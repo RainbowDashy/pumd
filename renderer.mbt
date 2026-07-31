@@ -7,12 +7,13 @@ fn source_range(span : @markdown.Span) -> SourceRange {
 fn unsupported(
   node_kind : String,
   span : @markdown.Span,
+  message : String,
 ) -> RenderingDiagnostic {
   {
     kind: DiagnosticKind::UnsupportedConstruct,
     node_kind,
     provenance: Some(source_range(span)),
-    message: "Unsupported Markdown construct: " + node_kind,
+    message,
   }
 }
 
@@ -186,13 +187,15 @@ fn append_inline_runs(
               runs,
             )
           }
-          None =>
+          None => {
             context.diagnostics.push({
               kind: DiagnosticKind::MissingDefinition,
               node_kind: "reference-link",
               provenance: Some(source_range(span)),
-              message: "Missing link definition for label: " + label,
+              message: "Add a link definition for label: " + label + ".",
             })
+            append_inline_runs(children, style, link, context, runs)
+          }
         }
       @markdown.Inline::Autolink(url~, is_email~, span~) => {
         let destination = if is_email { "mailto:" + url } else { url }
@@ -206,17 +209,41 @@ fn append_inline_runs(
         )
       }
       @markdown.Inline::Image(span~, ..) =>
-        context.diagnostics.push(unsupported("image", span))
+        context.diagnostics.push(
+          unsupported("image", span, "Replace the image with a text link."),
+        )
       @markdown.Inline::RefImage(span~, ..) =>
-        context.diagnostics.push(unsupported("reference-image", span))
-      @markdown.Inline::Strikethrough(span~, ..) =>
-        context.diagnostics.push(unsupported("strikethrough", span))
+        context.diagnostics.push(
+          unsupported(
+            "reference-image", span, "Replace the reference image with a text link.",
+          ),
+        )
+      @markdown.Inline::Strikethrough(children~, span~) => {
+        context.diagnostics.push(
+          unsupported(
+            "strikethrough", span, "Remove the strikethrough markers or use plain text.",
+          ),
+        )
+        append_inline_runs(children, style, link, context, runs)
+      }
       @markdown.Inline::HtmlInline(span~, ..) =>
-        context.diagnostics.push(unsupported("html-inline", span))
+        context.diagnostics.push(
+          unsupported(
+            "html-inline", span, "Remove the inline HTML and use supported Markdown instead.",
+          ),
+        )
       @markdown.Inline::WikiLink(span~, ..) =>
-        context.diagnostics.push(unsupported("wiki-link", span))
+        context.diagnostics.push(
+          unsupported(
+            "wiki-link", span, "Replace the wiki link with a standard Markdown link.",
+          ),
+        )
       @markdown.Inline::FootnoteReference(span~, ..) =>
-        context.diagnostics.push(unsupported("footnote-reference", span))
+        context.diagnostics.push(
+          unsupported(
+            "footnote-reference", span, "Replace the footnote reference with inline text or a standard link.",
+          ),
+        )
     }
   }
 }
@@ -338,27 +365,18 @@ fn render_list(
   for item in items {
     match item.checked {
       Some(_) =>
-        context.diagnostics.push(unsupported("task-list-item", item.span))
-      None => {
-        let properties = Some({ kind, nesting_level })
-        for child in item.children {
-          match child {
-            @markdown.Block::BulletList(items~, ..) =>
-              render_list(items, ListKind::Bullet, nesting_level + 1, context)
-            @markdown.Block::OrderedList(start~, delimiter~, items~, ..) =>
-              render_list(
-                items,
-                ListKind::Numbered(
-                  start~,
-                  delimiter=ordered_delimiter(delimiter),
-                ),
-                nesting_level + 1,
-                context,
-              )
-            _ => render_block(child, properties, context)
-          }
-        }
-      }
+        context.diagnostics.push(
+          unsupported(
+            "task-list-item",
+            item.span,
+            "Replace the task list item with a regular list item.",
+          ),
+        )
+      None => ()
+    }
+    let properties = Some({ kind, nesting_level })
+    for child in item.children {
+      render_block(child, properties, context)
     }
   }
 }
@@ -440,15 +458,43 @@ fn render_block(
         ),
       )
     @markdown.Block::ThematicBreak(span~, ..) =>
-      context.diagnostics.push(unsupported("thematic-break", span))
+      context.diagnostics.push(
+        unsupported(
+          "thematic-break", span, "Replace the thematic break with a paragraph or remove it.",
+        ),
+      )
     @markdown.Block::IndentedCode(span~, ..) =>
-      context.diagnostics.push(unsupported("indented-code", span))
-    @markdown.Block::Blockquote(span~, ..) =>
-      context.diagnostics.push(unsupported("blockquote", span))
+      context.diagnostics.push(
+        unsupported(
+          "indented-code", span, "Replace the indented code block with a fenced code block.",
+        ),
+      )
+    @markdown.Block::Blockquote(children~, span~, ..) => {
+      context.diagnostics.push(
+        unsupported(
+          "blockquote", span, "Remove the blockquote marker and use regular paragraphs instead.",
+        ),
+      )
+      for child in children {
+        render_block(child, bullet, context)
+      }
+    }
     @markdown.Block::HtmlBlock(span~, ..) =>
-      context.diagnostics.push(unsupported("html-block", span))
-    @markdown.Block::FootnoteDefinition(span~, ..) =>
-      context.diagnostics.push(unsupported("footnote-definition", span))
+      context.diagnostics.push(
+        unsupported(
+          "html-block", span, "Remove the HTML block and use supported Markdown instead.",
+        ),
+      )
+    @markdown.Block::FootnoteDefinition(children~, span~, ..) => {
+      context.diagnostics.push(
+        unsupported(
+          "footnote-definition", span, "Remove the footnote definition and include its content inline.",
+        ),
+      )
+      for child in children {
+        render_block(child, bullet, context)
+      }
+    }
   }
 }
 
@@ -458,7 +504,7 @@ fn render_block(
 pub fn render_markdown(
   source : String,
 ) -> Result[DesiredDocument, Array[RenderingDiagnostic]] {
-  let parsed = @markdown.parse(source)
+  let parsed = @markdown.parse(source, wikilinks=true)
   let profile = builtin_style_profile()
   let diagnostics : Array[RenderingDiagnostic] = []
   let content : Array[StructuralElement] = []
@@ -470,7 +516,13 @@ pub fn render_markdown(
   }
   match parsed.document.frontmatter {
     Some(frontmatter) =>
-      context.diagnostics.push(unsupported("frontmatter", frontmatter.span))
+      context.diagnostics.push(
+        unsupported(
+          "frontmatter",
+          frontmatter.span,
+          "Remove the YAML frontmatter; document metadata is not supported.",
+        ),
+      )
     None => ()
   }
   for block in parsed.document.children {

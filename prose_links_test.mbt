@@ -120,7 +120,7 @@ test "returns a missing-definition diagnostic without a partial document" {
       assert_eq(diagnostics[0].node_kind, "reference-link")
       assert_eq(
         diagnostics[0].message,
-        "Missing link definition for label: unknown",
+        "Add a link definition for label: unknown.",
       )
     }
   }
