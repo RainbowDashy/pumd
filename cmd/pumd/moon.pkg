@@ -1,0 +1,14 @@
+import {
+  "rainbowdashy/pumd/cmd/pumd/args",
+  "rainbowdashy/pumd/publish",
+  "moonbitlang/async",
+  "mizchi/x/fs",
+  "mizchi/x/stdio",
+  "mizchi/x/sys",
+}
+
+pkgtype(kind: "executable")
+
+options(
+  targets: { "main.mbt": [ "native" ] },
+)

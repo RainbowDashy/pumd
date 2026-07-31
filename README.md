@@ -61,10 +61,39 @@ The common workflow should require one obvious command:
 pumd publish proposal.md
 ```
 
-The command should create the document on first use and safely update the same
-document afterward. Google document IDs, tab IDs, UTF-16 indexes, named ranges,
-and request ordering are implementation concerns that the author should not need
-to manage.
+The current publishing milestone creates a new document for every invocation;
+safe incremental updates are a later milestone. Google document IDs, tab IDs,
+UTF-16 indexes, named ranges, and request ordering are implementation concerns
+that the author should not need to manage.
+
+### Run the native command from a checkout
+
+First create a Desktop OAuth client, download its JSON, and configure
+Application Default Credentials with the narrow `drive.file` scope:
+
+```console
+gcloud auth application-default login --client-id-file=oauth-client.json --scopes=https://www.googleapis.com/auth/drive.file
+```
+
+Then publish one Markdown file:
+
+```console
+moon run cmd/pumd -- publish proposal.md
+```
+
+The command validates and decodes the source before it obtains credentials or
+makes an HTTP request. On success it prints the new document ID and canonical
+edit URL. Unsupported Markdown and failures at source access, authentication,
+creation, population, or response decoding are reported with their stage.
+
+An opt-in smoke script creates a temporary comprehensive Markdown fixture,
+publishes it through the actual native `pumd publish <path>` command, captures
+the document ID and edit URL printed by that process, then reads back that same
+Google Doc. It requires ADC and writes to Google:
+
+```console
+powershell -ExecutionPolicy Bypass -File scripts/live-smoke.ps1
+```
 
 ### Make every write inspectable
 
@@ -124,8 +153,11 @@ Rendering applies one versioned, built-in style profile with opinionated default
 for body text and every supported document element. Configurable themes and
 templates are outside this milestone.
 
-Authentication, HTTP, Google document creation and updates, diffing, and local
-publishing state are deferred until after this rendering pipeline is sound.
+The current publishing slice adds a native `pumd publish <markdown-path>`
+command. It reads and decodes the source, derives the Google Doc title from the
+file name, then uses Application Default Credentials to create and populate one
+new Google Doc. Every invocation creates a new document. Incremental updates,
+local publishing state, diffing, and remote reconciliation remain deferred.
 
 ## Non-goals
 
