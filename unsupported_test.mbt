@@ -26,15 +26,14 @@ fn assert_render_failure(
     Ok(_) => assert_true(false)
     Err(diagnostics) => {
       assert_eq(diagnostics.length(), 1)
-      let diagnostic = diagnostics[0]
-      assert_eq(diagnostic.kind, expected_kind)
-      assert_eq(diagnostic.node_kind, expected_node_kind)
-      assert_diagnostic_source_range(
-        diagnostic.provenance,
+      assert_diagnostic(
+        diagnostics[0],
+        expected_kind,
+        expected_node_kind,
         expected_start,
         expected_end,
+        expected_message,
       )
-      assert_eq(diagnostic.message, expected_message)
     }
   }
 }
