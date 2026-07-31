@@ -105,6 +105,26 @@ Version one is successful when it can:
 - **Escape hatches are explicit:** Force operations must be deliberate and
   narrowly scoped.
 
+## Current implementation milestone
+
+The first milestone is a pure MoonBit library that parses Markdown with
+`mizchi/markdown` and renders its CST into a deterministic, Google-Docs-native
+`DesiredDocument`. It includes explicit, source-located errors for parsed
+constructs without a rendering rule and golden tests for the desired native
+structure.
+
+The supported rendering set is headings, paragraphs, emphasis, links, lists,
+tables, images, inline code, and fenced code blocks. Parser-supported constructs
+outside that set do not gain implicit behavior; they produce an unsupported-
+construct error until an explicit native rendering rule is added.
+
+Rendering applies one versioned, built-in style profile with opinionated defaults
+for body text and every supported document element. Configurable themes and
+templates are outside this milestone.
+
+Authentication, HTTP, Google document creation and updates, diffing, and local
+publishing state are deferred until after this rendering pipeline is sound.
+
 ## Non-goals
 
 The initial product will not attempt to:
@@ -124,7 +144,7 @@ The initial product will not attempt to:
 
 These decisions should follow from the goals rather than be fixed prematurely:
 
-- Implementation language and distribution format.
+- Distribution format.
 - Exact command names beyond the core publish workflow.
 - Local state-file layout and stable block identity strategy.
 - Whether custom templates belong in version one.
