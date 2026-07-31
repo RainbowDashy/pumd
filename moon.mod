@@ -8,6 +8,8 @@ preferred_target = "wasm"
 
 description = "Render Markdown into a canonical Google-Docs-native desired document"
 
+source = "src"
+
 import {
   "mizchi/markdown@0.7.4",
 }
