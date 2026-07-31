@@ -1,3 +1,4 @@
+///|
 pub(all) struct StyleProfile {
   id : String
   version : Int
@@ -13,6 +14,7 @@ pub(all) struct StyleProfile {
   table_header_fill : String
 } derive(Eq, @debug.Debug)
 
+///|
 fn make_text_style(font_family : String, font_size_points : Int) -> TextStyle {
   {
     font_family,
@@ -25,6 +27,7 @@ fn make_text_style(font_family : String, font_size_points : Int) -> TextStyle {
   }
 }
 
+///|
 fn make_paragraph_style(
   named_style : NamedStyle,
   font_size_points : Int,
@@ -42,6 +45,7 @@ fn make_paragraph_style(
   }
 }
 
+///|
 /// The sole version-one Style Profile.
 pub fn builtin_style_profile() -> StyleProfile {
   let heading_sizes = [24, 18, 14, 12, 11, 10]

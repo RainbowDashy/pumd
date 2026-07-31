@@ -1,3 +1,4 @@
+///|
 test "renders nested bullet and non-default ordered lists as native list paragraphs" {
   let markdown =
     #|- alpha **bold**
@@ -28,6 +29,7 @@ test "renders nested bullet and non-default ordered lists as native list paragra
   }
 }
 
+///|
 test "rejects task list state without returning a partial document" {
   match @pumd.render_markdown("before\n\n- [x] done") {
     Ok(_) => assert_true(false)

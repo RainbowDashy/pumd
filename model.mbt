@@ -1,3 +1,4 @@
+///|
 /// A parser-provided, zero-based, end-exclusive Unicode code-point range.
 /// Nested parser ranges can be relative to the fragment the parser used for
 /// that node; consumers must not treat this metadata as stable identity.
@@ -6,17 +7,20 @@ pub(all) struct SourceRange {
   end : Int
 } derive(Eq, @debug.Debug)
 
+///|
 pub(all) struct DocumentMetadata {
   title : String?
   locale : String?
 } derive(Eq, @debug.Debug)
 
+///|
 /// Renderer provenance that is deliberately outside native document content.
 pub(all) struct RenderMetadata {
   style_profile_id : String
   style_profile_version : Int
 } derive(Eq, @debug.Debug)
 
+///|
 pub(all) enum NamedStyle {
   NormalText
   Heading1
@@ -27,6 +31,7 @@ pub(all) enum NamedStyle {
   Heading6
 } derive(Eq, @debug.Debug)
 
+///|
 pub(all) struct TextStyle {
   font_family : String
   font_size_points : Int
@@ -37,6 +42,7 @@ pub(all) struct TextStyle {
   background_color : String?
 } derive(Eq, @debug.Debug)
 
+///|
 pub(all) struct ParagraphStyle {
   named_style : NamedStyle
   font_family : String
@@ -47,21 +53,25 @@ pub(all) struct ParagraphStyle {
   background_color : String?
 } derive(Eq, @debug.Debug)
 
+///|
 pub(all) struct LinkIntent {
   url : String
   title : String?
 } derive(Eq, @debug.Debug)
 
+///|
 pub(all) enum ListKind {
   Bullet
   Numbered(start~ : Int, delimiter~ : String)
 } derive(Eq, @debug.Debug)
 
+///|
 pub(all) struct BulletProperties {
   kind : ListKind
   nesting_level : Int
 } derive(Eq, @debug.Debug)
 
+///|
 pub(all) struct TextRun {
   content : String
   style : TextStyle
@@ -69,6 +79,7 @@ pub(all) struct TextRun {
   provenance : SourceRange?
 } derive(@debug.Debug)
 
+///|
 pub(all) struct Paragraph {
   runs : Array[TextRun]
   style : ParagraphStyle
@@ -76,6 +87,7 @@ pub(all) struct Paragraph {
   provenance : SourceRange?
 } derive(@debug.Debug)
 
+///|
 pub(all) enum TableAlignment {
   Left
   Center
@@ -83,6 +95,7 @@ pub(all) enum TableAlignment {
   Unspecified
 } derive(Eq, @debug.Debug)
 
+///|
 pub(all) struct TableCell {
   content : Array[Paragraph]
   alignment : TableAlignment
@@ -90,22 +103,26 @@ pub(all) struct TableCell {
   provenance : SourceRange?
 } derive(@debug.Debug)
 
+///|
 pub(all) struct TableRow {
   cells : Array[TableCell]
   is_header : Bool
   provenance : SourceRange?
 } derive(@debug.Debug)
 
+///|
 pub(all) struct Table {
   rows : Array[TableRow]
   provenance : SourceRange?
 } derive(@debug.Debug)
 
+///|
 pub(all) enum StructuralElement {
   Paragraph(Paragraph)
   Table(Table)
 } derive(@debug.Debug)
 
+///|
 pub(all) struct DesiredDocument {
   metadata : DocumentMetadata
   render_metadata : RenderMetadata
@@ -113,11 +130,13 @@ pub(all) struct DesiredDocument {
   provenance : SourceRange?
 } derive(@debug.Debug)
 
+///|
 pub(all) enum DiagnosticKind {
   UnsupportedConstruct
   MissingDefinition
 } derive(Eq, @debug.Debug)
 
+///|
 pub(all) struct RenderingDiagnostic {
   kind : DiagnosticKind
   node_kind : String

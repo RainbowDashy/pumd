@@ -1,3 +1,4 @@
+///|
 test "renders aligned native tables with rich header and cell content" {
   let markdown =
     #|| Name | Value | Empty |
@@ -38,6 +39,7 @@ test "renders aligned native tables with rich header and cell content" {
   }
 }
 
+///|
 test "retains table and cell ranges without inventing row provenance" {
   let markdown =
     #|| A | B |

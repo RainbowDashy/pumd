@@ -1,3 +1,4 @@
+///|
 test "renders body paragraphs with emphasis, strong text, and inline code" {
   let markdown = "Intro paragraph.\n\nStyled **strong** and *emphasis* with `code`."
   match @pumd.render_markdown(markdown) {
@@ -23,6 +24,7 @@ test "renders body paragraphs with emphasis, strong text, and inline code" {
   }
 }
 
+///|
 test "renders soft and hard breaks inside a paragraph" {
   match @pumd.render_markdown("soft\nbreak  \nhard") {
     Ok(document) =>
@@ -39,6 +41,7 @@ test "renders soft and hard breaks inside a paragraph" {
   }
 }
 
+///|
 test "renders a direct link with its title and link styling" {
   match
     @pumd.render_markdown(
@@ -60,6 +63,7 @@ test "renders a direct link with its title and link styling" {
   }
 }
 
+///|
 test "resolves a reference link before rendering the paragraph" {
   let markdown =
     #|See [the guide][docs].
@@ -82,6 +86,7 @@ test "resolves a reference link before rendering the paragraph" {
   }
 }
 
+///|
 test "renders web and email autolinks as link runs" {
   match
     @pumd.render_markdown(
@@ -105,6 +110,7 @@ test "renders web and email autolinks as link runs" {
   }
 }
 
+///|
 test "returns a missing-definition diagnostic without a partial document" {
   match @pumd.render_markdown("[missing][unknown]") {
     Ok(_) => assert_true(false)
