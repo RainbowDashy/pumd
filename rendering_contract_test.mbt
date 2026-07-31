@@ -7,21 +7,6 @@ fn render_or_fail(source : String) -> @pumd.DesiredDocument raise {
 }
 
 ///|
-fn assert_contract_source_range(
-  actual : @pumd.SourceRange?,
-  expected_start : Int,
-  expected_end : Int,
-) -> Unit raise {
-  match actual {
-    Some(range) => {
-      assert_eq(range.start, expected_start)
-      assert_eq(range.end, expected_end)
-    }
-    None => assert_true(false)
-  }
-}
-
-///|
 fn mixed_feature_markdown() -> String {
   (
     #|# Contract title
@@ -117,8 +102,8 @@ test "moving unchanged source changes provenance without changing native content
       @pumd.StructuralElement::Paragraph(original_heading),
       @pumd.StructuralElement::Paragraph(moved_heading),
     ) => {
-      assert_contract_source_range(original_heading.provenance, 0, 9)
-      assert_contract_source_range(moved_heading.provenance, 2, 11)
+      assert_source_range(original_heading.provenance, 0, 9)
+      assert_source_range(moved_heading.provenance, 2, 11)
     }
     _ => assert_true(false)
   }
@@ -150,14 +135,14 @@ test "empty and blank-line whitespace variants have documented deterministic out
 ///|
 test "CJK combining marks and non-BMP Unicode retain rendered content and code-point provenance" {
   let document = render_or_fail("中文é🚀")
-  assert_contract_source_range(document.provenance, 0, 5)
+  assert_source_range(document.provenance, 0, 5)
   assert_eq(document.content.length(), 1)
   match document.content[0] {
     @pumd.StructuralElement::Paragraph(paragraph) => {
-      assert_contract_source_range(paragraph.provenance, 0, 5)
+      assert_source_range(paragraph.provenance, 0, 5)
       assert_eq(paragraph.runs.length(), 1)
       assert_eq(paragraph.runs[0].content, "中文é🚀")
-      assert_contract_source_range(paragraph.runs[0].provenance, 0, 5)
+      assert_source_range(paragraph.runs[0].provenance, 0, 5)
     }
     @pumd.StructuralElement::Table(_) => assert_true(false)
   }
@@ -200,9 +185,14 @@ test "canonical rendering removes empty runs merges adjacent runs and normalizes
   match document.content[2] {
     @pumd.StructuralElement::Table(table) => {
       assert_eq(table.rows.length(), 2)
-      assert_true(table.rows[0].cells[0].background_color is Some(_))
-      assert_true(table.rows[1].cells[0].background_color is None)
-      assert_true(table.rows[0].cells[0].content[0].bullet is None)
+      let header_row = table.rows[0]
+      let body_row = table.rows[1]
+      let header_cell = header_row.cells[0]
+      let body_cell = body_row.cells[0]
+      assert_true(header_cell.background_color is Some(_))
+      assert_true(body_cell.background_color is None)
+      let header_paragraph = header_cell.content[0]
+      assert_true(header_paragraph.bullet is None)
     }
     _ => assert_true(false)
   }
