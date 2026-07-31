@@ -114,9 +114,11 @@ constructs without a rendering rule and golden tests for the desired native
 structure.
 
 The supported rendering set is headings, paragraphs, emphasis, links, lists,
-tables, images, inline code, and fenced code blocks. Parser-supported constructs
-outside that set do not gain implicit behavior; they produce an unsupported-
-construct error until an explicit native rendering rule is added.
+tables, inline code, and fenced code blocks. Parser-supported constructs outside
+that set do not gain implicit behavior; they produce an unsupported-construct
+error until an explicit native rendering rule is added. Image rendering is
+deferred: direct images and reference images currently yield source-located
+unsupported diagnostics.
 
 Rendering applies one versioned, built-in style profile with opinionated defaults
 for body text and every supported document element. Configurable themes and
