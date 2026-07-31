@@ -1,4 +1,4 @@
 import {
-  "rainbowdashy/pumd/vendor/markdown",
+  "moonbitlang/core/bench",
   "moonbitlang/core/debug",
 }

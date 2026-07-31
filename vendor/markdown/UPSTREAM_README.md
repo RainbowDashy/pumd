@@ -1,0 +1,268 @@
+# @mizchi/markdown
+
+CST-based incremental Markdown parser for JavaScript/MoonBit.
+
+A cross-platform (JS/WASM/native) Markdown compiler optimized for real-time editing with incremental parsing.
+
+## Features
+
+- **Fast**: Edit-position based incremental updates inspired by [CRDTs Go Brrr](https://josephg.com/blog/crdts-go-brrr/). Optimized for speed over edge-case correctness CommonMark 207/542
+- **Lossless CST**: Preserves all whitespace, markers, and formatting
+- **Incremental parsing**: Re-parses only changed blocks (up to 42x faster)
+- **GFM**: GitHub Flavored Markdown support (tables, task lists, strikethrough)
+- **Cross-platform**: Works on JS, WASM-GC, and native targets
+- **HTML rendering**: Built-in HTML renderer with remark-html compatible output
+- **mdast compatible**: AST follows [mdast](https://github.com/syntax-tree/mdast) specification
+
+----
+
+## JavaScript API
+
+```bash
+npm install @mizchi/markdown
+```
+
+### Usage
+
+```javascript
+import { parse, toHtml, toMarkdown } from "@mizchi/markdown";
+
+// Parse to AST
+const ast = parse("# Hello\n\n**Bold** text");
+console.log(ast.children[0].type); // "heading"
+
+// Convert to HTML
+const html = toHtml("See https://example.com/docs\n");
+// => '<p>See <a href="https://example.com/docs">https://example.com/docs</a></p>\n'
+
+// Disable bare URL links when you need plain text output
+const plain = toHtml("See https://example.com/docs\n", { autolink: false });
+// => "<p>See https://example.com/docs</p>\n"
+
+// Normalize markdown
+const normalized = toMarkdown("# Hello\n\n\n\nWorld");
+// => "# Hello\n\nWorld\n"
+```
+
+### Optional WikiLinks
+
+WikiLinks are disabled by default to keep CommonMark-compatible behavior.
+Pass `{ wikilinks: true }` to parse `[[target]]` and `[[target|label]]`.
+
+```javascript
+import { parse, toHtml } from "@mizchi/markdown";
+
+const ast = parse("[[MoonBit#syntax|MoonBit syntax]]", { wikilinks: true });
+// ast.children[0].children[0].type === "wikiLink"
+
+const html = toHtml("[[MoonBit|MoonBit notes]]", { wikilinks: true });
+// => '<p><a href="MoonBit">MoonBit notes</a></p>\n'
+```
+
+### Incremental Parsing
+
+For real-time editing scenarios:
+
+```javascript
+import { createDocument, insertEdit } from "@mizchi/markdown";
+
+// Create document handle
+const doc = createDocument("# Hello");
+
+// Access AST, HTML, or Markdown
+console.log(doc.ast);        // Parsed AST
+console.log(doc.toHtml());   // "<h1>Hello</h1>\n"
+console.log(doc.toMarkdown()); // "# Hello\n"
+
+// Incremental update (faster than full re-parse)
+const edit = insertEdit(7, 6); // Insert 6 chars at position 7
+const newDoc = doc.update("# Hello World", edit);
+
+// Free resources when done
+doc.dispose();
+newDoc.dispose();
+```
+
+### TypeScript Support
+
+Full TypeScript definitions are included:
+
+```typescript
+import { parse, Document, Block, Inline } from "@mizchi/markdown";
+
+const ast: Document = parse("# Hello");
+const heading = ast.children[0] as HeadingBlock;
+console.log(heading.level); // 1
+```
+
+----
+
+## MoonBit API
+
+### Installation
+
+```bash
+moon add mizchi/markdown
+```
+
+### Usage
+
+```moonbit
+// Parse markdown
+let result = @markdown.parse("# Hello\n\nWorld")
+let doc = result.document
+
+// Serialize back (lossless)
+let output = @markdown.serialize(doc)
+
+// Render to HTML
+let html = @markdown.render_html(doc)
+
+// Or use convenience function
+let html = @markdown.md_to_html("# Hello\n\nWorld")
+let linked = @markdown.md_to_html("See https://example.com/docs\n")
+let plain = @markdown.md_to_html("See https://example.com/docs\n", autolink=false)
+
+// Enable the WikiLink extension explicitly
+let wiki_html = @markdown.md_to_html("[[MoonBit|MoonBit notes]]", wikilinks=true)
+```
+
+### Incremental Parsing
+
+```moonbit
+// Initial parse
+let result = @markdown.parse(source)
+let doc = result.document
+
+// Create edit info
+let edit = @markdown.EditInfo::replace(
+  change_start,    // Start position
+  old_length,      // Length of replaced text
+  new_length       // Length of new text
+)
+
+// Incremental update (reuses unchanged blocks)
+let inc_result = @markdown.parse_incremental(doc, old_source, new_source, edit)
+let new_doc = inc_result.document
+```
+
+### Typed MDX Declarations
+
+`mizchi/markdown/x/mdx` extracts MDX JSX components and validates
+their attributes against a closed, typed schema. It is intended for document
+metadata and domain declarations, rather than evaluating arbitrary MDX code.
+
+Expressions use a deterministic literal-only subset: strings, booleans, and
+arrays of strings. For example, `requires={["auth.mfa"]}` is valid, while
+`requires={loadRequirements()}` is rejected.
+
+```moonbit
+import {
+  "mizchi/markdown",
+  "mizchi/markdown/x/mdx" @mdx,
+}
+
+let schema = @mdx.MdxSchema::closed([
+  @mdx.ComponentSchema::new(
+    "Fold",
+    [
+      @mdx.PropSchema::required("id", @mdx.MdxValueType::Text),
+      @mdx.PropSchema::required(
+        "kind",
+        @mdx.MdxValueType::OneOf(["concept", "procedure"]),
+      ),
+      @mdx.PropSchema::optional("requires", @mdx.MdxValueType::TextList),
+    ],
+  ),
+])
+
+let source = #|<Fold id="auth.mfa" kind="procedure" requires={["auth.login"]} />
+let checked = @mdx.type_check_mdx(@markdown.parse(source).document, schema)
+let is_valid = checked.is_valid()
+```
+
+### Folddown
+
+`mizchi/markdown/x/folddown` defines the typed `Fold` declaration vocabulary
+for structured, reader-adaptive Markdown. It validates declarations and emits a
+canonical manifest that retains each Markdown child source; reader selection and
+rendering consume that manifest. See [Folddown](./docs/folddown.md) for its
+grammar and boundary. Local external documents use typed `<Include>`
+declarations; [Folddown drift review](./docs/folddown-drift.md) defines the
+provider-neutral LLM review packet and response contract. Its two reader
+states and two content filters are generated from the entry document's
+frontmatter DSL. `familiarTo` marks direct source-language correspondences, so
+an interest-focused view can omit material already familiar to its reader.
+
+----
+
+## Playground
+
+```bash
+pnpm install
+moon build --target js
+pnpm exec vite
+```
+
+## Frontend Editor Package
+
+`@mizchi/markdown/editor` exports the Luna-based markdown editor without
+bundling syntax highlighters into the initial module. Code block highlighters
+are loaded on demand through dynamic imports under `@mizchi/markdown/highlight`.
+
+The editor uses [`@luna_ui/luna`](https://www.npmjs.com/package/@luna_ui/luna)
+as a JSX runtime and signal library; it is declared as an **optional peer
+dependency** — install it alongside `@mizchi/markdown` only if you use the
+editor entry. See `frontend/editor/README.md` for the editor-specific docs.
+
+```bash
+pnpm add @mizchi/markdown @luna_ui/luna
+```
+
+```tsx
+import { SyntaxHighlightEditor } from "@mizchi/markdown/editor";
+import "@mizchi/markdown/editor/style.css";
+
+<SyntaxHighlightEditor
+  value={() => markdown}
+  onChange={(next) => setMarkdown(next)}
+/>;
+```
+
+You can also preload or call a language highlighter explicitly:
+
+```ts
+import { loadHighlighter } from "@mizchi/markdown/highlight";
+
+const highlightMoonBit = await loadHighlighter("moonbit");
+const html = highlightMoonBit?.("fn main { println(\"hi\") }");
+```
+
+The currently split lazy highlighter entries are `typescript`, `moonbit`,
+`json`, `html`, `css`, `bash`, and `rust`.
+
+## Performance
+
+| Document | Full Parse | Incremental | Speedup |
+|----------|-----------|-------------|---------|
+| 10 paragraphs | 68.89µs | 7.36µs | 9.4x |
+| 50 paragraphs | 327.99µs | 8.67µs | 37.8x |
+| 100 paragraphs | 651.14µs | 15.25µs | 42.7x |
+
+## Documentation
+
+See [docs/markdown.md](./docs/markdown.md) for detailed architecture and design.
+
+## CommonMark Compatibility
+
+This parser handles most common Markdown syntax correctly and works well for typical use cases like documentation, blog posts, and notes.
+
+However, some edge cases (deeply nested structures, unusual delimiter combinations) are not fully CommonMark compliant. If you need strict CommonMark compliance, consider using [cmark.mbt](https://github.com/moonbit-community/cmark.mbt) or other fully compliant parsers.
+
+## Credits
+
+- Fonts: [PlemolJP](https://github.com/yuru7/PlemolJP) (SIL Open Font License 1.1) — bundled in `playground/public/fonts/`
+
+## License
+
+MIT
