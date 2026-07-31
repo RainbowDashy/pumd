@@ -1,4 +1,3 @@
-///|
 fn write_escaped(value : String, buffer : StringBuilder) -> Unit {
   buffer.write_char('"')
   for char in value {
@@ -14,7 +13,6 @@ fn write_escaped(value : String, buffer : StringBuilder) -> Unit {
   buffer.write_char('"')
 }
 
-///|
 fn named_style_name(style : NamedStyle) -> String {
   match style {
     NormalText => "normal"
@@ -27,7 +25,6 @@ fn named_style_name(style : NamedStyle) -> String {
   }
 }
 
-///|
 fn write_text_style(style : TextStyle, buffer : StringBuilder) -> Unit {
   if style.bold {
     buffer.write_string(" bold")
@@ -58,7 +55,6 @@ fn write_text_style(style : TextStyle, buffer : StringBuilder) -> Unit {
   }
 }
 
-///|
 fn write_paragraph(
   paragraph : Paragraph,
   buffer : StringBuilder,
@@ -132,7 +128,6 @@ fn write_paragraph(
   }
 }
 
-///|
 fn write_native_content(
   document : DesiredDocument,
   buffer : StringBuilder,
@@ -175,7 +170,6 @@ fn write_native_content(
   }
 }
 
-///|
 /// Human-readable canonical serialization used by golden tests. Source
 /// provenance is intentionally omitted.
 pub fn DesiredDocument::to_snapshot(self : DesiredDocument) -> String {
@@ -189,7 +183,6 @@ pub fn DesiredDocument::to_snapshot(self : DesiredDocument) -> String {
   buffer.to_string()
 }
 
-///|
 /// Compares native content while excluding source provenance and Style Profile
 /// version metadata.
 pub fn DesiredDocument::semantic_eq(
@@ -206,7 +199,6 @@ pub fn DesiredDocument::semantic_eq(
   left.to_string() == right.to_string()
 }
 
-///|
 pub impl Eq for DesiredDocument with fn equal(left, right) {
   left.semantic_eq(right)
 }

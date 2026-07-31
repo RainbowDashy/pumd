@@ -1,4 +1,3 @@
-///|
 test "renders fenced code as editable paragraphs preserving blank lines and Unicode" {
   let markdown =
     #|```moonbit

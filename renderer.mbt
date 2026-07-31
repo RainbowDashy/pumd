@@ -1,9 +1,7 @@
-///|
 fn source_range(span : @markdown.Span) -> SourceRange {
   { start: span.from, end: span.to }
 }
 
-///|
 fn unsupported(
   node_kind : String,
   span : @markdown.Span,
@@ -16,7 +14,6 @@ fn unsupported(
   }
 }
 
-///|
 priv struct RenderContext {
   profile : StyleProfile
   definitions : Array[@markdown.LinkDefinition]
@@ -24,22 +21,18 @@ priv struct RenderContext {
   content : Array[StructuralElement]
 }
 
-///|
 fn with_italic(style : TextStyle) -> TextStyle {
   { ..style, italic: true }
 }
 
-///|
 fn with_bold(style : TextStyle) -> TextStyle {
   { ..style, bold: true }
 }
 
-///|
 fn with_link_style(style : TextStyle, profile : StyleProfile) -> TextStyle {
   { ..style, underline: true, foreground_color: Some(profile.link_color) }
 }
 
-///|
 fn with_code_style(style : TextStyle, profile : StyleProfile) -> TextStyle {
   {
     ..profile.code_text,
@@ -50,7 +43,6 @@ fn with_code_style(style : TextStyle, profile : StyleProfile) -> TextStyle {
   }
 }
 
-///|
 fn text_run(
   content : String,
   style : TextStyle,
@@ -60,12 +52,10 @@ fn text_run(
   { content, style, link, provenance: Some(source_range(span)) }
 }
 
-///|
 fn same_native_run(left : TextRun, right : TextRun) -> Bool {
   left.style == right.style && left.link == right.link
 }
 
-///|
 fn merge_ranges(left : SourceRange?, right : SourceRange?) -> SourceRange? {
   match (left, right) {
     (Some(a), Some(b)) => Some({ start: a.start, end: b.end })
@@ -75,7 +65,6 @@ fn merge_ranges(left : SourceRange?, right : SourceRange?) -> SourceRange? {
   }
 }
 
-///|
 fn canonicalize_runs(runs : Array[TextRun]) -> Array[TextRun] {
   let canonical : Array[TextRun] = []
   for run in runs {
@@ -97,7 +86,6 @@ fn canonicalize_runs(runs : Array[TextRun]) -> Array[TextRun] {
   canonical
 }
 
-///|
 fn unescape_text(content : String) -> String {
   let buffer = StringBuilder::new()
   let mut escaped = false
@@ -122,7 +110,6 @@ fn unescape_text(content : String) -> String {
   buffer.to_string()
 }
 
-///|
 fn find_definition(
   definitions : Array[@markdown.LinkDefinition],
   label : String,
@@ -136,7 +123,6 @@ fn find_definition(
   None
 }
 
-///|
 fn append_inline_runs(
   inlines : Array[@markdown.Inline],
   style : TextStyle,
@@ -221,7 +207,6 @@ fn append_inline_runs(
   }
 }
 
-///|
 fn render_inlines(
   inlines : Array[@markdown.Inline],
   style : TextStyle,
@@ -232,7 +217,6 @@ fn render_inlines(
   canonicalize_runs(runs)
 }
 
-///|
 fn heading_index(level : Int) -> Int {
   if level < 1 {
     0
@@ -243,7 +227,6 @@ fn heading_index(level : Int) -> Int {
   }
 }
 
-///|
 fn ordered_delimiter(delimiter : @markdown.OrderedDelimiter) -> String {
   match delimiter {
     Dot => "."
@@ -251,7 +234,6 @@ fn ordered_delimiter(delimiter : @markdown.OrderedDelimiter) -> String {
   }
 }
 
-///|
 fn table_alignment(alignment : @markdown.TableAlign) -> TableAlignment {
   match alignment {
     @markdown.TableAlign::Left => TableAlignment::Left
@@ -261,7 +243,6 @@ fn table_alignment(alignment : @markdown.TableAlign) -> TableAlignment {
   }
 }
 
-///|
 fn render_table_cell(
   cell : @markdown.TableCell,
   alignment : TableAlignment,
@@ -292,7 +273,6 @@ fn render_table_cell(
   }
 }
 
-///|
 fn render_table_row(
   cells : Array[@markdown.TableCell],
   alignments : Array[@markdown.TableAlign],
@@ -311,7 +291,6 @@ fn render_table_row(
   { cells: desired_cells, is_header, provenance: None }
 }
 
-///|
 fn render_table(
   header : Array[@markdown.TableCell],
   alignments : Array[@markdown.TableAlign],
@@ -328,7 +307,6 @@ fn render_table(
   { rows: desired_rows, provenance: Some(source_range(span)) }
 }
 
-///|
 fn render_list(
   items : Array[@markdown.ListItem],
   kind : ListKind,
@@ -363,7 +341,6 @@ fn render_list(
   }
 }
 
-///|
 fn render_block(
   block : @markdown.Block,
   bullet : BulletProperties?,
@@ -452,7 +429,6 @@ fn render_block(
   }
 }
 
-///|
 /// Parse Markdown and render the complete canonical Desired Document, or
 /// return diagnostics without a partial document.
 pub fn render_markdown(

@@ -1,4 +1,3 @@
-///|
 test "returns an image diagnostic and no partial desired document" {
   match @pumd.render_markdown("before ![alt](image.png) after") {
     Ok(_) => assert_true(false)
@@ -11,7 +10,6 @@ test "returns an image diagnostic and no partial desired document" {
   }
 }
 
-///|
 test "collects unsupported diagnostics in stable source order" {
   match @pumd.render_markdown("text\n\n---\n\n> quote") {
     Ok(_) => assert_true(false)

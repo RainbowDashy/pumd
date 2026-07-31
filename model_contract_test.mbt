@@ -1,4 +1,3 @@
-///|
 fn assert_source_range(
   actual : @pumd.SourceRange?,
   expected_start : Int,
@@ -13,7 +12,6 @@ fn assert_source_range(
   }
 }
 
-///|
 test "public seam applies all six heading roles and profile sizes" {
   let markdown =
     #|# One
@@ -60,7 +58,6 @@ test "public seam applies all six heading roles and profile sizes" {
   }
 }
 
-///|
 test "public seam renders empty Markdown as an empty desired document" {
   match @pumd.render_markdown("") {
     Ok(document) => {
@@ -71,7 +68,6 @@ test "public seam renders empty Markdown as an empty desired document" {
   }
 }
 
-///|
 test "blank-line parser nodes are ignored without losing document provenance" {
   match @pumd.render_markdown("\n\n\n") {
     Ok(document) => {
@@ -82,7 +78,6 @@ test "blank-line parser nodes are ignored without losing document provenance" {
   }
 }
 
-///|
 test "repeated public rendering is deterministic" {
   let markdown = "# Stable\n\nText with **style** and [link](https://example.test)."
   match (@pumd.render_markdown(markdown), @pumd.render_markdown(markdown)) {
@@ -94,7 +89,6 @@ test "repeated public rendering is deterministic" {
   }
 }
 
-///|
 test "canonical rendering removes empty runs and merges adjacent native runs" {
   match @pumd.render_markdown("left\nright  \nafter") {
     Ok(document) => {
@@ -114,7 +108,6 @@ test "canonical rendering removes empty runs and merges adjacent native runs" {
   }
 }
 
-///|
 test "document block and run provenance retain Unicode code-point ranges" {
   match @pumd.render_markdown("A🚀B") {
     Ok(document) => {
@@ -134,7 +127,6 @@ test "document block and run provenance retain Unicode code-point ranges" {
   }
 }
 
-///|
 test "semantic equality excludes profile metadata and all provenance" {
   match @pumd.render_markdown("same native content") {
     Ok(original) =>

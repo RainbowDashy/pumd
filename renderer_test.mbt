@@ -1,4 +1,3 @@
-///|
 test "renders a mixed Unicode heading through the public seam" {
   match @pumd.render_markdown("# Hello *世界* 🚀") {
     Ok(document) =>
@@ -17,7 +16,6 @@ test "renders a mixed Unicode heading through the public seam" {
   }
 }
 
-///|
 test "composes linked emphasis and inline code in a heading" {
   match
     @pumd.render_markdown("# Build `code` and [*linked*](https://example.test)") {
