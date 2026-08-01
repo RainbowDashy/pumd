@@ -161,3 +161,47 @@ test "keeps combining marks at one UTF-16 unit each" {
     Err(_) => assert_true(false)
   }
 }
+
+///|
+test "planning reports the index of an empty table after valid tables" {
+  let document = match
+    @pumd.render_markdown(
+      (
+        #|| Header |
+        #|| --- |
+        #|| Value |
+      ),
+    ) {
+    Ok(document) => document
+    Err(_) => abort("fixture must render")
+  }
+  document.content.push(
+    @pumd.StructuralElement::Table({ rows: [], provenance: None }),
+  )
+  match prepare_docs_update_plan(document) {
+    Err(EmptyTable(table_index=1)) => ()
+    _ => assert_true(false)
+  }
+}
+
+///|
+test "planning rejects a table whose rows have no cells" {
+  let document = @pumd.DesiredDocument::{
+    metadata: { title: None, locale: None },
+    render_metadata: {
+      style_profile_id: "pumd.default",
+      style_profile_version: 1,
+    },
+    content: [
+      @pumd.StructuralElement::Table({
+        rows: [{ cells: [], is_header: false, provenance: None }],
+        provenance: None,
+      }),
+    ],
+    provenance: None,
+  }
+  match prepare_docs_update_plan(document) {
+    Err(TableWithoutColumns(table_index=0)) => ()
+    _ => assert_true(false)
+  }
+}

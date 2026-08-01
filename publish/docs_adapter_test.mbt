@@ -134,10 +134,82 @@ async test "create document separates malformed responses from HTTP status" {
   match create_document(docs_adapter_client(failed), "title") {
     Err(error) =>
       match error {
-        AdapterHttpStatus(status=403, body="forbidden") =>
+        AdapterHttpStatus(status=403, kind=Some(PermissionDenied)) =>
           assert_true(error.message().contains("drive.file"))
         _ => assert_true(false)
       }
+    _ => assert_true(false)
+  }
+}
+
+///|
+async test "adapter classifies Google permission errors without exposing response details" {
+  let response_body = "{\"error\":{\"code\":403,\"message\":\"Bearer secret-token must never be printed\",\"status\":\"PERMISSION_DENIED\"}}"
+  let fake = DocsAdapterFakeHttpClient::{
+    requests: [],
+    responses: [@google_http.HttpResponse::new(403, {}, response_body)],
+  }
+  match create_document(docs_adapter_client(fake), "title") {
+    Err(error) => {
+      guard error is AdapterHttpStatus(status=403, kind=Some(PermissionDenied)) else {
+        assert_true(false)
+      }
+      assert_true(error.message().contains("drive.file"))
+      assert_true(!error.message().contains("secret-token"))
+    }
+    _ => assert_true(false)
+  }
+  assert_eq(fake.requests.length(), 1)
+}
+
+///|
+async test "adapter classifies throttling and hides malformed response bodies" {
+  let throttled_body = "{\"error\":{\"code\":429,\"message\":\"private quota detail\",\"status\":\"RESOURCE_EXHAUSTED\"}}"
+  let throttled = DocsAdapterFakeHttpClient::{
+    requests: [],
+    responses: [@google_http.HttpResponse::new(429, {}, throttled_body)],
+  }
+  match create_document(docs_adapter_client(throttled), "title") {
+    Err(error) => {
+      guard error is AdapterHttpStatus(status=429, kind=Some(Throttled)) else {
+        assert_true(false)
+      }
+      assert_true(error.message().contains("wait and retry"))
+      assert_true(!error.message().contains("private quota detail"))
+    }
+    _ => assert_true(false)
+  }
+  let malformed = DocsAdapterFakeHttpClient::{
+    requests: [],
+    responses: [
+      @google_http.HttpResponse::new(500, {}, "credential=must-not-leak"),
+    ],
+  }
+  match create_document(docs_adapter_client(malformed), "title") {
+    Err(error) => {
+      guard error is AdapterHttpStatus(status=500, kind=None) else {
+        assert_true(false)
+      }
+      assert_true(!error.message().contains("must-not-leak"))
+    }
+    _ => assert_true(false)
+  }
+}
+
+///|
+async test "adapter recognizes legacy Google rate-limit reasons" {
+  let response_body = "{\"error\":{\"code\":403,\"message\":\"quota detail\",\"errors\":[{\"reason\":\"rateLimitExceeded\"}]}}"
+  let fake = DocsAdapterFakeHttpClient::{
+    requests: [],
+    responses: [@google_http.HttpResponse::new(403, {}, response_body)],
+  }
+  match create_document(docs_adapter_client(fake), "title") {
+    Err(error) => {
+      guard error is AdapterHttpStatus(status=403, kind=Some(Throttled)) else {
+        assert_true(false)
+      }
+      assert_true(error.message().contains("wait and retry"))
+    }
     _ => assert_true(false)
   }
 }

@@ -83,8 +83,27 @@ moon run cmd/pumd -- publish proposal.md
 
 The command validates and decodes the source before it obtains credentials or
 makes an HTTP request. On success it prints the new document ID and canonical
-edit URL. Unsupported Markdown and failures at source access, authentication,
-creation, population, or response decoding are reported with their stage.
+edit URL. Unsupported Markdown and failures at source access, Desired Document
+planning, authentication, permission, throttling, creation, population,
+response decoding, or ambiguous transport outcomes are reported distinctly.
+
+### Recover from publication failures
+
+Source access, rendering, and Desired Document planning finish before pumd
+requests credentials or sends HTTP. Fix those local failures and run the same
+command again; no Google Doc was created.
+
+Authentication errors distinguish unavailable, invalid, unrefreshable, and
+Google-rejected Application Default Credentials. Follow the printed ADC setup
+command. A permission failure normally means the credential is missing the
+`drive.file` scope. If Google throttles a request, wait before publishing again.
+
+If creation completed before population failed, pumd prints the created
+document ID and edit URL. An ambiguous transport failure is never retried
+automatically: inspect Google Drive and the reported document before deciding
+whether to publish again, because another invocation creates another document.
+HTTP and Google API response details are classified without printing credential
+or access-token contents.
 
 An opt-in smoke script creates a temporary comprehensive Markdown fixture,
 publishes it through the actual native `pumd publish <path>` command, captures

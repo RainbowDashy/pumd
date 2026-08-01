@@ -56,8 +56,18 @@ try {
 
   Push-Location $repository
   try {
-    $publishOutput = & $Moon run cmd/pumd -- publish $temporaryMarkdown 2>&1
-    $publishExitCode = $LASTEXITCODE
+    # Windows PowerShell wraps redirected native stderr as non-terminating
+    # ErrorRecord values. Keep collecting that output so the explicit exit-code
+    # check below can report the complete Moon failure.
+    $previousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+      $publishOutput = & $Moon run cmd/pumd -- publish $temporaryMarkdown 2>&1
+      $publishExitCode = $LASTEXITCODE
+    }
+    finally {
+      $ErrorActionPreference = $previousErrorActionPreference
+    }
   }
   finally {
     Pop-Location

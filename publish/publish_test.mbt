@@ -22,7 +22,59 @@ impl @google_http.HttpClient for NetworkFailureClient with fn request(
   request,
 ) {
   self.requests.push(request)
-  raise @google_http.HttpError::NetworkError("connection outcome is unknown")
+  raise @google_http.HttpError::NetworkError(
+    "Bearer creation-secret must not be printed",
+  )
+}
+
+///|
+priv struct PopulationNetworkFailureClient {
+  requests : Array[@google_http.HttpRequest]
+}
+
+///|
+impl @google_http.HttpClient for PopulationNetworkFailureClient with fn request(
+  self,
+  request,
+) {
+  let request_index = self.requests.length()
+  self.requests.push(request)
+  if request_index == 0 {
+    @google_http.HttpResponse::new(
+      200,
+      {},
+      "{\"documentId\":\"ambiguous-update-1\"}",
+    )
+  } else {
+    raise @google_http.HttpError::NetworkError(
+      "Bearer transport-secret must not be printed",
+    )
+  }
+}
+
+///|
+priv struct PopulationTimeoutClient {
+  requests : Array[@google_http.HttpRequest]
+}
+
+///|
+impl @google_http.HttpClient for PopulationTimeoutClient with fn request(
+  self,
+  request,
+) {
+  let request_index = self.requests.length()
+  self.requests.push(request)
+  if request_index == 0 {
+    @google_http.HttpResponse::new(
+      200,
+      {},
+      "{\"documentId\":\"ambiguous-timeout-1\"}",
+    )
+  } else {
+    raise @google_http.HttpError::TimeoutError(
+      "Bearer timeout-secret must not be printed",
+    )
+  }
 }
 
 ///|
@@ -72,6 +124,51 @@ async test "publish creates then populates one document through injected HTTP" {
 }
 
 ///|
+async test "complete supported document still publishes through the public seam" {
+  let source =
+    #|# Heading 🚀
+    #|
+    #|A **strong** *emphasis* [link](https://example.test) with `inline code`.
+    #|
+    #|```text
+    #|fenced code
+    #|```
+    #|
+    #|1. ordered
+    #|   - nested
+    #|
+    #|| Header | Right |
+    #|| --- | ---: |
+    #|| 世界 | Cell |
+  let fake = FakeHttpClient::{
+    requests: [],
+    responses: [
+      @google_http.HttpResponse::new(200, {}, "{\"documentId\":\"full-1\"}"),
+      @google_http.HttpResponse::new(200, {}, "{}"),
+    ],
+  }
+  let result = publish_markdown(
+    source,
+    "complete",
+    fn() { Ok("test-token") },
+    fake,
+  )
+  guard result is Ok(success) else { assert_true(false) }
+  inspect(success.document_id, content="full-1")
+  assert_eq(fake.requests.length(), 2)
+  let body = fake.requests[1].body.unwrap()
+  assert_true(body.contains("HEADING_1"))
+  assert_true(body.contains("\"bold\":true"))
+  assert_true(body.contains("\"italic\":true"))
+  assert_true(body.contains("https://example.test"))
+  assert_true(body.contains("Roboto Mono"))
+  assert_true(body.contains("NUMBERED_DECIMAL_ALPHA_ROMAN"))
+  assert_true(body.contains("BULLET_DISC_CIRCLE_SQUARE"))
+  assert_true(body.contains("\"insertTable\""))
+  assert_true(body.contains("世界"))
+}
+
+///|
 async test "rendering diagnostics stop before authentication and HTTP" {
   let fake = FakeHttpClient::{ requests: [], responses: [] }
   let token_calls : Array[Unit] = []
@@ -92,23 +189,270 @@ async test "rendering diagnostics stop before authentication and HTTP" {
 }
 
 ///|
+async test "source access failure stops before authentication and HTTP" {
+  let fake = FakeHttpClient::{ requests: [], responses: [] }
+  let token_calls : Array[Unit] = []
+  let result = publish_path(
+    "missing.md",
+    fn(_) { Err("credential=reader-secret") },
+    fn() {
+      token_calls.push(())
+      Ok("must-not-be-used")
+    },
+    fake,
+  )
+  guard result is Err(error) else { assert_true(false) }
+  guard error is SourceAccess(path="missing.md") else { assert_true(false) }
+  let message = error.user_message()
+  assert_true(message.contains("source access failed"))
+  assert_true(message.contains("missing.md"))
+  assert_true(!message.contains("reader-secret"))
+  assert_eq(token_calls.length(), 0)
+  assert_eq(fake.requests.length(), 0)
+}
+
+///|
+async test "Desired Document planning failure stops before authentication and HTTP" {
+  let invalid_document = @pumd.DesiredDocument::{
+    metadata: { title: None, locale: None },
+    render_metadata: {
+      style_profile_id: "pumd.default",
+      style_profile_version: 1,
+    },
+    content: [@pumd.StructuralElement::Table({ rows: [], provenance: None })],
+    provenance: None,
+  }
+  let fake = FakeHttpClient::{ requests: [], responses: [] }
+  let token_calls : Array[Unit] = []
+  let result = publish_desired_document(
+    invalid_document,
+    "proposal",
+    fn() {
+      token_calls.push(())
+      Ok("must-not-be-used")
+    },
+    fake,
+  )
+  guard result is Err(error) else { assert_true(false) }
+  guard error is Planning(_) else { assert_true(false) }
+  assert_true(error.user_message().contains("planning failed"))
+  assert_eq(token_calls.length(), 0)
+  assert_eq(fake.requests.length(), 0)
+}
+
+///|
 async test "authentication failure produces zero HTTP" {
   let fake = FakeHttpClient::{ requests: [], responses: [] }
   let result = @publish.publish_markdown(
     "Hello",
     "proposal",
-    fn() { Err("ADC is unavailable") },
+    fn() { Err(CredentialsUnavailable) },
     fake,
   )
-  guard result is Err(@publish.PublishError::Authentication(message)) else {
+  guard result is Err(error) else { assert_true(false) }
+  guard error
+    is Authentication(problem=CredentialsUnavailable, created_document=None) else {
     assert_true(false)
   }
-  inspect(message, content="ADC is unavailable")
+  assert_true(error.user_message().contains("Application Default Credentials"))
+  assert_true(error.user_message().contains("gcloud auth"))
   assert_eq(fake.requests.length(), 0)
 }
 
 ///|
-async test "population failure retains the created document identity" {
+test "authentication guidance distinguishes invalid and unrefreshable ADC" {
+  let invalid_error : PublishError = Authentication(
+    problem=CredentialsInvalid,
+    created_document=None,
+  )
+  let refresh_error : PublishError = Authentication(
+    problem=CredentialsRefreshFailed,
+    created_document=None,
+  )
+  let invalid = invalid_error.user_message()
+  let refresh = refresh_error.user_message()
+  assert_true(invalid.contains("invalid"))
+  assert_true(refresh.contains("expired or could not be refreshed"))
+  assert_true(invalid != refresh)
+  assert_true(invalid.contains("gcloud auth"))
+  assert_true(refresh.contains("gcloud auth"))
+}
+
+///|
+async test "creation permission failure is actionable and never populates" {
+  let response_body = "{\"error\":{\"code\":403,\"message\":\"Bearer private-token\",\"status\":\"PERMISSION_DENIED\"}}"
+  let fake = FakeHttpClient::{
+    requests: [],
+    responses: [@google_http.HttpResponse::new(403, {}, response_body)],
+  }
+  let result = publish_markdown(
+    "Hello",
+    "proposal",
+    fn() { Ok("test-token") },
+    fake,
+  )
+  guard result is Err(error) else { assert_true(false) }
+  guard error is Permission(stage=DocumentCreation, created_document=None) else {
+    assert_true(false)
+  }
+  let message = error.user_message()
+  assert_true(message.contains("permission"))
+  assert_true(message.contains("drive.file"))
+  assert_true(!message.contains("private-token"))
+  assert_eq(fake.requests.length(), 1)
+}
+
+///|
+async test "creation throttling is safe to retry later and never populates" {
+  let response_body = "{\"error\":{\"code\":403,\"message\":\"private quota name\",\"errors\":[{\"reason\":\"rateLimitExceeded\"}]}}"
+  let fake = FakeHttpClient::{
+    requests: [],
+    responses: [@google_http.HttpResponse::new(403, {}, response_body)],
+  }
+  let result = publish_markdown(
+    "Hello",
+    "proposal",
+    fn() { Ok("test-token") },
+    fake,
+  )
+  guard result is Err(error) else { assert_true(false) }
+  guard error is Throttled(stage=DocumentCreation, created_document=None) else {
+    assert_true(false)
+  }
+  let message = error.user_message()
+  assert_true(message.contains("wait and retry later"))
+  assert_true(!message.contains("private quota name"))
+  assert_eq(fake.requests.length(), 1)
+}
+
+///|
+async test "creation rejects expired credentials as authentication failure" {
+  let fake = FakeHttpClient::{
+    requests: [],
+    responses: [
+      @google_http.HttpResponse::new(
+        401,
+        {},
+        "{\"error\":{\"code\":401,\"message\":\"Bearer expired-secret\",\"status\":\"UNAUTHENTICATED\"}}",
+      ),
+    ],
+  }
+  let result = publish_markdown(
+    "Hello",
+    "proposal",
+    fn() { Ok("test-token") },
+    fake,
+  )
+  guard result is Err(error) else { assert_true(false) }
+  guard error
+    is Authentication(problem=CredentialsRejected, created_document=None) else {
+    assert_true(false)
+  }
+  let message = error.user_message()
+  assert_true(message.contains("refresh"))
+  assert_true(message.contains("Application Default Credentials"))
+  assert_true(!message.contains("expired-secret"))
+  assert_eq(fake.requests.length(), 1)
+}
+
+///|
+async test "malformed creation response never guesses an ID or populates" {
+  let fake = FakeHttpClient::{
+    requests: [],
+    responses: [@google_http.HttpResponse::new(200, {}, "Bearer decode-secret")],
+  }
+  let result = publish_markdown(
+    "Hello",
+    "proposal",
+    fn() { Ok("test-token") },
+    fake,
+  )
+  guard result
+    is Err(
+      ResponseDecode(stage=DocumentCreation, message~, created_document=None)
+    ) else {
+    assert_true(false)
+  }
+  assert_true(!message.contains("decode-secret"))
+  assert_eq(fake.requests.length(), 1)
+}
+
+///|
+async test "empty creation document ID never constructs publication identity" {
+  let fake = FakeHttpClient::{
+    requests: [],
+    responses: [
+      @google_http.HttpResponse::new(200, {}, "{\"documentId\":\"\"}"),
+    ],
+  }
+  let result = publish_markdown(
+    "Hello",
+    "proposal",
+    fn() { Ok("test-token") },
+    fake,
+  )
+  guard result
+    is Err(ResponseDecode(stage=DocumentCreation, created_document=None, ..)) else {
+    assert_true(false)
+  }
+  assert_eq(fake.requests.length(), 1)
+  assert_true(!fake.requests[0].url.has_suffix(":batchUpdate"))
+}
+
+///|
+async test "generic creation HTTP failure is sanitized and never populates" {
+  let fake = FakeHttpClient::{
+    requests: [],
+    responses: [
+      @google_http.HttpResponse::new(500, {}, "credential=server-secret"),
+    ],
+  }
+  let result = publish_markdown(
+    "Hello",
+    "proposal",
+    fn() { Ok("test-token") },
+    fake,
+  )
+  guard result is Err(error) else { assert_true(false) }
+  guard error is Creation(_) else { assert_true(false) }
+  assert_true(error.user_message().contains("HTTP 500"))
+  assert_true(!error.user_message().contains("server-secret"))
+  assert_eq(fake.requests.length(), 1)
+}
+
+///|
+async test "generic population HTTP failure retains publication identity" {
+  let fake = FakeHttpClient::{
+    requests: [],
+    responses: [
+      @google_http.HttpResponse::new(200, {}, "{\"documentId\":\"server-1\"}"),
+      @google_http.HttpResponse::new(500, {}, "credential=server-secret"),
+    ],
+  }
+  let result = publish_markdown(
+    "Hello",
+    "proposal",
+    fn() { Ok("test-token") },
+    fake,
+  )
+  guard result is Err(error) else { assert_true(false) }
+  guard error is Population(created_document~, message~) else {
+    assert_true(false)
+  }
+  inspect(created_document.document_id, content="server-1")
+  inspect(
+    created_document.url,
+    content="https://docs.google.com/document/d/server-1/edit",
+  )
+  assert_true(message.contains("HTTP 500"))
+  assert_true(!message.contains("server-secret"))
+  assert_true(!error.user_message().contains("server-secret"))
+  assert_eq(fake.requests.length(), 2)
+  assert_true(fake.requests[1].url.has_suffix(":batchUpdate"))
+}
+
+///|
+async test "population permission failure retains the created document identity" {
   let fake = FakeHttpClient::{
     requests: [],
     responses: [
@@ -122,13 +466,96 @@ async test "population failure retains the created document identity" {
     fn() { Ok("test-token") },
     fake,
   )
-  guard result
-    is Err(@publish.PublishError::Population(document_id~, url~, message~)) else {
+  guard result is Err(error) else { assert_true(false) }
+  guard error
+    is Permission(
+      stage=DocumentPopulation,
+      created_document=Some(created_document)
+    ) else {
     assert_true(false)
   }
-  inspect(document_id, content="orphan-1")
-  inspect(url, content="https://docs.google.com/document/d/orphan-1/edit")
-  assert_true(message.contains("403"))
+  inspect(created_document.document_id, content="orphan-1")
+  inspect(
+    created_document.url,
+    content="https://docs.google.com/document/d/orphan-1/edit",
+  )
+  assert_true(error.user_message().contains("drive.file"))
+  assert_true(!error.user_message().contains("missing scope"))
+  assert_eq(fake.requests.length(), 2)
+}
+
+///|
+async test "population throttling retains identity and uses one batch request" {
+  let fake = FakeHttpClient::{
+    requests: [],
+    responses: [
+      @google_http.HttpResponse::new(200, {}, "{\"documentId\":\"quota-1\"}"),
+      @google_http.HttpResponse::new(
+        429,
+        {},
+        "{\"error\":{\"code\":429,\"message\":\"private quota name\",\"status\":\"RESOURCE_EXHAUSTED\"}}",
+      ),
+    ],
+  }
+  let result = publish_markdown(
+    "Hello",
+    "proposal",
+    fn() { Ok("test-token") },
+    fake,
+  )
+  guard result is Err(error) else { assert_true(false) }
+  guard error
+    is Throttled(
+      stage=DocumentPopulation,
+      created_document=Some(created_document)
+    ) else {
+    assert_true(false)
+  }
+  inspect(created_document.document_id, content="quota-1")
+  inspect(
+    created_document.url,
+    content="https://docs.google.com/document/d/quota-1/edit",
+  )
+  assert_true(error.user_message().contains("wait and retry later"))
+  assert_true(!error.user_message().contains("private quota name"))
+  assert_eq(fake.requests.length(), 2)
+  assert_true(fake.requests[1].url.has_suffix(":batchUpdate"))
+}
+
+///|
+async test "population authentication rejection retains created identity" {
+  let fake = FakeHttpClient::{
+    requests: [],
+    responses: [
+      @google_http.HttpResponse::new(200, {}, "{\"documentId\":\"auth-1\"}"),
+      @google_http.HttpResponse::new(
+        401,
+        {},
+        "{\"error\":{\"code\":401,\"message\":\"Bearer expired-secret\",\"status\":\"UNAUTHENTICATED\"}}",
+      ),
+    ],
+  }
+  let result = publish_markdown(
+    "Hello",
+    "proposal",
+    fn() { Ok("test-token") },
+    fake,
+  )
+  guard result is Err(error) else { assert_true(false) }
+  guard error
+    is Authentication(
+      problem=CredentialsRejected,
+      created_document=Some(created_document)
+    ) else {
+    assert_true(false)
+  }
+  inspect(created_document.document_id, content="auth-1")
+  inspect(
+    created_document.url,
+    content="https://docs.google.com/document/d/auth-1/edit",
+  )
+  assert_true(error.user_message().contains("refresh ADC"))
+  assert_true(!error.user_message().contains("expired-secret"))
   assert_eq(fake.requests.length(), 2)
 }
 
@@ -150,17 +577,19 @@ async test "batch response decoding failure keeps its own stage" {
   guard result
     is Err(
       ResponseDecode(
-        stage="population",
+        stage=DocumentPopulation,
         message~,
-        document_id=Some(document_id),
-        url=Some(url)
+        created_document=Some(created_document)
       )
     ) else {
     assert_true(false)
   }
   assert_true(!message.is_empty())
-  inspect(document_id, content="decode-1")
-  inspect(url, content="https://docs.google.com/document/d/decode-1/edit")
+  inspect(created_document.document_id, content="decode-1")
+  inspect(
+    created_document.url,
+    content="https://docs.google.com/document/d/decode-1/edit",
+  )
   assert_eq(fake.requests.length(), 2)
 }
 
@@ -173,9 +602,63 @@ async test "ambiguous creation transport failure is not retried" {
     fn() { Ok("test-token") },
     fake,
   )
-  guard result is Err(@publish.PublishError::AmbiguousCreation(message)) else {
+  guard result is Err(error) else { assert_true(false) }
+  guard error is AmbiguousCreation else { assert_true(false) }
+  let message = error.user_message()
+  assert_true(message.contains("inspect Google Drive"))
+  assert_true(message.contains("will not retry automatically"))
+  assert_true(!message.contains("creation-secret"))
+  assert_eq(fake.requests.length(), 1)
+}
+
+///|
+async test "ambiguous population retains identity and requires Drive inspection" {
+  let fake = PopulationNetworkFailureClient::{ requests: [] }
+  let result = publish_markdown(
+    "Hello",
+    "proposal",
+    fn() { Ok("test-token") },
+    fake,
+  )
+  guard result is Err(error) else { assert_true(false) }
+  guard error is AmbiguousPopulation(created_document) else {
     assert_true(false)
   }
-  inspect(message, content="connection outcome is unknown")
-  assert_eq(fake.requests.length(), 1)
+  inspect(created_document.document_id, content="ambiguous-update-1")
+  inspect(
+    created_document.url,
+    content="https://docs.google.com/document/d/ambiguous-update-1/edit",
+  )
+  let message = error.user_message()
+  assert_true(message.contains("inspect Google Drive"))
+  assert_true(message.contains("will not retry automatically"))
+  assert_true(!message.contains("transport-secret"))
+  assert_eq(fake.requests.length(), 2)
+  assert_true(fake.requests[1].url.has_suffix(":batchUpdate"))
+}
+
+///|
+async test "population timeout remains ambiguous and retains identity" {
+  let fake = PopulationTimeoutClient::{ requests: [] }
+  let result = publish_markdown(
+    "Hello",
+    "proposal",
+    fn() { Ok("test-token") },
+    fake,
+  )
+  guard result is Err(error) else { assert_true(false) }
+  guard error is AmbiguousPopulation(created_document) else {
+    assert_true(false)
+  }
+  inspect(created_document.document_id, content="ambiguous-timeout-1")
+  inspect(
+    created_document.url,
+    content="https://docs.google.com/document/d/ambiguous-timeout-1/edit",
+  )
+  let message = error.user_message()
+  assert_true(message.contains("inspect Google Drive"))
+  assert_true(message.contains("will not retry automatically"))
+  assert_true(!message.contains("timeout-secret"))
+  assert_eq(fake.requests.length(), 2)
+  assert_true(fake.requests[1].url.has_suffix(":batchUpdate"))
 }

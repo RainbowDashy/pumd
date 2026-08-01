@@ -1,10 +1,17 @@
 ///|
+pub(all) enum GoogleErrorKind {
+  Unauthenticated
+  PermissionDenied
+  Throttled
+} derive(Eq, @debug.Debug)
+
+///|
 /// Errors at the deliberately small Google Docs REST boundary.  Callers keep
 /// creation and population stages distinct, while this adapter owns only HTTP
 /// and the two response shapes it needs.
 pub(all) enum DocsAdapterError {
   AdapterTransport(String)
-  AdapterHttpStatus(status~ : Int, body~ : String)
+  AdapterHttpStatus(status~ : Int, kind~ : GoogleErrorKind?)
   AdapterDecode(String)
 } derive(@debug.Debug)
 
@@ -12,15 +19,69 @@ pub(all) enum DocsAdapterError {
 pub fn DocsAdapterError::message(self : DocsAdapterError) -> String {
   match self {
     AdapterTransport(message) => "transport error: " + message
-    AdapterHttpStatus(status~, body~) => {
-      let scope_hint = if status == 401 || status == 403 {
-        " Check that ADC includes https://www.googleapis.com/auth/drive.file."
-      } else {
-        ""
-      }
-      "HTTP " + status.to_string() + ": " + body + scope_hint
-    }
+    AdapterHttpStatus(kind=Some(Throttled), ..) =>
+      "Google Docs throttled the request; wait and retry later."
+    AdapterHttpStatus(kind=Some(Unauthenticated), ..) =>
+      "Google rejected the Application Default Credentials. Refresh ADC before retrying."
+    AdapterHttpStatus(kind=Some(PermissionDenied), ..) =>
+      "Google denied permission. Check that ADC includes https://www.googleapis.com/auth/drive.file."
+    AdapterHttpStatus(status~, kind=None) =>
+      "HTTP " + status.to_string() + ": Google Docs rejected the request."
     AdapterDecode(message) => "response decoding error: " + message
+  }
+}
+
+///|
+fn google_error_kind_from_status(status : String) -> GoogleErrorKind? {
+  match status {
+    "UNAUTHENTICATED" => Some(Unauthenticated)
+    "PERMISSION_DENIED" => Some(PermissionDenied)
+    "RESOURCE_EXHAUSTED" => Some(Throttled)
+    _ => None
+  }
+}
+
+///|
+fn legacy_google_error_kind(body : String) -> GoogleErrorKind? {
+  let json = @json.parse(body) catch { _ => return None }
+  let envelope : LegacyGoogleErrorEnvelope = @json.from_json(json) catch {
+    _ => return None
+  }
+  for item in envelope.error.errors {
+    match item.reason {
+      "rateLimitExceeded" | "userRateLimitExceeded" | "quotaExceeded" =>
+        return Some(Throttled)
+      "insufficientPermissions" | "forbidden" => return Some(PermissionDenied)
+      "authError" => return Some(Unauthenticated)
+      _ => ()
+    }
+  }
+  None
+}
+
+///|
+fn safe_google_error_kind(status : Int, body : String) -> GoogleErrorKind? {
+  match @google_core.parse_error_response(body) {
+    Some(detail) =>
+      match detail.status {
+        Some(api_status) =>
+          match google_error_kind_from_status(api_status) {
+            Some(kind) => return Some(kind)
+            None => ()
+          }
+        None => ()
+      }
+    None => ()
+  }
+  match legacy_google_error_kind(body) {
+    Some(kind) => return Some(kind)
+    None => ()
+  }
+  match status {
+    401 => Some(Unauthenticated)
+    403 => Some(PermissionDenied)
+    429 => Some(Throttled)
+    _ => None
   }
 }
 
@@ -36,6 +97,21 @@ pub(all) struct RetrievedDocument {
 ///|
 priv struct CreatedDocumentResponse {
   documentId : String
+} derive(@json.FromJson)
+
+///|
+priv struct LegacyGoogleErrorReason {
+  reason : String
+} derive(@json.FromJson)
+
+///|
+priv struct LegacyGoogleErrorBody {
+  errors : Array[LegacyGoogleErrorReason]
+} derive(@json.FromJson)
+
+///|
+priv struct LegacyGoogleErrorEnvelope {
+  error : LegacyGoogleErrorBody
 } derive(@json.FromJson)
 
 ///|
@@ -603,7 +679,12 @@ async fn send_post(
       return Err(AdapterTransport(message))
   }
   if response.status_code < 200 || response.status_code >= 300 {
-    Err(AdapterHttpStatus(status=response.status_code, body=response.body))
+    Err(
+      AdapterHttpStatus(
+        status=response.status_code,
+        kind=safe_google_error_kind(response.status_code, response.body),
+      ),
+    )
   } else {
     Ok(response)
   }
@@ -628,7 +709,12 @@ async fn send_get(
       return Err(AdapterTransport(message))
   }
   if response.status_code < 200 || response.status_code >= 300 {
-    Err(AdapterHttpStatus(status=response.status_code, body=response.body))
+    Err(
+      AdapterHttpStatus(
+        status=response.status_code,
+        kind=safe_google_error_kind(response.status_code, response.body),
+      ),
+    )
   } else {
     Ok(response)
   }

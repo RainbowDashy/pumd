@@ -6,19 +6,13 @@ async fn report_failure(message : String) -> Unit {
 
 ///|
 async fn publish_file(path : String) -> Unit {
-  let source = @fs.read_file(path).text() catch {
-    error => {
-      report_failure(
-        "could not read or decode Markdown file `" +
-        path +
-        "`: " +
-        error.to_string(),
-      )
-      return
-    }
-  }
-  let title = @publish.publication_title_from_path(path)
-  match @publish.publish_markdown_with_adc(source, title) {
+  match
+    @publish.publish_path_with_adc(path, async fn(source_path) {
+      let source = @fs.read_file(source_path).text() catch {
+        error => return Err(error.to_string())
+      }
+      Ok(source)
+    }) {
     Ok(success) => {
       @stdio.stdout.write("document ID: " + success.document_id + "\n")
       @stdio.stdout.write("edit URL: " + success.url + "\n")

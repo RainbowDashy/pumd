@@ -59,6 +59,22 @@ pub struct DocsUpdatePlan {
 }
 
 ///|
+pub(all) enum DocsPlanError {
+  EmptyTable(table_index~ : Int)
+  TableWithoutColumns(table_index~ : Int)
+} derive(Eq, @debug.Debug)
+
+///|
+pub fn DocsPlanError::message(self : DocsPlanError) -> String {
+  match self {
+    EmptyTable(table_index~) =>
+      "Desired Document table " + table_index.to_string() + " has no rows"
+    TableWithoutColumns(table_index~) =>
+      "Desired Document table " + table_index.to_string() + " has no columns"
+  }
+}
+
+///|
 /// The beginning of a Google Docs body segment.  Google Docs reserves index
 /// zero for the implicit document boundary.
 pub let google_docs_body_start_index : Int = 1
@@ -259,6 +275,37 @@ pub fn compile_docs_update_plan(
     }
   }
   { requests, }
+}
+
+///|
+/// Validates the Desired Document structures required by the Docs API before
+/// compiling any remote write. This remains separate from rendering so the
+/// renderer never owns API indexes or request ordering.
+pub fn prepare_docs_update_plan(
+  document : @pumd.DesiredDocument,
+) -> Result[DocsUpdatePlan, DocsPlanError] {
+  let mut table_index = 0
+  for element in document.content {
+    match element {
+      @pumd.StructuralElement::Paragraph(_) => ()
+      @pumd.StructuralElement::Table(table) => {
+        if table.rows.is_empty() {
+          return Err(EmptyTable(table_index~))
+        }
+        let mut columns = 0
+        for row in table.rows {
+          if row.cells.length() > columns {
+            columns = row.cells.length()
+          }
+        }
+        if columns == 0 {
+          return Err(TableWithoutColumns(table_index~))
+        }
+        table_index = table_index + 1
+      }
+    }
+  }
+  Ok(compile_docs_update_plan(document))
 }
 
 ///|
