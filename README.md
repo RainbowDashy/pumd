@@ -12,6 +12,21 @@ replacing the entire document.
 > creates a new document. Stable republishing, diffing, and remote
 > reconciliation are version-one goals that remain deferred.
 
+## Nightly binaries
+
+The latest `main` commit is built with the latest stable MoonBit toolchain every
+night at approximately 02:23 Asia/Shanghai. The GitHub Actions workflow can also
+be run manually; only a run on `main` publishes a release. Successful native
+builds for Windows x86-64, Linux x86-64, and Apple Silicon macOS replace the
+assets in the rolling
+[`nightly` prerelease](https://github.com/RainbowDashy/pumd/releases/tag/nightly).
+
+Nightly artifacts are intended for testing. The `nightly` tag and its release
+assets move in place, builds may be unstable, and older nightlies are not kept
+as releases. Use the attached `SHA256SUMS` file to verify a download. The
+workflow runs the complete local native release suite and a CLI smoke test, but
+does not run the opt-in test that creates a real Google Doc.
+
 ## Problem
 
 Markdown is a good local authoring format, while Google Docs is often the most
@@ -303,7 +318,6 @@ The initial product will not attempt to:
 
 These decisions should follow from the goals rather than be fixed prematurely:
 
-- Distribution format.
 - Exact command names beyond the core publish workflow.
 - Local state-file layout and stable block identity strategy.
 - Whether custom templates belong in version one.

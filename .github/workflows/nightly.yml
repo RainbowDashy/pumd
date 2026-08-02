@@ -1,0 +1,169 @@
+name: Nightly
+
+on:
+  schedule:
+    # 02:23 Asia/Shanghai. A non-zero minute reduces peak scheduler delay.
+    - cron: "23 18 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            platform: linux-x86_64
+          - os: macos-15
+            platform: darwin-aarch64
+          - os: windows-2025
+            platform: windows-x86_64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out the nightly commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install MoonBit
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          curl --proto '=https' --tlsv1.2 -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
+          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
+
+      - name: Install MoonBit
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
+          Invoke-RestMethod https://cli.moonbitlang.com/install/powershell.ps1 | Invoke-Expression
+          Join-Path $env:USERPROFILE '.moon\bin' | Out-File -FilePath $env:GITHUB_PATH -Append
+
+      - name: Configure MSVC
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+
+      - name: Record the toolchain
+        run: moon version --all
+
+      - name: Resolve dependencies and check native packages
+        run: moon check --target native --deny-warn
+
+      - name: Run release tests
+        run: moon test --target native --release --frozen
+
+      - name: Build stripped release binary
+        run: moon build --target native --release --strip --frozen cmd/pumd
+
+      - name: Smoke test the Unix binary
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          binary="_build/native/release/build/rainbowdashy/pumd/cmd/pumd/pumd"
+          set +e
+          output="$("$binary" 2>&1)"
+          status=$?
+          set -e
+          test "$status" -eq 1
+          grep -F "usage: pumd publish <markdown-path>" <<< "$output"
+
+      - name: Smoke test the Windows binary
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $binary = '_build/native/release/build/rainbowdashy/pumd/cmd/pumd/pumd.exe'
+          $output = & $binary 2>&1
+          if ($LASTEXITCODE -ne 1) {
+            throw "expected pumd without arguments to exit 1, got $LASTEXITCODE"
+          }
+          if ($output -notmatch 'usage: pumd publish <markdown-path>') {
+            throw "pumd did not print its usage message"
+          }
+
+      - name: Package the Unix binary
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          archive="pumd-nightly-${{ matrix.platform }}"
+          mkdir -p "dist/$archive"
+          install -m 0755 "_build/native/release/build/rainbowdashy/pumd/cmd/pumd/pumd" "dist/$archive/pumd"
+          cp README.md "dist/$archive/README.md"
+          tar -C dist -czf "dist/$archive.tar.gz" "$archive"
+          rm -r "dist/$archive"
+
+      - name: Package the Windows binary
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $archive = 'pumd-nightly-${{ matrix.platform }}'
+          $archiveDirectory = Join-Path 'dist' $archive
+          New-Item -ItemType Directory -Path $archiveDirectory -Force | Out-Null
+          Copy-Item '_build/native/release/build/rainbowdashy/pumd/cmd/pumd/pumd.exe' (Join-Path $archiveDirectory 'pumd.exe')
+          Copy-Item 'README.md' (Join-Path $archiveDirectory 'README.md')
+          Compress-Archive -Path $archiveDirectory -DestinationPath "dist\$archive.zip"
+          Remove-Item -LiteralPath $archiveDirectory -Recurse
+
+      - name: Upload the packaged binary
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pumd-nightly-${{ matrix.platform }}
+          path: dist/pumd-nightly-*
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Publish rolling nightly release
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download packaged binaries
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: pumd-nightly-*
+          path: dist
+          merge-multiple: true
+
+      - name: Create checksums
+        shell: bash
+        run: |
+          cd dist
+          sha256sum pumd-nightly-* > SHA256SUMS
+
+      - name: Point the nightly tag at this commit
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/nightly" > /dev/null 2>&1; then
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/nightly" --raw-field sha="$GITHUB_SHA" -F force=true > /dev/null
+          else
+            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" --raw-field ref='refs/tags/nightly' --raw-field sha="$GITHUB_SHA" > /dev/null
+          fi
+
+      - name: Publish the rolling prerelease
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          built_at="$(date -u '+%Y-%m-%d %H:%M UTC')"
+          notes="$(printf 'Automated nightly build from main.\n\nCommit: %s\nBuilt: %s\n\nThis prerelease is replaced in place and may be unstable.' "$GITHUB_SHA" "$built_at")"
+          if gh release view nightly > /dev/null 2>&1; then
+            gh release upload nightly dist/* --clobber
+            gh release edit nightly --title 'pumd nightly' --notes "$notes" --prerelease
+          else
+            gh release create nightly dist/* --verify-tag --title 'pumd nightly' --notes "$notes" --prerelease
+          fi
