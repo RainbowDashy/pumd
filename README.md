@@ -7,6 +7,11 @@ The local Markdown file remains the authoritative source. Publishing it again
 should update the existing Google Doc safely and incrementally instead of
 replacing the entire document.
 
+> **Current Milestone 2 behavior:** `pumd` can create and populate a native
+> Google Doc, but it does not republish to an existing document. Every publish
+> creates a new document. Stable republishing, diffing, and remote
+> reconciliation are version-one goals that remain deferred.
+
 ## Problem
 
 Markdown is a good local authoring format, while Google Docs is often the most
@@ -66,69 +71,156 @@ safe incremental updates are a later milestone. Google document IDs, tab IDs,
 UTF-16 indexes, named ranges, and request ordering are implementation concerns
 that the author should not need to manage.
 
-### Run the native command from a checkout
-
-First create a Desktop OAuth client, download its JSON, and configure
-Application Default Credentials with the narrow `drive.file` scope:
-
-```console
-gcloud auth application-default login --client-id-file=oauth-client.json --scopes=https://www.googleapis.com/auth/drive.file
-```
-
-Then publish one Markdown file:
-
-```console
-moon run cmd/pumd -- publish proposal.md
-```
-
-The command validates and decodes the source before it obtains credentials or
-makes an HTTP request. On success it prints the new document ID and canonical
-edit URL. Unsupported Markdown and failures at source access, Desired Document
-planning, authentication, permission, throttling, creation, population,
-response decoding, or ambiguous transport outcomes are reported distinctly.
-
-### Recover from publication failures
-
-Source access, rendering, and Desired Document planning finish before pumd
-requests credentials or sends HTTP. Fix those local failures and run the same
-command again; no Google Doc was created.
-
-Authentication errors distinguish unavailable, invalid, unrefreshable, and
-Google-rejected Application Default Credentials. Follow the printed ADC setup
-command. A permission failure normally means the credential is missing the
-`drive.file` scope. If Google throttles a request, wait before publishing again.
-
-If creation completed before population failed, pumd prints the created
-document ID and edit URL. An ambiguous transport failure is never retried
-automatically: inspect Google Drive and the reported document before deciding
-whether to publish again, because another invocation creates another document.
-HTTP and Google API response details are classified without printing credential
-or access-token contents.
-
-An opt-in smoke script creates a temporary comprehensive Markdown fixture,
-publishes it through the actual native `pumd publish <path>` command, captures
-the document ID and edit URL printed by that process, then reads back that same
-Google Doc. It requires ADC and writes to Google:
-
-```console
-pwsh -NoProfile -File scripts/live-smoke.ps1
-```
-
-PowerShell 7 is preferred. If only Windows PowerShell 5.1 is available, use
-the compatible fallback:
-
-```console
-powershell -ExecutionPolicy Bypass -File scripts/live-smoke.ps1
-```
-
-Either shell can validate the fixture without creating a Google Doc by adding
-`-ValidateFixtureOnly`.
-
 ### Make every write inspectable
 
 Authors should be able to preview what would change before publishing. Results
 and failures should explain which Markdown sections are affected and why a push
 is safe, blocked, or requires intervention.
+
+## Current Milestone 2 setup and publishing
+
+### Toolchain, target, and dependencies
+
+The executable supports the MoonBit `native` target only. The current checkout
+has been validated with this toolchain:
+
+```text
+moon 0.1.20260724 (5f1406a 2026-07-24)
+moonc v0.10.5+5e7afb0c0 (2026-07-27)
+```
+
+The direct dependency contract in `moon.mod` is pinned exactly to:
+
+- `mizchi/x@0.5.2` (resolved to the vendored workspace copy, with the recorded
+  native Windows compatibility patches)
+- `ryota0624/googleauth@0.2.0`
+- `ryota0624/googleapis@0.4.1`
+- `moonbitlang/async@0.20.3`
+
+Other MoonBit targets and other dependency versions are not part of the
+validated Milestone 2 contract.
+
+### Enable Google Docs and configure authorized-user ADC
+
+1. Create or select a Google Cloud project and enable the **Google Docs API**.
+   With the Google Cloud CLI, the enablement command is:
+
+   ```console
+   gcloud services enable docs.googleapis.com --project=YOUR_PROJECT_ID
+   ```
+
+2. Configure the project's OAuth consent screen. If the app is in testing,
+   include the Google account that will publish as a test user.
+3. Create an OAuth client ID with application type **Desktop app**, then download
+   its client JSON as `oauth-client.json`.
+4. Use that client only to create authorized-user Application Default
+   Credentials (ADC), requesting the required `drive.file` scope:
+
+   ```console
+   gcloud auth application-default login --client-id-file=oauth-client.json --scopes=https://www.googleapis.com/auth/drive.file
+   ```
+
+`oauth-client.json` is the Desktop client definition; it is not itself ADC.
+The command above writes an `authorized_user` ADC file. `pumd` uses the
+authorized-user refresh token from that file and requires exactly this scope:
+`https://www.googleapis.com/auth/drive.file`.
+
+For the normal local setup, leave `GOOGLE_APPLICATION_CREDENTIALS` unset and
+`pumd` will look for the gcloud ADC file at `$HOME/.config/gcloud/application_default_credentials.json`,
+or at `%APPDATA%\gcloud\application_default_credentials.json` when `HOME` is not
+set. If `GOOGLE_APPLICATION_CREDENTIALS` is set, the pinned auth library checks
+that path first. It may point to a valid `authorized_user` ADC JSON file, but it
+must not point to `oauth-client.json`. An unreadable, invalid, or unsupported
+file at the override path is ignored and discovery continues at the well-known
+location. A valid service-account JSON is detected differently: the library
+selects it, but its service-account token exchange is not implemented in the
+pinned version, so publication fails instead of falling back. Service-account
+credentials are therefore not supported by the current publisher. Unset a
+stale or confusing override to use the gcloud authorized-user ADC file.
+
+### Publish a Markdown file
+
+From the repository root, the exact Milestone 2 publish command is:
+
+```console
+moon run --target native cmd/pumd -- publish proposal.md
+```
+
+Each successful invocation creates a new Google Doc, including when the same
+Markdown file was published before. The document title is the source file name
+without its final extension. Republish-to-the-same-document, local publication
+state, diffing, conflict detection, and remote reconciliation are deferred.
+
+On success, `pumd` prints this two-line result shape (with Google's real ID
+substituted):
+
+```text
+document ID: 1AbCdEfGhIjKlMnOpQrStUvWxYz
+edit URL: https://docs.google.com/document/d/1AbCdEfGhIjKlMnOpQrStUvWxYz/edit
+```
+
+Images are not supported in Milestone 2. Both direct images such as
+`![diagram](diagram.png)` and reference images produce a source-located
+unsupported diagnostic. Source reading and decoding, rendering (including this
+image check), and Desired Document planning all finish before ADC is requested
+or any HTTP request is sent, so an image blocks publication before credentials
+are read and before any remote document can be created or changed.
+
+Ordered lists publish as native Google Docs lists when they start at `1`, with
+either a period or parenthesis delimiter. Google Docs' create-bullets request
+does not expose a writable starting number, so a Markdown list starting at any
+other number fails Desired Document planning before ADC or HTTP instead of being
+silently renumbered.
+
+### Recover from publication failures
+
+- For source access, decoding, rendering, or Desired Document planning errors,
+  fix the local input and run the publish command again. These failures happen
+  before credential access or remote mutation, so no Google Doc was created.
+- Authentication errors distinguish unavailable, invalid, unrefreshable, and
+  Google-rejected ADC. Re-run the authorized-user ADC command above. For a
+  permission failure, confirm that ADC was minted with the exact `drive.file`
+  scope and that the Google Docs API is enabled in the OAuth client's project.
+- If Google throttles a request, wait before trying again. For another explicit
+  5xx response, wait and retry later; report other unexpected HTTP statuses
+  before retrying.
+- If document creation succeeded but population failed, the error includes the
+  created document ID and edit URL. Inspect that document before deciding what
+  to do next.
+- A transport or response-decoding failure can be ambiguous: the remote mutation
+  may have succeeded. `pumd` does not retry automatically. Inspect Google Drive
+  and any reported document before retrying, because every retry creates another
+  new document.
+
+Errors are classified without printing credential or access-token contents.
+
+### Opt-in live integration test
+
+The live smoke test is deliberately not part of the default test suite. Running
+it without `-ValidateFixtureOnly` **creates and leaves a real Google Doc in the
+authenticated account's Drive**. It publishes a temporary mixed Markdown file
+through the actual native CLI, reads the resulting document back through the
+narrow Docs adapter, verifies representative text and native structure, and
+prints the real document URL:
+
+```console
+pwsh -NoProfile -File scripts/live-smoke.ps1
+```
+
+On success, its final line has this form:
+
+```text
+Live smoke passed: https://docs.google.com/document/d/REAL_DOCUMENT_ID/edit
+```
+
+PowerShell 7 is preferred. If only Windows PowerShell 5.1 is available, use:
+
+```console
+powershell -ExecutionPolicy Bypass -File scripts/live-smoke.ps1
+```
+
+To validate only the local fixture without credentials, network access, or a
+real Google Doc, add `-ValidateFixtureOnly` to either command.
 
 ## Version-one success criteria
 
@@ -182,11 +274,11 @@ Rendering applies one versioned, built-in style profile with opinionated default
 for body text and every supported document element. Configurable themes and
 templates are outside this milestone.
 
-The current publishing slice adds a native `pumd publish <markdown-path>`
-command. It reads and decodes the source, derives the Google Doc title from the
-file name, then uses Application Default Credentials to create and populate one
-new Google Doc. Every invocation creates a new document. Incremental updates,
-local publishing state, diffing, and remote reconciliation remain deferred.
+Milestone 2 adds the native `pumd publish <markdown-path>` command. It reads and
+decodes the source, derives the Google Doc title from the file name, then uses
+authorized-user Application Default Credentials to create and populate one new
+Google Doc. Every invocation creates a new document. Incremental updates, local
+publishing state, diffing, and remote reconciliation remain deferred.
 
 ## Non-goals
 

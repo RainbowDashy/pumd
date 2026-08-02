@@ -1,10 +1,17 @@
 import {
   "rainbowdashy/pumd",
-  "moonbitlang/async",
   "moonbitlang/core/debug",
   "moonbitlang/core/json",
-  "mizchi/x/sys",
   "ryota0624/googleauth/lib" @googleauth,
   "ryota0624/googleapis/core" @google_core,
   "ryota0624/googleapis/http" @google_http,
 }
+
+import {
+  "moonbitlang/async",
+  "mizchi/x/sys",
+} for "test"
+
+import {
+  "moonbitlang/async",
+} for "wbtest"

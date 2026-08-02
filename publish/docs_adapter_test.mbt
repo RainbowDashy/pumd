@@ -195,6 +195,25 @@ async test "adapter classifies Google permission errors without exposing respons
 }
 
 ///|
+async test "googleapis error parsing classifies a neutral HTTP status" {
+  let response_body = "{\"error\":{\"code\":400,\"message\":\"private permission detail\",\"status\":\"PERMISSION_DENIED\"}}"
+  let fake = DocsAdapterFakeHttpClient::{
+    requests: [],
+    responses: [@google_http.HttpResponse::new(400, {}, response_body)],
+  }
+  match create_document(docs_adapter_client(fake), "title") {
+    Err(error) => {
+      guard error is AdapterHttpStatus(status=400, kind=Some(PermissionDenied)) else {
+        fail("googleapis error status must classify permission denial")
+      }
+      assert_true(!error.message().contains("private permission detail"))
+    }
+    Ok(_) => fail("permission error must not create a document")
+  }
+  assert_eq(fake.requests.length(), 1)
+}
+
+///|
 async test "adapter classifies throttling and hides malformed response bodies" {
   let throttled_body = "{\"error\":{\"code\":429,\"message\":\"private quota detail\",\"status\":\"RESOURCE_EXHAUSTED\"}}"
   let throttled = DocsAdapterFakeHttpClient::{

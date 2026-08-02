@@ -241,6 +241,26 @@ async test "Desired Document planning failure stops before authentication and HT
 }
 
 ///|
+async test "unwritable ordered-list starts stop before authentication and HTTP" {
+  let fake = FakeHttpClient::{ requests: [], responses: [] }
+  let token_calls : Array[Unit] = []
+  let result = publish_markdown(
+    "3. third",
+    "proposal",
+    fn() {
+      token_calls.push(())
+      Ok("must-not-be-used")
+    },
+    fake,
+  )
+  guard result is Err(error) else { fail("publish must reject list start") }
+  guard error is Planning(_) else { fail("list start must fail in planning") }
+  assert_true(error.user_message().contains("starting at 3"))
+  assert_eq(token_calls.length(), 0)
+  assert_eq(fake.requests.length(), 0)
+}
+
+///|
 async test "authentication failure produces zero HTTP" {
   let fake = FakeHttpClient::{ requests: [], responses: [] }
   let result = @publish.publish_markdown(

@@ -323,29 +323,55 @@ fn google_auth_problem(
 }
 
 ///|
-pub async fn application_default_access_token() -> Result[String, PublishError] {
-  let auth_client = match @googleauth.auto_detect_and_authenticate() {
-    Ok(client) => client
-    Err(error) =>
-      return Err(
-        Authentication(
-          problem=google_auth_problem(error),
-          created_document=None,
-        ),
-      )
+async fn detect_googleauth_client() -> Result[
+  @googleauth.GoogleAuthClient,
+  AuthenticationProblem,
+] {
+  match @googleauth.auto_detect_and_authenticate() {
+    Ok(client) => Ok(client)
+    Err(error) => Err(google_auth_problem(error))
   }
-  match @googleauth.get_access_token(auth_client) {
+}
+
+///|
+async fn acquire_googleauth_token(
+  client : @googleauth.GoogleAuthClient,
+) -> Result[String, AuthenticationProblem] {
+  match @googleauth.get_access_token(client) {
     Ok(token) => Ok(token)
-    Err(error) =>
-      Err(
-        Authentication(
-          problem=match error {
-            @googleauth.AuthenticationError::NoValidCredentials =>
-              CredentialsUnavailable
-            _ => CredentialsRefreshFailed
-          },
-          created_document=None,
-        ),
-      )
+    Err(@googleauth.AuthenticationError::NoValidCredentials) =>
+      Err(CredentialsUnavailable)
+    Err(_) => Err(CredentialsRefreshFailed)
   }
+}
+
+///|
+/// Testable composition seam around googleauth's two-step ADC contract. The
+/// production wrapper below owns dependency-error mapping; this function owns
+/// sequencing and converts the mapped result into pumd's public error model.
+async fn application_default_access_token_with(
+  detect_credentials : async () -> Result[
+    @googleauth.GoogleAuthClient,
+    AuthenticationProblem,
+  ],
+  acquire_token : async (@googleauth.GoogleAuthClient) -> Result[
+    String,
+    AuthenticationProblem,
+  ],
+) -> Result[String, PublishError] {
+  let auth_client = match detect_credentials() {
+    Ok(client) => client
+    Err(problem) => return Err(Authentication(problem~, created_document=None))
+  }
+  match acquire_token(auth_client) {
+    Ok(token) => Ok(token)
+    Err(problem) => Err(Authentication(problem~, created_document=None))
+  }
+}
+
+///|
+pub async fn application_default_access_token() -> Result[String, PublishError] {
+  application_default_access_token_with(
+    detect_googleauth_client, acquire_googleauth_token,
+  )
 }

@@ -62,6 +62,7 @@ pub struct DocsUpdatePlan {
 pub(all) enum DocsPlanError {
   EmptyTable(table_index~ : Int)
   TableWithoutColumns(table_index~ : Int)
+  UnsupportedOrderedListStart(start~ : Int)
 } derive(Eq, @debug.Debug)
 
 ///|
@@ -71,6 +72,10 @@ pub fn DocsPlanError::message(self : DocsPlanError) -> String {
       "Desired Document table " + table_index.to_string() + " has no rows"
     TableWithoutColumns(table_index~) =>
       "Desired Document table " + table_index.to_string() + " has no columns"
+    UnsupportedOrderedListStart(start~) =>
+      "Google Docs cannot create a numbered list starting at " +
+      start.to_string() +
+      "; use a list starting at 1"
   }
 }
 
@@ -289,7 +294,12 @@ pub fn prepare_docs_update_plan(
   let mut table_index = 0
   for element in document.content {
     match element {
-      @pumd.StructuralElement::Paragraph(_) => ()
+      @pumd.StructuralElement::Paragraph(paragraph) =>
+        match paragraph.bullet {
+          Some({ kind: Numbered(start~, ..), .. }) if start != 1 =>
+            return Err(UnsupportedOrderedListStart(start~))
+          _ => ()
+        }
       @pumd.StructuralElement::Table(table) => {
         if table.rows.is_empty() {
           return Err(EmptyTable(table_index~))

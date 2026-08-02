@@ -152,6 +152,8 @@ try {
     throw "pumd printed a URL for a different document: $documentUrl"
   }
 
+  Write-Host "REAL GOOGLE DOC CREATED: $documentUrl"
+
   # The readback test gets its ADC token through the project's googleauth
   # integration. The CLI above remains the only code that creates a document.
   $env:PUMD_LIVE_SMOKE_DOCUMENT_ID = $documentId
@@ -161,7 +163,7 @@ try {
   try {
     & $Moon test --target native -p rainbowdashy/pumd/publish --include-skipped --filter "live smoke reads the CLI-created document"
     if ($LASTEXITCODE -ne 0) {
-      throw "Google Docs readback test failed (exit $LASTEXITCODE)."
+      throw "Google Docs readback test failed for $documentUrl (exit $LASTEXITCODE)."
     }
   }
   finally {

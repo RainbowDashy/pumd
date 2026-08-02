@@ -1,0 +1,136 @@
+///|
+priv struct RequestContractHttpClient {
+  requests : Array[@google_http.HttpRequest]
+  responses : Array[@google_http.HttpResponse]
+}
+
+///|
+impl @google_http.HttpClient for RequestContractHttpClient with fn request(
+  self,
+  request,
+) {
+  let response_index = self.requests.length()
+  self.requests.push(request)
+  self.responses[response_index]
+}
+
+///|
+fn complete_request_contract_markdown() -> String {
+  (
+    #|# Heading one A界é🚀
+    #|## Heading two
+    #|### Heading three
+    #|#### Heading four
+    #|##### Heading five
+    #|###### Heading six
+    #|
+    #|Plain A界é🚀 with **bold A界é🚀**, *italic*, [linked](https://example.test/guide "Guide"), and `code A界é🚀`.
+    #|
+    #|Soft break
+    #|continues\
+    #|Hard break A界é🚀
+    #|
+    #|```text
+    #|fenced A界é🚀
+    #|```
+    #|
+    #|- bullet A界é🚀
+    #|  - nested
+    #|
+    #|1. ordered
+    #|
+    #|1) parenthesized
+    #|
+    #|| Left | Center | Right | Unspecified |
+    #|| :--- | :---: | ---: | --- |
+    #|| cell A界é🚀 | centered | [table link](https://example.test/table) | plain |
+  )
+}
+
+///|
+async fn capture_complete_request_contract() -> Array[@google_http.HttpRequest] {
+  let fake = RequestContractHttpClient::{
+    requests: [],
+    responses: [
+      @google_http.HttpResponse::new(
+        200,
+        {},
+        "{\"documentId\":\"contract-doc\"}",
+      ),
+      @google_http.HttpResponse::new(200, {}, "{}"),
+    ],
+  }
+  match
+    publish_markdown(
+      complete_request_contract_markdown(),
+      "Contract title",
+      fn() { Ok("contract-token") },
+      fake,
+    ) {
+    Ok(success) => {
+      assert_eq(success.document_id, "contract-doc")
+      assert_eq(
+        success.url,
+        "https://docs.google.com/document/d/contract-doc/edit",
+      )
+    }
+    Err(error) => fail(error.user_message())
+  }
+  fake.requests
+}
+
+///|
+fn request_sequence_snapshot(
+  requests : Array[@google_http.HttpRequest],
+) -> String {
+  let output = StringBuilder::new()
+  for index, request in requests {
+    output.write_string("request ")
+    output.write_string((index + 1).to_string())
+    output.write_char(' ')
+    output.write_string(request.method_.to_string())
+    output.write_char(' ')
+    output.write_string(request.url)
+    output.write_char('\n')
+    output.write_string("authorization: ")
+    output.write_string(
+      request.headers.get("Authorization").unwrap_or("<none>"),
+    )
+    output.write_char('\n')
+    output.write_string("content-type: ")
+    output.write_string(request.headers.get("Content-Type").unwrap_or("<none>"))
+    output.write_char('\n')
+    output.write_string("body: ")
+    output.write_string(request.body.unwrap_or("<none>"))
+    output.write_char('\n')
+  }
+  output.to_string()
+}
+
+///|
+async test "complete non-image document has one canonical Google request golden" {
+  let requests = capture_complete_request_contract()
+  assert_eq(requests.length(), 2)
+  let snapshot = request_sequence_snapshot(requests)
+  inspect(
+    snapshot,
+    content=(
+      #|request 1 POST https://docs.googleapis.com/v1/documents
+      #|authorization: Bearer contract-token
+      #|content-type: application/json
+      #|body: {"title":"Contract title"}
+      #|request 2 POST https://docs.googleapis.com/v1/documents/contract-doc:batchUpdate
+      #|authorization: Bearer contract-token
+      #|content-type: application/json
+      #|body: {"requests":[{"insertText":{"location":{"index":1},"text":"Heading one A界é🚀\n"}},{"updateParagraphStyle":{"range":{"startIndex":1,"endIndex":20},"paragraphStyle":{"namedStyleType":"HEADING_1","lineSpacing":115,"spaceAbove":{"magnitude":20,"unit":"PT"},"spaceBelow":{"magnitude":8,"unit":"PT"}},"fields":"namedStyleType,lineSpacing,spaceAbove,spaceBelow"}},{"updateTextStyle":{"range":{"startIndex":1,"endIndex":20},"textStyle":{"weightedFontFamily":{"fontFamily":"Arial"},"fontSize":{"magnitude":24,"unit":"PT"}},"fields":"weightedFontFamily,fontSize"}},{"updateTextStyle":{"range":{"startIndex":1,"endIndex":19},"textStyle":{"bold":false,"italic":false,"underline":false,"weightedFontFamily":{"fontFamily":"Arial"},"fontSize":{"magnitude":24,"unit":"PT"}},"fields":"bold,italic,underline,weightedFontFamily,fontSize"}},{"insertText":{"location":{"index":20},"text":"Heading two\n"}},{"updateParagraphStyle":{"range":{"startIndex":20,"endIndex":32},"paragraphStyle":{"namedStyleType":"HEADING_2","lineSpacing":115,"spaceAbove":{"magnitude":18,"unit":"PT"},"spaceBelow":{"magnitude":6,"unit":"PT"}},"fields":"namedStyleType,lineSpacing,spaceAbove,spaceBelow"}},{"updateTextStyle":{"range":{"startIndex":20,"endIndex":32},"textStyle":{"weightedFontFamily":{"fontFamily":"Arial"},"fontSize":{"magnitude":18,"unit":"PT"}},"fields":"weightedFontFamily,fontSize"}},{"updateTextStyle":{"range":{"startIndex":20,"endIndex":31},"textStyle":{"bold":false,"italic":false,"underline":false,"weightedFontFamily":{"fontFamily":"Arial"},"fontSize":{"magnitude":18,"unit":"PT"}},"fields":"bold,italic,underline,weightedFontFamily,fontSize"}},{"insertText":{"location":{"index":32},"text":"Heading three\n"}},{"updateParagraphStyle":{"range":{"startIndex":32,"endIndex":46},"paragraphStyle":{"namedStyleType":"HEADING_3","lineSpacing":115,"spaceAbove":{"magnitude":16,"unit":"PT"},"spaceBelow":{"magnitude":4,"unit":"PT"}},"fields":"namedStyleType,lineSpacing,spaceAbove,spaceBelow"}},{"updateTextStyle":{"range":{"startIndex":32,"endIndex":46},"textStyle":{"weightedFontFamily":{"fontFamily":"Arial"},"fontSize":{"magnitude":14,"unit":"PT"}},"fields":"weightedFontFamily,fontSize"}},{"updateTextStyle":{"range":{"startIndex":32,"endIndex":45},"textStyle":{"bold":false,"italic":false,"underline":false,"weightedFontFamily":{"fontFamily":"Arial"},"fontSize":{"magnitude":14,"unit":"PT"}},"fields":"bold,italic,underline,weightedFontFamily,fontSize"}},{"insertText":{"location":{"index":46},"text":"Heading four\n"}},{"updateParagraphStyle":{"range":{"startIndex":46,"endIndex":59},"paragraphStyle":{"namedStyleType":"HEADING_4","lineSpacing":115,"spaceAbove":{"magnitude":14,"unit":"PT"},"spaceBelow":{"magnitude":4,"unit":"PT"}},"fields":"namedStyleType,lineSpacing,spaceAbove,spaceBelow"}},{"updateTextStyle":{"range":{"startIndex":46,"endIndex":59},"textStyle":{"weightedFontFamily":{"fontFamily":"Arial"},"fontSize":{"magnitude":12,"unit":"PT"}},"fields":"weightedFontFamily,fontSize"}},{"updateTextStyle":{"range":{"startIndex":46,"endIndex":58},"textStyle":{"bold":false,"italic":false,"underline":false,"weightedFontFamily":{"fontFamily":"Arial"},"fontSize":{"magnitude":12,"unit":"PT"}},"fields":"bold,italic,underline,weightedFontFamily,fontSize"}},{"insertText":{"location":{"index":59},"text":"Heading five\n"}},{"updateParagraphStyle":{"range":{"startIndex":59,"endIndex":72},"paragraphStyle":{"namedStyleType":"HEADING_5","lineSpacing":115,"spaceAbove":{"magnitude":12,"unit":"PT"},"spaceBelow":{"magnitude":3,"unit":"PT"}},"fields":"namedStyleType,lineSpacing,spaceAbove,spaceBelow"}},{"updateTextStyle":{"range":{"startIndex":59,"endIndex":72},"textStyle":{"weightedFontFamily":{"fontFamily":"Arial"},"fontSize":{"magnitude":11,"unit":"PT"}},"fields":"weightedFontFamily,fontSize"}},{"updateTextStyle":{"range":{"startIndex":59,"endIndex":71},"textStyle":{"bold":false,"italic":false,"underline":false,"weightedFontFamily":{"fontFamily":"Arial"},"fontSize":{"magnitude":11,"unit":"PT"}},"fields":"bold,italic,underline,weightedFontFamily,fontSize"}},{"insertText":{"location":{"index":72},"text":"Heading six\n"}},{"updateParagraphStyle":{"range":{"startIndex":72,"endIndex":84},"paragraphStyle":{"namedStyleType":"HEADING_6","lineSpacing":115,"spaceAbove":{"magnitude":10,"unit":"PT"},"spaceBelow":{"magnitude":3,"unit":"PT"}},"fields":"namedStyleType,lineSpacing,spaceAbove,spaceBelow"}},{"updateTextStyle":{"range":{"startIndex":72,"endIndex":84},"textStyle":{"weightedFontFamily":{"fontFamily":"Arial"},"fontSize":{"magnitude":10,"unit":"PT"}},"fields":"weightedFontFamily,fontSize"}},{"updateTextStyle":{"range":{"startIndex":72,"endIndex":83},"textStyle":{"bold":false,"italic":false,"underline":false,"weightedFontFamily":{"fontFamily":"Arial"},"fontSize":{"magnitude":10,"unit":"PT"}},"fields":"bold,italic,underline,weightedFontFamily,fontSize"}},{"insertText":{"location":{"index":84},"text":"Plain A界é🚀 with bold A界é🚀, italic, linked, and code A界é🚀.\n"}},{"updateParagraphStyle":{"range":{"startIndex":84,"endIndex":148},"paragraphStyle":{"namedStyleType":"NORMAL_TEXT","lineSpacing":115,"spaceAbove":{"magnitude":0,"unit":"PT"},"spaceBelow":{"magnitude":6,"unit":"PT"}},"fields":"namedStyleType,lineSpacing,spaceAbove,spaceBelow"}},{"updateTextStyle":{"range":{"startIndex":84,"endIndex":148},"textStyle":{"weightedFontFamily":{"fontFamily":"Arial"},"fontSize":{"magnitude":11,"unit":"PT"}},"fields":"weightedFontFamily,fontSize"}},{"updateTextStyle":{"range":{"startIndex":84,"endIndex":102},"textStyle":{"bold":false,"italic":false,"underline":false,"weightedFontFamily":{"fontFamily":"Arial"},"fontSize":{"magnitude":11,"unit":"PT"}},"fields":"bold,italic,underline,weightedFontFamily,fontSize"}},{"updateTextStyle":{"range":{"startIndex":102,"endIndex":113},"textStyle":{"bold":true,"italic":false,"underline":false,"weightedFontFamily":{"fontFamily":"Arial"},"fontSize":{"magnitude":11,"unit":"PT"}},"fields":"bold,italic,underline,weightedFontFamily,fontSize"}},{"updateTextStyle":{"range":{"startIndex":113,"endIndex":115},"textStyle":{"bold":false,"italic":false,"underline":false,"weightedFontFamily":{"fontFamily":"Arial"},"fontSize":{"magnitude":11,"unit":"PT"}},"fields":"bold,italic,underline,weightedFontFamily,fontSize"}},{"updateTextStyle":{"range":{"startIndex":115,"endIndex":121},"textStyle":{"bold":false,"italic":true,"underline":false,"weightedFontFamily":{"fontFamily":"Arial"},"fontSize":{"magnitude":11,"unit":"PT"}},"fields":"bold,italic,underline,weightedFontFamily,fontSize"}},{"updateTextStyle":{"range":{"startIndex":121,"endIndex":123},"textStyle":{"bold":false,"italic":false,"underline":false,"weightedFontFamily":{"fontFamily":"Arial"},"fontSize":{"magnitude":11,"unit":"PT"}},"fields":"bold,italic,underline,weightedFontFamily,fontSize"}},{"updateTextStyle":{"range":{"startIndex":123,"endIndex":129},"textStyle":{"bold":false,"italic":false,"underline":true,"weightedFontFamily":{"fontFamily":"Arial"},"fontSize":{"magnitude":11,"unit":"PT"},"foregroundColor":{"color":{"rgbColor":{"red":0.06666666666666667,"green":0.3333333333333333,"blue":0.8}}},"link":{"url":"https://example.test/guide"}},"fields":"bold,italic,underline,weightedFontFamily,fontSize,foregroundColor,link"}},{"updateTextStyle":{"range":{"startIndex":129,"endIndex":135},"textStyle":{"bold":false,"italic":false,"underline":false,"weightedFontFamily":{"fontFamily":"Arial"},"fontSize":{"magnitude":11,"unit":"PT"}},"fields":"bold,italic,underline,weightedFontFamily,fontSize"}},{"updateTextStyle":{"range":{"startIndex":135,"endIndex":146},"textStyle":{"bold":false,"italic":false,"underline":false,"weightedFontFamily":{"fontFamily":"Roboto Mono"},"fontSize":{"magnitude":10,"unit":"PT"},"backgroundColor":{"color":{"rgbColor":{"red":0.9450980392156862,"green":0.9529411764705882,"blue":0.9568627450980393}}}},"fields":"bold,italic,underline,weightedFontFamily,fontSize,backgroundColor"}},{"updateTextStyle":{"range":{"startIndex":146,"endIndex":147},"textStyle":{"bold":false,"italic":false,"underline":false,"weightedFontFamily":{"fontFamily":"Arial"},"fontSize":{"magnitude":11,"unit":"PT"}},"fields":"bold,italic,underline,weightedFontFamily,fontSize"}},{"insertText":{"location":{"index":148},"text":"Soft break continues\nHard break A界é🚀\n"}},{"updateParagraphStyle":{"range":{"startIndex":148,"endIndex":187},"paragraphStyle":{"namedStyleType":"NORMAL_TEXT","lineSpacing":115,"spaceAbove":{"magnitude":0,"unit":"PT"},"spaceBelow":{"magnitude":6,"unit":"PT"}},"fields":"namedStyleType,lineSpacing,spaceAbove,spaceBelow"}},{"updateTextStyle":{"range":{"startIndex":148,"endIndex":187},"textStyle":{"weightedFontFamily":{"fontFamily":"Arial"},"fontSize":{"magnitude":11,"unit":"PT"}},"fields":"weightedFontFamily,fontSize"}},{"updateTextStyle":{"range":{"startIndex":148,"endIndex":186},"textStyle":{"bold":false,"italic":false,"underline":false,"weightedFontFamily":{"fontFamily":"Arial"},"fontSize":{"magnitude":11,"unit":"PT"}},"fields":"bold,italic,underline,weightedFontFamily,fontSize"}},{"insertText":{"location":{"index":187},"text":"fenced A界é🚀\n"}},{"updateParagraphStyle":{"range":{"startIndex":187,"endIndex":201},"paragraphStyle":{"namedStyleType":"NORMAL_TEXT","lineSpacing":100,"spaceAbove":{"magnitude":0,"unit":"PT"},"spaceBelow":{"magnitude":0,"unit":"PT"},"shading":{"backgroundColor":{"color":{"rgbColor":{"red":0.9450980392156862,"green":0.9529411764705882,"blue":0.9568627450980393}}}}},"fields":"namedStyleType,lineSpacing,spaceAbove,spaceBelow,shading.backgroundColor"}},{"updateTextStyle":{"range":{"startIndex":187,"endIndex":201},"textStyle":{"weightedFontFamily":{"fontFamily":"Roboto Mono"},"fontSize":{"magnitude":10,"unit":"PT"}},"fields":"weightedFontFamily,fontSize"}},{"updateTextStyle":{"range":{"startIndex":187,"endIndex":200},"textStyle":{"bold":false,"italic":false,"underline":false,"weightedFontFamily":{"fontFamily":"Roboto Mono"},"fontSize":{"magnitude":10,"unit":"PT"},"backgroundColor":{"color":{"rgbColor":{"red":0.9450980392156862,"green":0.9529411764705882,"blue":0.9568627450980393}}}},"fields":"bold,italic,underline,weightedFontFamily,fontSize,backgroundColor"}},{"insertText":{"location":{"index":201},"text":"\n"}},{"updateParagraphStyle":{"range":{"startIndex":201,"endIndex":202},"paragraphStyle":{"namedStyleType":"NORMAL_TEXT","lineSpacing":100,"spaceAbove":{"magnitude":0,"unit":"PT"},"spaceBelow":{"magnitude":0,"unit":"PT"},"shading":{"backgroundColor":{"color":{"rgbColor":{"red":0.9450980392156862,"green":0.9529411764705882,"blue":0.9568627450980393}}}}},"fields":"namedStyleType,lineSpacing,spaceAbove,spaceBelow,shading.backgroundColor"}},{"updateTextStyle":{"range":{"startIndex":201,"endIndex":202},"textStyle":{"weightedFontFamily":{"fontFamily":"Roboto Mono"},"fontSize":{"magnitude":10,"unit":"PT"}},"fields":"weightedFontFamily,fontSize"}},{"insertText":{"location":{"index":202},"text":"bullet A界é🚀\n"}},{"updateParagraphStyle":{"range":{"startIndex":202,"endIndex":216},"paragraphStyle":{"namedStyleType":"NORMAL_TEXT","lineSpacing":115,"spaceAbove":{"magnitude":0,"unit":"PT"},"spaceBelow":{"magnitude":6,"unit":"PT"}},"fields":"namedStyleType,lineSpacing,spaceAbove,spaceBelow"}},{"updateTextStyle":{"range":{"startIndex":202,"endIndex":216},"textStyle":{"weightedFontFamily":{"fontFamily":"Arial"},"fontSize":{"magnitude":11,"unit":"PT"}},"fields":"weightedFontFamily,fontSize"}},{"updateTextStyle":{"range":{"startIndex":202,"endIndex":215},"textStyle":{"bold":false,"italic":false,"underline":false,"weightedFontFamily":{"fontFamily":"Arial"},"fontSize":{"magnitude":11,"unit":"PT"}},"fields":"bold,italic,underline,weightedFontFamily,fontSize"}},{"createParagraphBullets":{"range":{"startIndex":202,"endIndex":216},"bulletPreset":"BULLET_DISC_CIRCLE_SQUARE"}},{"insertText":{"location":{"index":216},"text":"\tnested\n"}},{"updateParagraphStyle":{"range":{"startIndex":216,"endIndex":224},"paragraphStyle":{"namedStyleType":"NORMAL_TEXT","lineSpacing":115,"spaceAbove":{"magnitude":0,"unit":"PT"},"spaceBelow":{"magnitude":6,"unit":"PT"}},"fields":"namedStyleType,lineSpacing,spaceAbove,spaceBelow"}},{"updateTextStyle":{"range":{"startIndex":216,"endIndex":224},"textStyle":{"weightedFontFamily":{"fontFamily":"Arial"},"fontSize":{"magnitude":11,"unit":"PT"}},"fields":"weightedFontFamily,fontSize"}},{"updateTextStyle":{"range":{"startIndex":217,"endIndex":223},"textStyle":{"bold":false,"italic":false,"underline":false,"weightedFontFamily":{"fontFamily":"Arial"},"fontSize":{"magnitude":11,"unit":"PT"}},"fields":"bold,italic,underline,weightedFontFamily,fontSize"}},{"createParagraphBullets":{"range":{"startIndex":216,"endIndex":224},"bulletPreset":"BULLET_DISC_CIRCLE_SQUARE"}},{"insertText":{"location":{"index":223},"text":"ordered\n"}},{"updateParagraphStyle":{"range":{"startIndex":223,"endIndex":231},"paragraphStyle":{"namedStyleType":"NORMAL_TEXT","lineSpacing":115,"spaceAbove":{"magnitude":0,"unit":"PT"},"spaceBelow":{"magnitude":6,"unit":"PT"}},"fields":"namedStyleType,lineSpacing,spaceAbove,spaceBelow"}},{"updateTextStyle":{"range":{"startIndex":223,"endIndex":231},"textStyle":{"weightedFontFamily":{"fontFamily":"Arial"},"fontSize":{"magnitude":11,"unit":"PT"}},"fields":"weightedFontFamily,fontSize"}},{"updateTextStyle":{"range":{"startIndex":223,"endIndex":230},"textStyle":{"bold":false,"italic":false,"underline":false,"weightedFontFamily":{"fontFamily":"Arial"},"fontSize":{"magnitude":11,"unit":"PT"}},"fields":"bold,italic,underline,weightedFontFamily,fontSize"}},{"createParagraphBullets":{"range":{"startIndex":223,"endIndex":231},"bulletPreset":"NUMBERED_DECIMAL_ALPHA_ROMAN"}},{"insertText":{"location":{"index":231},"text":"parenthesized\n"}},{"updateParagraphStyle":{"range":{"startIndex":231,"endIndex":245},"paragraphStyle":{"namedStyleType":"NORMAL_TEXT","lineSpacing":115,"spaceAbove":{"magnitude":0,"unit":"PT"},"spaceBelow":{"magnitude":6,"unit":"PT"}},"fields":"namedStyleType,lineSpacing,spaceAbove,spaceBelow"}},{"updateTextStyle":{"range":{"startIndex":231,"endIndex":245},"textStyle":{"weightedFontFamily":{"fontFamily":"Arial"},"fontSize":{"magnitude":11,"unit":"PT"}},"fields":"weightedFontFamily,fontSize"}},{"updateTextStyle":{"range":{"startIndex":231,"endIndex":244},"textStyle":{"bold":false,"italic":false,"underline":false,"weightedFontFamily":{"fontFamily":"Arial"},"fontSize":{"magnitude":11,"unit":"PT"}},"fields":"bold,italic,underline,weightedFontFamily,fontSize"}},{"createParagraphBullets":{"range":{"startIndex":231,"endIndex":245},"bulletPreset":"NUMBERED_DECIMAL_ALPHA_ROMAN_PARENS"}},{"insertTable":{"rows":2,"columns":4,"location":{"index":245}}},{"insertText":{"location":{"index":249},"text":"Left"}},{"updateParagraphStyle":{"range":{"startIndex":249,"endIndex":254},"paragraphStyle":{"namedStyleType":"NORMAL_TEXT","lineSpacing":115,"spaceAbove":{"magnitude":0,"unit":"PT"},"spaceBelow":{"magnitude":0,"unit":"PT"}},"fields":"namedStyleType,lineSpacing,spaceAbove,spaceBelow"}},{"updateTextStyle":{"range":{"startIndex":249,"endIndex":254},"textStyle":{"weightedFontFamily":{"fontFamily":"Arial"},"fontSize":{"magnitude":11,"unit":"PT"}},"fields":"weightedFontFamily,fontSize"}},{"updateTextStyle":{"range":{"startIndex":249,"endIndex":253},"textStyle":{"bold":true,"italic":false,"underline":false,"weightedFontFamily":{"fontFamily":"Arial"},"fontSize":{"magnitude":11,"unit":"PT"}},"fields":"bold,italic,underline,weightedFontFamily,fontSize"}},{"updateTableCellStyle":{"tableRange":{"tableCellLocation":{"tableStartLocation":{"index":246},"rowIndex":0,"columnIndex":0},"rowSpan":1,"columnSpan":1},"tableCellStyle":{"backgroundColor":{"color":{"rgbColor":{"red":0.9450980392156862,"green":0.9529411764705882,"blue":0.9568627450980393}}}},"fields":"backgroundColor"}},{"updateParagraphStyle":{"range":{"startIndex":249,"endIndex":254},"paragraphStyle":{"alignment":"START"},"fields":"alignment"}},{"insertText":{"location":{"index":255},"text":"Center"}},{"updateParagraphStyle":{"range":{"startIndex":255,"endIndex":262},"paragraphStyle":{"namedStyleType":"NORMAL_TEXT","lineSpacing":115,"spaceAbove":{"magnitude":0,"unit":"PT"},"spaceBelow":{"magnitude":0,"unit":"PT"}},"fields":"namedStyleType,lineSpacing,spaceAbove,spaceBelow"}},{"updateTextStyle":{"range":{"startIndex":255,"endIndex":262},"textStyle":{"weightedFontFamily":{"fontFamily":"Arial"},"fontSize":{"magnitude":11,"unit":"PT"}},"fields":"weightedFontFamily,fontSize"}},{"updateTextStyle":{"range":{"startIndex":255,"endIndex":261},"textStyle":{"bold":true,"italic":false,"underline":false,"weightedFontFamily":{"fontFamily":"Arial"},"fontSize":{"magnitude":11,"unit":"PT"}},"fields":"bold,italic,underline,weightedFontFamily,fontSize"}},{"updateTableCellStyle":{"tableRange":{"tableCellLocation":{"tableStartLocation":{"index":246},"rowIndex":0,"columnIndex":1},"rowSpan":1,"columnSpan":1},"tableCellStyle":{"backgroundColor":{"color":{"rgbColor":{"red":0.9450980392156862,"green":0.9529411764705882,"blue":0.9568627450980393}}}},"fields":"backgroundColor"}},{"updateParagraphStyle":{"range":{"startIndex":255,"endIndex":262},"paragraphStyle":{"alignment":"CENTER"},"fields":"alignment"}},{"insertText":{"location":{"index":263},"text":"Right"}},{"updateParagraphStyle":{"range":{"startIndex":263,"endIndex":269},"paragraphStyle":{"namedStyleType":"NORMAL_TEXT","lineSpacing":115,"spaceAbove":{"magnitude":0,"unit":"PT"},"spaceBelow":{"magnitude":0,"unit":"PT"}},"fields":"namedStyleType,lineSpacing,spaceAbove,spaceBelow"}},{"updateTextStyle":{"range":{"startIndex":263,"endIndex":269},"textStyle":{"weightedFontFamily":{"fontFamily":"Arial"},"fontSize":{"magnitude":11,"unit":"PT"}},"fields":"weightedFontFamily,fontSize"}},{"updateTextStyle":{"range":{"startIndex":263,"endIndex":268},"textStyle":{"bold":true,"italic":false,"underline":false,"weightedFontFamily":{"fontFamily":"Arial"},"fontSize":{"magnitude":11,"unit":"PT"}},"fields":"bold,italic,underline,weightedFontFamily,fontSize"}},{"updateTableCellStyle":{"tableRange":{"tableCellLocation":{"tableStartLocation":{"index":246},"rowIndex":0,"columnIndex":2},"rowSpan":1,"columnSpan":1},"tableCellStyle":{"backgroundColor":{"color":{"rgbColor":{"red":0.9450980392156862,"green":0.9529411764705882,"blue":0.9568627450980393}}}},"fields":"backgroundColor"}},{"updateParagraphStyle":{"range":{"startIndex":263,"endIndex":269},"paragraphStyle":{"alignment":"END"},"fields":"alignment"}},{"insertText":{"location":{"index":270},"text":"Unspecified"}},{"updateParagraphStyle":{"range":{"startIndex":270,"endIndex":282},"paragraphStyle":{"namedStyleType":"NORMAL_TEXT","lineSpacing":115,"spaceAbove":{"magnitude":0,"unit":"PT"},"spaceBelow":{"magnitude":0,"unit":"PT"}},"fields":"namedStyleType,lineSpacing,spaceAbove,spaceBelow"}},{"updateTextStyle":{"range":{"startIndex":270,"endIndex":282},"textStyle":{"weightedFontFamily":{"fontFamily":"Arial"},"fontSize":{"magnitude":11,"unit":"PT"}},"fields":"weightedFontFamily,fontSize"}},{"updateTextStyle":{"range":{"startIndex":270,"endIndex":281},"textStyle":{"bold":true,"italic":false,"underline":false,"weightedFontFamily":{"fontFamily":"Arial"},"fontSize":{"magnitude":11,"unit":"PT"}},"fields":"bold,italic,underline,weightedFontFamily,fontSize"}},{"updateTableCellStyle":{"tableRange":{"tableCellLocation":{"tableStartLocation":{"index":246},"rowIndex":0,"columnIndex":3},"rowSpan":1,"columnSpan":1},"tableCellStyle":{"backgroundColor":{"color":{"rgbColor":{"red":0.9450980392156862,"green":0.9529411764705882,"blue":0.9568627450980393}}}},"fields":"backgroundColor"}},{"updateParagraphStyle":{"range":{"startIndex":270,"endIndex":282},"paragraphStyle":{"alignment":"START"},"fields":"alignment"}},{"insertText":{"location":{"index":284},"text":"cell A界é🚀"}},{"updateParagraphStyle":{"range":{"startIndex":284,"endIndex":296},"paragraphStyle":{"namedStyleType":"NORMAL_TEXT","lineSpacing":115,"spaceAbove":{"magnitude":0,"unit":"PT"},"spaceBelow":{"magnitude":0,"unit":"PT"}},"fields":"namedStyleType,lineSpacing,spaceAbove,spaceBelow"}},{"updateTextStyle":{"range":{"startIndex":284,"endIndex":296},"textStyle":{"weightedFontFamily":{"fontFamily":"Arial"},"fontSize":{"magnitude":11,"unit":"PT"}},"fields":"weightedFontFamily,fontSize"}},{"updateTextStyle":{"range":{"startIndex":284,"endIndex":295},"textStyle":{"bold":false,"italic":false,"underline":false,"weightedFontFamily":{"fontFamily":"Arial"},"fontSize":{"magnitude":11,"unit":"PT"}},"fields":"bold,italic,underline,weightedFontFamily,fontSize"}},{"updateParagraphStyle":{"range":{"startIndex":284,"endIndex":296},"paragraphStyle":{"alignment":"START"},"fields":"alignment"}},{"insertText":{"location":{"index":297},"text":"centered"}},{"updateParagraphStyle":{"range":{"startIndex":297,"endIndex":306},"paragraphStyle":{"namedStyleType":"NORMAL_TEXT","lineSpacing":115,"spaceAbove":{"magnitude":0,"unit":"PT"},"spaceBelow":{"magnitude":0,"unit":"PT"}},"fields":"namedStyleType,lineSpacing,spaceAbove,spaceBelow"}},{"updateTextStyle":{"range":{"startIndex":297,"endIndex":306},"textStyle":{"weightedFontFamily":{"fontFamily":"Arial"},"fontSize":{"magnitude":11,"unit":"PT"}},"fields":"weightedFontFamily,fontSize"}},{"updateTextStyle":{"range":{"startIndex":297,"endIndex":305},"textStyle":{"bold":false,"italic":false,"underline":false,"weightedFontFamily":{"fontFamily":"Arial"},"fontSize":{"magnitude":11,"unit":"PT"}},"fields":"bold,italic,underline,weightedFontFamily,fontSize"}},{"updateParagraphStyle":{"range":{"startIndex":297,"endIndex":306},"paragraphStyle":{"alignment":"CENTER"},"fields":"alignment"}},{"insertText":{"location":{"index":307},"text":"table link"}},{"updateParagraphStyle":{"range":{"startIndex":307,"endIndex":318},"paragraphStyle":{"namedStyleType":"NORMAL_TEXT","lineSpacing":115,"spaceAbove":{"magnitude":0,"unit":"PT"},"spaceBelow":{"magnitude":0,"unit":"PT"}},"fields":"namedStyleType,lineSpacing,spaceAbove,spaceBelow"}},{"updateTextStyle":{"range":{"startIndex":307,"endIndex":318},"textStyle":{"weightedFontFamily":{"fontFamily":"Arial"},"fontSize":{"magnitude":11,"unit":"PT"}},"fields":"weightedFontFamily,fontSize"}},{"updateTextStyle":{"range":{"startIndex":307,"endIndex":317},"textStyle":{"bold":false,"italic":false,"underline":true,"weightedFontFamily":{"fontFamily":"Arial"},"fontSize":{"magnitude":11,"unit":"PT"},"foregroundColor":{"color":{"rgbColor":{"red":0.06666666666666667,"green":0.3333333333333333,"blue":0.8}}},"link":{"url":"https://example.test/table"}},"fields":"bold,italic,underline,weightedFontFamily,fontSize,foregroundColor,link"}},{"updateParagraphStyle":{"range":{"startIndex":307,"endIndex":318},"paragraphStyle":{"alignment":"END"},"fields":"alignment"}},{"insertText":{"location":{"index":319},"text":"plain"}},{"updateParagraphStyle":{"range":{"startIndex":319,"endIndex":325},"paragraphStyle":{"namedStyleType":"NORMAL_TEXT","lineSpacing":115,"spaceAbove":{"magnitude":0,"unit":"PT"},"spaceBelow":{"magnitude":0,"unit":"PT"}},"fields":"namedStyleType,lineSpacing,spaceAbove,spaceBelow"}},{"updateTextStyle":{"range":{"startIndex":319,"endIndex":325},"textStyle":{"weightedFontFamily":{"fontFamily":"Arial"},"fontSize":{"magnitude":11,"unit":"PT"}},"fields":"weightedFontFamily,fontSize"}},{"updateTextStyle":{"range":{"startIndex":319,"endIndex":324},"textStyle":{"bold":false,"italic":false,"underline":false,"weightedFontFamily":{"fontFamily":"Arial"},"fontSize":{"magnitude":11,"unit":"PT"}},"fields":"bold,italic,underline,weightedFontFamily,fontSize"}},{"updateParagraphStyle":{"range":{"startIndex":319,"endIndex":325},"paragraphStyle":{"alignment":"START"},"fields":"alignment"}}]}
+      #|
+    ),
+  )
+}
+
+///|
+async test "identical Markdown produces the same request bytes and sequence" {
+  let first = request_sequence_snapshot(capture_complete_request_contract())
+  let second = request_sequence_snapshot(capture_complete_request_contract())
+  assert_eq(first, second)
+}

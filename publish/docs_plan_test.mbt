@@ -163,6 +163,60 @@ test "keeps combining marks at one UTF-16 unit each" {
 }
 
 ///|
+test "UTF-16 matrix covers every published text context" {
+  let markdown =
+    #|plain A界é🚀
+    #|
+    #|**formatted A界é🚀** and `inline A界é🚀`
+    #|
+    #|```text
+    #|fenced A界é🚀
+    #|```
+    #|
+    #|- list A界é🚀
+    #|
+    #|| Value |
+    #|| --- |
+    #|| cell A界é🚀 |
+  let snapshot = match @pumd.render_markdown(markdown) {
+    Ok(document) => compile_docs_update_plan(document).to_snapshot()
+    Err(_) => abort("UTF-16 matrix fixture must render")
+  }
+  inspect(
+    snapshot,
+    content=(
+      #|insert-text 1 "plain A界é🚀\n"
+      #|paragraph-style 1..14 normal font=Arial size=11 line=115 before=0 after=6
+      #|text-style 1..13 font=Arial size=11
+      #|insert-text 14 "formatted A界é🚀 and inline A界é🚀\n"
+      #|paragraph-style 14..49 normal font=Arial size=11 line=115 before=0 after=6
+      #|text-style 14..30 bold font=Arial size=11
+      #|text-style 30..35 font=Arial size=11
+      #|text-style 35..48 font=Roboto Mono size=10 background=#F1F3F4
+      #|insert-text 49 "fenced A界é🚀\n"
+      #|paragraph-style 49..63 normal font=Roboto Mono size=10 line=100 before=0 after=0
+      #|text-style 49..62 font=Roboto Mono size=10 background=#F1F3F4
+      #|insert-text 63 "\n"
+      #|paragraph-style 63..64 normal font=Roboto Mono size=10 line=100 before=0 after=0
+      #|insert-text 64 "list A界é🚀\n"
+      #|paragraph-style 64..76 normal font=Arial size=11 line=115 before=0 after=6
+      #|text-style 64..75 font=Arial size=11
+      #|paragraph-bullets 64..76 bullet level=0
+      #|insert-table 76 rows=2 columns=1
+      #|insert-cell-text table=76 row=0 column=0 "Value"
+      #|cell-paragraph-style table=76 row=0 column=0 0..6 normal font=Arial size=11 line=115 before=0 after=0
+      #|cell-text-style table=76 row=0 column=0 0..5 bold font=Arial size=11
+      #|cell-style table=76 row=0 column=0 alignment=unspecified background=#F1F3F4
+      #|insert-cell-text table=76 row=1 column=0 "cell A界é🚀"
+      #|cell-paragraph-style table=76 row=1 column=0 0..12 normal font=Arial size=11 line=115 before=0 after=0
+      #|cell-text-style table=76 row=1 column=0 0..11 font=Arial size=11
+      #|cell-style table=76 row=1 column=0 alignment=unspecified
+      #|
+    ),
+  )
+}
+
+///|
 test "planning reports the index of an empty table after valid tables" {
   let document = match
     @pumd.render_markdown(
@@ -203,5 +257,17 @@ test "planning rejects a table whose rows have no cells" {
   match prepare_docs_update_plan(document) {
     Err(TableWithoutColumns(table_index=0)) => ()
     _ => assert_true(false)
+  }
+}
+
+///|
+test "planning rejects ordered-list starts Google Docs cannot write" {
+  let document = match @pumd.render_markdown("3. third") {
+    Ok(document) => document
+    Err(_) => abort("ordered-list fixture must render")
+  }
+  match prepare_docs_update_plan(document) {
+    Err(UnsupportedOrderedListStart(start=3)) => ()
+    _ => fail("non-default ordered-list start must fail before HTTP")
   }
 }
