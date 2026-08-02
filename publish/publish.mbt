@@ -72,6 +72,22 @@ fn format_document_identity(created_document : PublishSuccess?) -> String {
 }
 
 ///|
+fn response_decode_recovery_guidance(
+  created_document : PublishSuccess?,
+) -> String {
+  let inspection_target = match created_document {
+    Some(_) => "Google Drive and the created document"
+    None => "Google Drive"
+  }
+  " A remote mutation may have succeeded; inspect " +
+  inspection_target +
+  " before retrying. pumd will not retry automatically."
+}
+
+///|
+let generic_remote_recovery_guidance = " Check the reported HTTP status: for a 5xx response, wait and retry later; otherwise report the status to the pumd maintainer before retrying."
+
+///|
 fn classified_google_error(
   stage : PublicationRemoteStage,
   kind : GoogleErrorKind?,
@@ -124,7 +140,8 @@ pub fn PublishError::user_message(self : PublishError) -> String {
       ": " +
       guidance
     }
-    Creation(message) => "document creation failed: " + message
+    Creation(message) =>
+      "document creation failed: " + message + generic_remote_recovery_guidance
     AmbiguousCreation =>
       "document creation had an ambiguous transport outcome. pumd will not retry automatically; inspect Google Drive before retrying."
     AmbiguousPopulation(created_document) =>
@@ -135,7 +152,8 @@ pub fn PublishError::user_message(self : PublishError) -> String {
       "document population failed after creation" +
       format_document_identity(Some(created_document)) +
       ": " +
-      message
+      message +
+      generic_remote_recovery_guidance
     Permission(stage~, created_document~) =>
       remote_stage_name(stage) +
       " permission failed" +
@@ -151,7 +169,8 @@ pub fn PublishError::user_message(self : PublishError) -> String {
       " response decoding failed" +
       format_document_identity(created_document) +
       ": " +
-      message
+      message +
+      response_decode_recovery_guidance(created_document)
   }
 }
 

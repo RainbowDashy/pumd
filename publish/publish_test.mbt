@@ -367,13 +367,17 @@ async test "malformed creation response never guesses an ID or populates" {
     fn() { Ok("test-token") },
     fake,
   )
-  guard result
-    is Err(
-      ResponseDecode(stage=DocumentCreation, message~, created_document=None)
-    ) else {
+  guard result is Err(error) else { assert_true(false) }
+  guard error
+    is ResponseDecode(stage=DocumentCreation, message~, created_document=None) else {
     assert_true(false)
   }
   assert_true(!message.contains("decode-secret"))
+  let user_message = error.user_message()
+  assert_true(user_message.contains("remote mutation may have succeeded"))
+  assert_true(user_message.contains("inspect Google Drive before retrying"))
+  assert_true(user_message.contains("will not retry automatically"))
+  assert_true(!user_message.contains("decode-secret"))
   assert_eq(fake.requests.length(), 1)
 }
 
@@ -415,8 +419,11 @@ async test "generic creation HTTP failure is sanitized and never populates" {
   )
   guard result is Err(error) else { assert_true(false) }
   guard error is Creation(_) else { assert_true(false) }
-  assert_true(error.user_message().contains("HTTP 500"))
-  assert_true(!error.user_message().contains("server-secret"))
+  let user_message = error.user_message()
+  assert_true(user_message.contains("HTTP 500"))
+  assert_true(user_message.contains("for a 5xx response, wait and retry later"))
+  assert_true(user_message.contains("report the status to the pumd maintainer"))
+  assert_true(!user_message.contains("server-secret"))
   assert_eq(fake.requests.length(), 1)
 }
 
@@ -445,8 +452,11 @@ async test "generic population HTTP failure retains publication identity" {
     content="https://docs.google.com/document/d/server-1/edit",
   )
   assert_true(message.contains("HTTP 500"))
+  let user_message = error.user_message()
+  assert_true(user_message.contains("for a 5xx response, wait and retry later"))
+  assert_true(user_message.contains("report the status to the pumd maintainer"))
   assert_true(!message.contains("server-secret"))
-  assert_true(!error.user_message().contains("server-secret"))
+  assert_true(!user_message.contains("server-secret"))
   assert_eq(fake.requests.length(), 2)
   assert_true(fake.requests[1].url.has_suffix(":batchUpdate"))
 }
@@ -574,13 +584,12 @@ async test "batch response decoding failure keeps its own stage" {
     fn() { Ok("test-token") },
     fake,
   )
-  guard result
-    is Err(
-      ResponseDecode(
-        stage=DocumentPopulation,
-        message~,
-        created_document=Some(created_document)
-      )
+  guard result is Err(error) else { assert_true(false) }
+  guard error
+    is ResponseDecode(
+      stage=DocumentPopulation,
+      message~,
+      created_document=Some(created_document)
     ) else {
     assert_true(false)
   }
@@ -590,6 +599,14 @@ async test "batch response decoding failure keeps its own stage" {
     created_document.url,
     content="https://docs.google.com/document/d/decode-1/edit",
   )
+  let user_message = error.user_message()
+  assert_true(user_message.contains("remote mutation may have succeeded"))
+  assert_true(
+    user_message.contains(
+      "inspect Google Drive and the created document before retrying",
+    ),
+  )
+  assert_true(user_message.contains("will not retry automatically"))
   assert_eq(fake.requests.length(), 2)
 }
 
