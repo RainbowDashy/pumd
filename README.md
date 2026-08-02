@@ -197,30 +197,30 @@ Errors are classified without printing credential or access-token contents.
 ### Opt-in live integration test
 
 The live smoke test is deliberately not part of the default test suite. Running
-it without `-ValidateFixtureOnly` **creates and leaves a real Google Doc in the
-authenticated account's Drive**. It publishes a temporary mixed Markdown file
-through the actual native CLI, reads the resulting document back through the
-narrow Docs adapter, verifies representative text and native structure, and
+it **creates and leaves a real Google Doc in the authenticated account's
+Drive**. The MoonBit test publishes a mixed Markdown fixture through the
+production ADC and Google Docs path, reads the resulting document back through
+the narrow Docs adapter, verifies representative text and native structure, and
 prints the real document URL:
 
 ```console
-pwsh -NoProfile -File scripts/live-smoke.ps1
+moon build --target native cmd/pumd
+moon test --target native -p rainbowdashy/pumd/publish --include-skipped --filter "live smoke publishes and reads a real Google Doc"
 ```
 
-On success, its final line has this form:
+On success, its output includes lines with this form:
 
 ```text
+REAL GOOGLE DOC CREATED: https://docs.google.com/document/d/REAL_DOCUMENT_ID/edit
 Live smoke passed: https://docs.google.com/document/d/REAL_DOCUMENT_ID/edit
 ```
 
-PowerShell 7 is preferred. If only Windows PowerShell 5.1 is available, use:
+To validate only the MoonBit fixture's rendering and Google Docs update plan,
+without credentials, network access, or a real Google Doc, run:
 
 ```console
-powershell -ExecutionPolicy Bypass -File scripts/live-smoke.ps1
+moon test --target native -p rainbowdashy/pumd/publish --filter "live smoke fixture renders and plans locally"
 ```
-
-To validate only the local fixture without credentials, network access, or a
-real Google Doc, add `-ValidateFixtureOnly` to either command.
 
 ## Version-one success criteria
 
