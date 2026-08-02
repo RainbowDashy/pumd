@@ -55,6 +55,9 @@ jobs:
       - name: Record the toolchain
         run: moon version --all
 
+      - name: Update the Mooncakes registry
+        run: moon update
+
       - name: Resolve dependencies and check native packages
         run: moon check --target native --deny-warn
 
