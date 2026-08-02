@@ -1,0 +1,67 @@
+///|
+pub struct PipeRead {
+  inner : @async_pipe.PipeRead
+}
+
+///|
+pub struct PipeWrite {
+  inner : @async_pipe.PipeWrite
+}
+
+///|
+pub fn pipe() -> (PipeRead, PipeWrite) raise {
+  let (r, w) = @async_pipe.pipe()
+  (PipeRead::{ inner: r }, PipeWrite::{ inner: w })
+}
+
+///|
+pub fn PipeRead::close(self : PipeRead) -> Unit {
+  self.inner.close()
+}
+
+///|
+pub fn PipeWrite::close(self : PipeWrite) -> Unit {
+  self.inner.close()
+}
+
+///|
+pub fn PipeRead::fd(self : PipeRead) -> @async_types.Fd {
+  self.inner.fd()
+}
+
+///|
+pub fn PipeWrite::fd(self : PipeWrite) -> @async_types.Fd {
+  self.inner.fd()
+}
+
+///|
+pub impl @io.Reader for PipeRead with fn _get_internal_buffer(self) {
+  @io.Reader::_get_internal_buffer(self.inner)
+}
+
+///|
+pub impl @io.Reader for PipeRead with fn _direct_read(
+  self,
+  buf,
+  offset~,
+  max_len~,
+) {
+  @io.Reader::_direct_read(self.inner, buf, offset~, max_len~)
+}
+
+///|
+pub impl @process.ProcessInput for PipeRead with fn _process_input_native(self) {
+  self.inner
+}
+
+///|
+pub impl @io.Writer for PipeWrite with fn write_once(self, buf, offset~, len~) {
+  @io.Writer::write_once(self.inner, buf, offset~, len~)
+}
+
+///|
+pub impl @process.ProcessOutput for PipeWrite with fn _process_output_native(
+  self,
+) {
+  self.inner
+}

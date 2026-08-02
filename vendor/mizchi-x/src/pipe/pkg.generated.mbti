@@ -1,0 +1,34 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "mizchi/x/pipe"
+
+import {
+  "moonbitlang/async/io",
+  "moonbitlang/async/types",
+}
+
+// Values
+pub fn pipe() -> (PipeRead, PipeWrite) raise
+
+// Errors
+
+// Types and methods
+pub struct PipeRead {
+  inner : @moonbitlang/async/pipe.PipeRead
+}
+pub fn PipeRead::close(Self) -> Unit
+pub fn PipeRead::fd(Self) -> @types.Fd
+pub impl @mizchi/x/process.ProcessInput for PipeRead
+pub impl @io.Reader for PipeRead
+
+pub struct PipeWrite {
+  inner : @moonbitlang/async/pipe.PipeWrite
+}
+pub fn PipeWrite::close(Self) -> Unit
+pub fn PipeWrite::fd(Self) -> @types.Fd
+pub impl @mizchi/x/process.ProcessOutput for PipeWrite
+pub impl @io.Writer for PipeWrite
+
+// Type aliases
+
+// Traits
+

@@ -1,0 +1,28 @@
+import {
+  "moonbitlang/async",
+  "moonbitlang/async/fs" @async_fs,
+  "moonbitlang/async/process" @async_process,
+  "moonbitlang/async/io" @async_io,
+  "moonbitlang/async/js_async",
+  "moonbitlang/async/signal" @async_signal,
+  "moonbitlang/core/env",
+  "mizchi/x/fs",
+  "mizchi/x/signal",
+  "mizchi/x/socket",
+}
+
+warnings = "-0029-0014-0024-0009-0067"
+
+options(
+  "native-stub": [ "process_native.c" ],
+  targets: {
+    "process_common.mbt": [ "native", "wasm" ],
+    "process_js.mbt": [ "js" ],
+    "process_native.mbt": [ "native" ],
+    "process_native_test.mbt": [ "native" ],
+    "process_test.mbt": [ "native", "js" ],
+    "process_wasm.mbt": [ "wasm" ],
+    "process_wasm_test.mbt": [ "wasm" ],
+    "process_wasmgc.mbt": [ "wasm-gc" ],
+  },
+)

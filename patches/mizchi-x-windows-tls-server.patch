@@ -1,0 +1,43 @@
+diff --git a/src/tls/tls_native.mbt b/src/tls/tls_native.mbt
+index 6ea8591..f3da2b9 100644
+--- a/src/tls/tls_native.mbt
++++ b/src/tls/tls_native.mbt
+@@ -15,0 +16 @@ fn to_async_trust(trust : TrustedRoot) -> @async_tls.TrustedRoot {
++#cfg(not(platform="windows"))
+@@ -89,0 +91 @@ pub async fn[R : @io.Reader, W : @io.Writer] Tls::client_from_pair(
++#cfg(not(platform="windows"))
+@@ -109,0 +112,10 @@ pub async fn[Inner : @io.Reader + @io.Writer] Tls::server(
++#cfg(platform="windows")
++pub async fn[Inner : @io.Reader + @io.Writer] Tls::server(
++  inner : Inner,
++  pfx_file~ : String,
++) -> Tls {
++  Tls::server_from_pair(inner, inner, pfx_file~)
++}
++
++///|
++#cfg(not(platform="windows"))
+@@ -130,0 +143,13 @@ pub async fn[R : @io.Reader, W : @io.Writer] Tls::server_from_pair(
++///|
++#cfg(platform="windows")
++pub async fn[R : @io.Reader, W : @io.Writer] Tls::server_from_pair(
++  reader : R,
++  writer : W,
++  pfx_file~ : String,
++) -> Tls {
++  let inner = @async_tls.Tls::server_from_pair(reader, writer, pfx_file~) catch {
++    err => raise_tls_error(err)
++  }
++  Tls::{ inner, }
++}
++
+diff --git a/src/tls/pkg.generated.mbti b/src/tls/pkg.generated.mbti
+index 7aeb9b8..0f08661 100644
+--- a/src/tls/pkg.generated.mbti
++++ b/src/tls/pkg.generated.mbti
+@@ -35 +35 @@ pub fn Tls::get_peer_certificate(Self) -> Bytes? raise
+-pub async fn[Inner : @io.Reader + @io.Writer] Tls::server(Inner, private_key_file~ : String, private_key_type~ : X509FileType, certificate_file~ : String, certificate_type~ : X509FileType) -> Self
++pub async fn[Inner : @io.Reader + @io.Writer] Tls::server(Inner, pfx_file~ : String) -> Self
+@@ -37 +37 @@ pub fn Tls::server_endpoint_channel_binding(Self) -> Bytes raise
+-pub async fn[R : @io.Reader, W : @io.Writer] Tls::server_from_pair(R, W, private_key_file~ : String, private_key_type~ : X509FileType, certificate_file~ : String, certificate_type~ : X509FileType) -> Self
++pub async fn[R : @io.Reader, W : @io.Writer] Tls::server_from_pair(R, W, pfx_file~ : String) -> Self
