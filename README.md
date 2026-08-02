@@ -111,8 +111,18 @@ the document ID and edit URL printed by that process, then reads back that same
 Google Doc. It requires ADC and writes to Google:
 
 ```console
+pwsh -NoProfile -File scripts/live-smoke.ps1
+```
+
+PowerShell 7 is preferred. If only Windows PowerShell 5.1 is available, use
+the compatible fallback:
+
+```console
 powershell -ExecutionPolicy Bypass -File scripts/live-smoke.ps1
 ```
+
+Either shell can validate the fixture without creating a Google Doc by adding
+`-ValidateFixtureOnly`.
 
 ### Make every write inspectable
 
