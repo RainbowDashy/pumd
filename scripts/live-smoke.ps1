@@ -1,19 +1,15 @@
 [CmdletBinding()]
 param(
-  [string]$Moon = "moon"
+  [string]$Moon = "moon",
+  [switch]$ValidateFixtureOnly
 )
 
 $ErrorActionPreference = "Stop"
 
-$repository = Split-Path -Parent $PSScriptRoot
-$temporaryMarkdown = Join-Path ([System.IO.Path]::GetTempPath()) (
-  "pumd-live-smoke-" + [System.Guid]::NewGuid().ToString("N") + ".md"
-)
-
 # This fixture deliberately exercises every supported native construct, including
 # both kinds of link the Markdown renderer accepts.
 $markdown = @'
-# Pumd live smoke heading 1 🚀
+# Pumd live smoke heading 1 __PUMD_ROCKET__
 
 ## Pumd live smoke heading 2
 
@@ -28,7 +24,7 @@ $markdown = @'
 A **strong** and *emphasized* [direct link](https://example.com/direct) plus a [reference link][reference-target] with `inline code`.
 Soft break stays in this paragraph.
 Hard break follows here.__PUMD_HARD_BREAK__
-第二行 with é.
+__PUMD_CJK_LINE__ with e__PUMD_COMBINING_ACUTE__.
 
 ```text
 fenced code
@@ -45,7 +41,72 @@ fenced code
 
 [reference-target]: https://example.com/reference "Reference link"
 '@
+$rocket = [char]::ConvertFromUtf32(0x1F680)
+$cjkLine = -join ([char]0x7B2C, [char]0x4E8C, [char]0x884C)
+$combiningAcute = [char]0x0301
+$markdown = $markdown.Replace('__PUMD_ROCKET__', $rocket)
+$markdown = $markdown.Replace('__PUMD_CJK_LINE__', $cjkLine)
+$markdown = $markdown.Replace('__PUMD_COMBINING_ACUTE__', $combiningAcute)
 $markdown = $markdown.Replace('__PUMD_HARD_BREAK__', '  ')
+
+if ($ValidateFixtureOnly) {
+  $expectedUnicodeLine = "$cjkLine with e$combiningAcute."
+  $unicodeLines = @($markdown -split "`r?`n" | Where-Object { $_ -like '*with e*' })
+  if ($unicodeLines.Count -ne 1 -or $unicodeLines[0] -cne $expectedUnicodeLine) {
+    throw "Unicode fixture line did not match the expected content."
+  }
+
+  $actualLineCodeUnits = @($unicodeLines[0].ToCharArray() | ForEach-Object { [int]$_ })
+  $expectedLineCodeUnits = @(
+    0x7B2C, 0x4E8C, 0x884C, 0x0020, 0x0077, 0x0069,
+    0x0074, 0x0068, 0x0020, 0x0065, 0x0301, 0x002E
+  )
+  if ($actualLineCodeUnits.Count -ne $expectedLineCodeUnits.Count) {
+    throw "Unicode fixture line had $($actualLineCodeUnits.Count) code units; expected $($expectedLineCodeUnits.Count)."
+  }
+  for ($index = 0; $index -lt $expectedLineCodeUnits.Count; $index++) {
+    if ($actualLineCodeUnits[$index] -ne $expectedLineCodeUnits[$index]) {
+      throw "Unicode fixture line code unit $index was $($actualLineCodeUnits[$index].ToString('X4')); expected $($expectedLineCodeUnits[$index].ToString('X4'))."
+    }
+  }
+
+  $privateUseCodeUnits = @(
+    $markdown.ToCharArray() | Where-Object {
+      [int]$_ -ge 0xE000 -and [int]$_ -le 0xF8FF
+    }
+  )
+  if ($privateUseCodeUnits.Count -ne 0) {
+    $privateUseCodeUnit = [int]$privateUseCodeUnits[0]
+    throw "Fixture contains BMP private-use code unit $($privateUseCodeUnit.ToString('X4')), which Google Docs strips."
+  }
+
+  $rocketCodeUnits = @($rocket.ToCharArray() | ForEach-Object { [int]$_ })
+  if (
+    $rocketCodeUnits.Count -ne 2 -or
+    $rocketCodeUnits[0] -ne 0xD83D -or
+    $rocketCodeUnits[1] -ne 0xDE80 -or
+    -not $markdown.Contains("# Pumd live smoke heading 1 $rocket")
+  ) {
+    throw "Rocket fixture did not contain the expected UTF-16 surrogate pair."
+  }
+
+  $hardBreakLines = @($markdown -split "`r?`n" | Where-Object { $_ -like 'Hard break follows here.*' })
+  if ($hardBreakLines.Count -ne 1 -or $hardBreakLines[0] -cne 'Hard break follows here.  ') {
+    throw "Hard-break fixture did not retain its two trailing spaces."
+  }
+
+  if ($markdown.Contains('__PUMD_')) {
+    throw "Fixture still contains an unreplaced sentinel token."
+  }
+
+  Write-Host "Live smoke fixture validation passed."
+  return
+}
+
+$repository = Split-Path -Parent $PSScriptRoot
+$temporaryMarkdown = Join-Path ([System.IO.Path]::GetTempPath()) (
+  "pumd-live-smoke-" + [System.Guid]::NewGuid().ToString("N") + ".md"
+)
 
 try {
   [System.IO.File]::WriteAllText(
