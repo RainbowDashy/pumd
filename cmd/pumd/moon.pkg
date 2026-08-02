@@ -2,9 +2,9 @@ import {
   "rainbowdashy/pumd/cmd/pumd/args",
   "rainbowdashy/pumd/publish",
   "moonbitlang/async",
-  "mizchi/x/fs",
-  "mizchi/x/stdio",
-  "mizchi/x/sys",
+  "moonbitlang/async/stdio",
+  "moonbitlang/x/fs",
+  "moonbitlang/x/sys",
 }
 
 pkgtype(kind: "executable")

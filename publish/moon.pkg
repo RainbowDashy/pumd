@@ -9,8 +9,9 @@ import {
 
 import {
   "moonbitlang/async",
-  "mizchi/x/fs",
-  "mizchi/x/process",
+  "moonbitlang/async/fs" @async_fs,
+  "moonbitlang/async/process",
+  "moonbitlang/x/fs",
 } for "test"
 
 import {

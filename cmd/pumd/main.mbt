@@ -7,9 +7,9 @@ async fn report_failure(message : String) -> Unit {
 ///|
 async fn publish_file(path : String) -> Unit {
   match
-    @publish.publish_path_with_adc(path, async fn(source_path) {
-      let source = @fs.read_file(source_path).text() catch {
-        error => return Err(error.to_string())
+    @publish.publish_path_with_adc(path, fn(source_path) {
+      let source = @fs.read_file_to_string(source_path) catch {
+        @fs.IOError(message) => return Err(message)
       }
       Ok(source)
     }) {

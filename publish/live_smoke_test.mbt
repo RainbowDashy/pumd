@@ -68,12 +68,12 @@ fn parse_cli_publish_success(output : String) -> PublishSuccess? {
 }
 
 ///|
-async fn native_pumd_binary() -> Result[String, String] {
+fn native_pumd_binary() -> Result[String, String] {
   let candidates = [
     "_build/native/debug/build/rainbowdashy/pumd/cmd/pumd/pumd.exe", "_build/native/debug/build/rainbowdashy/pumd/cmd/pumd/pumd",
   ]
   for candidate in candidates {
-    if @fs.exists(candidate) {
+    if @fs.path_exists(candidate) {
       return Ok(candidate)
     }
   }
@@ -89,9 +89,9 @@ async fn run_publish_cli_in_directory(
   temporary_directory : String,
 ) -> Result[PublishSuccess, String] {
   let markdown_path = temporary_directory + "/pumd-live-smoke.md"
-  @fs.write_file(markdown_path, markdown) catch {
-    error =>
-      return Err("could not write live smoke Markdown: " + error.to_string())
+  @fs.write_string_to_file(markdown_path, markdown) catch {
+    @fs.IOError(message) =>
+      return Err("could not write live smoke Markdown: " + message)
   }
   let (exit_code, stdout, stderr) = @process.collect_output(pumd, [
     "publish", markdown_path,
@@ -124,12 +124,12 @@ async fn run_publish_cli(markdown : String) -> Result[PublishSuccess, String] {
     Ok(path) => path
     Err(message) => return Err(message)
   }
-  let temporary_directory = @fs.tmpdir(prefix="pumd-live-smoke-") catch {
+  let temporary_directory = @async_fs.tmpdir(prefix="pumd-live-smoke-") catch {
     error =>
       return Err("could not create live smoke directory: " + error.to_string())
   }
   let result = run_publish_cli_in_directory(pumd, markdown, temporary_directory)
-  @fs.rmdir(temporary_directory, recursive=true) catch {
+  @async_fs.rmdir(temporary_directory, recursive=true) catch {
     _ => ()
   }
   result

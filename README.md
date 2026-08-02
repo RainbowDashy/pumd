@@ -91,11 +91,15 @@ moonc v0.10.5+5e7afb0c0 (2026-07-27)
 
 The direct dependency contract in `moon.mod` is pinned exactly to:
 
-- `mizchi/x@0.5.2` (resolved to the vendored workspace copy, with the recorded
-  native Windows compatibility patches)
+- `moonbitlang/x@0.4.46`
 - `ryota0624/googleauth@0.2.0`
 - `ryota0624/googleapis@0.4.1`
 - `moonbitlang/async@0.20.3`
+
+Project-owned code prefers `moonbitlang/x` for filesystem and system helpers
+and `moonbitlang/async` for asynchronous I/O. The pinned Google libraries still
+depend transitively on `mizchi/x@0.5.2`; `moon.work` resolves those imports to
+the vendored copy with the recorded native Windows compatibility patches.
 
 Other MoonBit targets and other dependency versions are not part of the
 validated Milestone 2 contract.
