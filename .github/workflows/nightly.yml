@@ -196,9 +196,9 @@ jobs:
         run: |
           built_at="$(date -u '+%Y-%m-%d %H:%M UTC')"
           notes="$(printf 'Automated nightly build from main.\n\nCommit: %s\nBuilt: %s\n\nThis prerelease is replaced in place and may be unstable.' "$GITHUB_SHA" "$built_at")"
-          if gh release view nightly > /dev/null 2>&1; then
-            gh release upload nightly dist/* --clobber
-            gh release edit nightly --title 'pumd nightly' --notes "$notes" --prerelease
+          if gh release view nightly --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload nightly dist/* --clobber --repo "$GITHUB_REPOSITORY"
+            gh release edit nightly --repo "$GITHUB_REPOSITORY" --title 'pumd nightly' --notes "$notes" --prerelease
           else
-            gh release create nightly dist/* --verify-tag --title 'pumd nightly' --notes "$notes" --prerelease
+            gh release create nightly dist/* --repo "$GITHUB_REPOSITORY" --verify-tag --title 'pumd nightly' --notes "$notes" --prerelease
           fi
