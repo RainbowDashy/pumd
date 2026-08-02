@@ -88,6 +88,38 @@ async test "batch update lowers a table then following paragraph at final Docs i
 }
 
 ///|
+async test "batch update applies table cell alignment after paragraph style" {
+  let fake = DocsAdapterFakeHttpClient::{
+    requests: [],
+    responses: [@google_http.HttpResponse::new(200, {}, "{}")],
+  }
+  let markdown =
+    #|| Head |
+    #|| ---: |
+    #|| Cell |
+  let plan = match @pumd.render_markdown(markdown) {
+    Ok(document) => compile_docs_update_plan(document)
+    Err(_) => abort("fixture must render")
+  }
+  match batch_update_document(docs_adapter_client(fake), "doc-123", plan) {
+    Ok(_) => ()
+    Err(_) => assert_true(false)
+  }
+  let body = match fake.requests[0].body {
+    Some(body) => body
+    None => abort("batch update must have JSON")
+  }
+  let paragraph_style = "\"range\":{\"startIndex\":5,\"endIndex\":10},\"paragraphStyle\":{\"namedStyleType\":\"NORMAL_TEXT\""
+  let alignment = "\"range\":{\"startIndex\":5,\"endIndex\":10},\"paragraphStyle\":{\"alignment\":\"END\"},\"fields\":\"alignment\""
+  match (body.find(paragraph_style), body.find(alignment)) {
+    (Some(paragraph_style_index), Some(alignment_index)) =>
+      assert_true(paragraph_style_index < alignment_index)
+    _ => assert_true(false)
+  }
+  assert_true(body.contains("\"backgroundColor\""))
+}
+
+///|
 async test "batch update preserves UTF-16 ranges, links, list presets, and colors" {
   let fake = DocsAdapterFakeHttpClient::{
     requests: [],

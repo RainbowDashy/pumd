@@ -6,13 +6,44 @@
 ///|
 fn compact_json(value : String) -> String {
   let result = StringBuilder::new()
+  let mut inside_string = false
+  let mut escaped = false
   for char in value {
-    match char {
-      ' ' | '\n' | '\r' | '\t' => ()
-      _ => result.write_char(char)
+    if inside_string {
+      result.write_char(char)
+      if escaped {
+        escaped = false
+      } else if char == '\\' {
+        escaped = true
+      } else if char == '"' {
+        inside_string = false
+      }
+    } else {
+      match char {
+        ' ' | '\n' | '\r' | '\t' => ()
+        '"' => {
+          result.write_char(char)
+          inside_string = true
+        }
+        _ => result.write_char(char)
+      }
     }
   }
   result.to_string()
+}
+
+///|
+test "live readback compacts JSON without changing string values" {
+  let response =
+    #|{
+    #|  "weightedFontFamily": {
+    #|    "fontFamily": "Roboto Mono"
+    #|  }
+    #|}
+  assert_eq(
+    compact_json(response),
+    "{\"weightedFontFamily\":{\"fontFamily\":\"Roboto Mono\"}}",
+  )
 }
 
 ///|

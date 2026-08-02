@@ -176,15 +176,6 @@ fn append_table_cell(
   }
   let inserted = text.to_string()
   requests.push(InsertTableCellText(table_index~, row~, column~, text=inserted))
-  requests.push(
-    UpdateTableCellStyle(
-      table_index~,
-      row~,
-      column~,
-      alignment=cell.alignment,
-      background_color=cell.background_color,
-    ),
-  )
   let mut paragraph_start = 0
   for paragraph in cell.content {
     let mut paragraph_end = paragraph_start + 1
@@ -224,6 +215,17 @@ fn append_table_cell(
     }
     paragraph_start = paragraph_end
   }
+  // Named paragraph styles can reset alignment, so apply the cell's alignment
+  // only after every paragraph style in the cell has been established.
+  requests.push(
+    UpdateTableCellStyle(
+      table_index~,
+      row~,
+      column~,
+      alignment=cell.alignment,
+      background_color=cell.background_color,
+    ),
+  )
   advance_google_docs_index(index=0, text=inserted)
 }
 

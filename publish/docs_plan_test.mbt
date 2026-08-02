@@ -79,13 +79,13 @@ test "compiles native tables in row and cell order" {
         content=(
           #|insert-table 1 rows=2 columns=1
           #|insert-cell-text table=1 row=0 column=0 "Head"
-          #|cell-style table=1 row=0 column=0 alignment=right background=#F1F3F4
           #|cell-paragraph-style table=1 row=0 column=0 0..5 normal font=Arial size=11 line=115 before=0 after=0
           #|cell-text-style table=1 row=0 column=0 0..4 bold font=Arial size=11
+          #|cell-style table=1 row=0 column=0 alignment=right background=#F1F3F4
           #|insert-cell-text table=1 row=1 column=0 "cell"
-          #|cell-style table=1 row=1 column=0 alignment=right
           #|cell-paragraph-style table=1 row=1 column=0 0..5 normal font=Arial size=11 line=115 before=0 after=0
           #|cell-text-style table=1 row=1 column=0 0..4 underline font=Arial size=11 color=#1155CC link="https://example.test"
+          #|cell-style table=1 row=1 column=0 alignment=right
           #|
         ),
       )
@@ -108,13 +108,13 @@ test "places a following paragraph after the complete native table" {
         content=(
           #|insert-table 1 rows=2 columns=1
           #|insert-cell-text table=1 row=0 column=0 "Head"
-          #|cell-style table=1 row=0 column=0 alignment=unspecified background=#F1F3F4
           #|cell-paragraph-style table=1 row=0 column=0 0..5 normal font=Arial size=11 line=115 before=0 after=0
           #|cell-text-style table=1 row=0 column=0 0..4 bold font=Arial size=11
+          #|cell-style table=1 row=0 column=0 alignment=unspecified background=#F1F3F4
           #|insert-cell-text table=1 row=1 column=0 "Cell"
-          #|cell-style table=1 row=1 column=0 alignment=unspecified
           #|cell-paragraph-style table=1 row=1 column=0 0..5 normal font=Arial size=11 line=115 before=0 after=0
           #|cell-text-style table=1 row=1 column=0 0..4 font=Arial size=11
+          #|cell-style table=1 row=1 column=0 alignment=unspecified
           #|insert-text 18 "after\n"
           #|paragraph-style 18..24 normal font=Arial size=11 line=115 before=0 after=6
           #|text-style 18..23 font=Arial size=11
