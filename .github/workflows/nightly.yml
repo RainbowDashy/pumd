@@ -76,21 +76,29 @@ jobs:
           output="$("$binary" 2>&1)"
           status=$?
           set -e
-          test "$status" -eq 1
-          grep -F "usage: pumd publish <markdown-path>" <<< "$output"
+          if [[ "$status" -ne 1 ]]; then
+            printf 'expected pumd without arguments to exit 1, got %s\n%s\n' "$status" "$output" >&2
+            exit 1
+          fi
+          if [[ "$output" != *"usage: pumd publish <markdown-path>"* ]]; then
+            printf 'pumd did not print its usage message:\n%s\n' "$output" >&2
+            exit 1
+          fi
 
       - name: Smoke test the Windows binary
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $binary = '_build/native/release/build/rainbowdashy/pumd/cmd/pumd/pumd.exe'
-          $output = & $binary 2>&1
+          $PSNativeCommandUseErrorActionPreference = $false
+          $output = & $binary 2>&1 | Out-String
           if ($LASTEXITCODE -ne 1) {
             throw "expected pumd without arguments to exit 1, got $LASTEXITCODE"
           }
           if ($output -notmatch 'usage: pumd publish <markdown-path>') {
-            throw "pumd did not print its usage message"
+            throw "pumd did not print its usage message: $output"
           }
+          exit 0
 
       - name: Package the Unix binary
         if: runner.os != 'Windows'
