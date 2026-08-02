@@ -67,13 +67,38 @@ jobs:
       - name: Build stripped release binary
         run: moon build --target native --release --strip --frozen cmd/pumd
 
+      - name: Locate the Unix binary
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          binary_base="_build/native/release/build/rainbowdashy/pumd/cmd/pumd/pumd"
+          for candidate in "$binary_base" "$binary_base.exe"; do
+            if [[ -f "$candidate" ]]; then
+              echo "PUMD_BINARY=$candidate" >> "$GITHUB_ENV"
+              exit 0
+            fi
+          done
+          printf 'native pumd binary was not found under %s\n' "$(dirname "$binary_base")" >&2
+          find "$(dirname "$binary_base")" -maxdepth 1 -type f -print >&2
+          exit 1
+
+      - name: Locate the Windows binary
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $binaryBase = '_build/native/release/build/rainbowdashy/pumd/cmd/pumd/pumd'
+          $binary = @($binaryBase, "$binaryBase.exe") | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+          if (-not $binary) {
+            throw "native pumd binary was not found under $(Split-Path $binaryBase)"
+          }
+          "PUMD_BINARY=$binary" | Out-File -FilePath $env:GITHUB_ENV -Append
+
       - name: Smoke test the Unix binary
         if: runner.os != 'Windows'
         shell: bash
         run: |
-          binary="_build/native/release/build/rainbowdashy/pumd/cmd/pumd/pumd"
           set +e
-          output="$("$binary" 2>&1)"
+          output="$("$PUMD_BINARY" 2>&1)"
           status=$?
           set -e
           if [[ "$status" -ne 1 ]]; then
@@ -89,9 +114,8 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $binary = '_build/native/release/build/rainbowdashy/pumd/cmd/pumd/pumd.exe'
           $PSNativeCommandUseErrorActionPreference = $false
-          $output = & $binary 2>&1 | Out-String
+          $output = & $env:PUMD_BINARY 2>&1 | Out-String
           if ($LASTEXITCODE -ne 1) {
             throw "expected pumd without arguments to exit 1, got $LASTEXITCODE"
           }
@@ -106,7 +130,7 @@ jobs:
         run: |
           archive="pumd-nightly-${{ matrix.platform }}"
           mkdir -p "dist/$archive"
-          install -m 0755 "_build/native/release/build/rainbowdashy/pumd/cmd/pumd/pumd" "dist/$archive/pumd"
+          install -m 0755 "$PUMD_BINARY" "dist/$archive/pumd"
           cp README.md "dist/$archive/README.md"
           tar -C dist -czf "dist/$archive.tar.gz" "$archive"
           rm -r "dist/$archive"
@@ -118,7 +142,7 @@ jobs:
           $archive = 'pumd-nightly-${{ matrix.platform }}'
           $archiveDirectory = Join-Path 'dist' $archive
           New-Item -ItemType Directory -Path $archiveDirectory -Force | Out-Null
-          Copy-Item '_build/native/release/build/rainbowdashy/pumd/cmd/pumd/pumd.exe' (Join-Path $archiveDirectory 'pumd.exe')
+          Copy-Item $env:PUMD_BINARY (Join-Path $archiveDirectory 'pumd.exe')
           Copy-Item 'README.md' (Join-Path $archiveDirectory 'README.md')
           Compress-Archive -Path $archiveDirectory -DestinationPath "dist\$archive.zip"
           Remove-Item -LiteralPath $archiveDirectory -Recurse
