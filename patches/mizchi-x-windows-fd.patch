@@ -1,0 +1,265 @@
+diff --git a/src/fs/fs_fd_native.mbt b/src/fs/fs_fd_native.mbt
+deleted file mode 100644
+index 329e0ee..0000000
+--- a/src/fs/fs_fd_native.mbt
++++ /dev/null
+@@ -1,4 +0,0 @@
+-///|
+-fn file_fd_to_int(fd : Int) -> Int {
+-  fd
+-}
+diff --git a/src/fs/fs_fd_wasm.mbt b/src/fs/fs_fd_wasm.mbt
+deleted file mode 100644
+index 80fd80c..0000000
+--- a/src/fs/fs_fd_wasm.mbt
++++ /dev/null
+@@ -1,8 +0,0 @@
+-///|
+-fn file_fd_to_int(fd : UInt64) -> Int {
+-  let max_int = 2147483647
+-  if fd > max_int.to_uint64() {
+-    abort("file fd value too large to fit in Int")
+-  }
+-  fd.reinterpret_as_int64().to_int()
+-}
+diff --git a/src/fs/fs_native.mbt b/src/fs/fs_native.mbt
+index 4cd2e5f..8c38d9a 100644
+--- a/src/fs/fs_native.mbt
++++ b/src/fs/fs_native.mbt
+@@ -323,2 +323,2 @@ pub fn File::close(self : File) -> Unit {
+-pub fn File::fd(self : File) -> Int {
+-  file_fd_to_int(self.inner.fd())
++pub fn File::fd(self : File) -> @async_types.Fd {
++  self.inner.fd()
+diff --git a/src/fs/moon.pkg b/src/fs/moon.pkg
+index 5c92dfa..af18865 100644
+--- a/src/fs/moon.pkg
++++ b/src/fs/moon.pkg
+@@ -6,0 +7 @@ import {
++  "moonbitlang/async/types" @async_types,
+@@ -14,2 +14,0 @@ options(
+-    "fs_fd_native.mbt": [ "native" ],
+-    "fs_fd_wasm.mbt": [ "wasm" ],
+diff --git a/src/fs/pkg.generated.mbti b/src/fs/pkg.generated.mbti
+index 0ed4405..91a096d 100644
+--- a/src/fs/pkg.generated.mbti
++++ b/src/fs/pkg.generated.mbti
+@@ -5,0 +6 @@ import {
++  "moonbitlang/async/types",
+@@ -90 +91 @@ pub async fn File::ctime(Self) -> (Int64, Int) raise IOError
+-pub fn File::fd(Self) -> Int
++pub fn File::fd(Self) -> @types.Fd
+diff --git a/src/pipe/moon.pkg b/src/pipe/moon.pkg
+index 4d7dcc8..e756908 100644
+--- a/src/pipe/moon.pkg
++++ b/src/pipe/moon.pkg
+@@ -2,0 +3 @@ import {
++  "moonbitlang/async/types" @async_types,
+@@ -18,2 +18,0 @@ options(
+-    "pipe_fd_native.mbt": [ "native" ],
+-    "pipe_fd_wasm.mbt": [ "wasm" ],
+diff --git a/src/pipe/pipe_fd_native.mbt b/src/pipe/pipe_fd_native.mbt
+deleted file mode 100644
+index f0c57f5..0000000
+--- a/src/pipe/pipe_fd_native.mbt
++++ /dev/null
+@@ -1,4 +0,0 @@
+-///|
+-fn pipe_fd_to_int(fd : Int) -> Int {
+-  fd
+-}
+diff --git a/src/pipe/pipe_fd_wasm.mbt b/src/pipe/pipe_fd_wasm.mbt
+deleted file mode 100644
+index d106fc2..0000000
+--- a/src/pipe/pipe_fd_wasm.mbt
++++ /dev/null
+@@ -1,8 +0,0 @@
+-///|
+-fn pipe_fd_to_int(fd : UInt64) -> Int {
+-  let max_int = 2147483647
+-  if fd > max_int.to_uint64() {
+-    abort("pipe fd value too large to fit in Int")
+-  }
+-  fd.reinterpret_as_int64().to_int()
+-}
+diff --git a/src/pipe/pipe_native.mbt b/src/pipe/pipe_native.mbt
+index cf76ca8..5dec320 100644
+--- a/src/pipe/pipe_native.mbt
++++ b/src/pipe/pipe_native.mbt
+@@ -28,3 +28,2 @@ pub fn PipeWrite::close(self : PipeWrite) -> Unit {
+-pub fn PipeRead::fd(self : PipeRead) -> Int {
+-  let fd = self.inner.fd()
+-  pipe_fd_to_int(fd)
++pub fn PipeRead::fd(self : PipeRead) -> @async_types.Fd {
++  self.inner.fd()
+@@ -34,3 +33,2 @@ pub fn PipeRead::fd(self : PipeRead) -> Int {
+-pub fn PipeWrite::fd(self : PipeWrite) -> Int {
+-  let fd = self.inner.fd()
+-  pipe_fd_to_int(fd)
++pub fn PipeWrite::fd(self : PipeWrite) -> @async_types.Fd {
++  self.inner.fd()
+diff --git a/src/pipe/pkg.generated.mbti b/src/pipe/pkg.generated.mbti
+index 107c7df..4359b70 100644
+--- a/src/pipe/pkg.generated.mbti
++++ b/src/pipe/pkg.generated.mbti
+@@ -5,0 +6 @@ import {
++  "moonbitlang/async/types",
+@@ -18 +19 @@ pub fn PipeRead::close(Self) -> Unit
+-pub fn PipeRead::fd(Self) -> Int
++pub fn PipeRead::fd(Self) -> @types.Fd
+@@ -26 +27 @@ pub fn PipeWrite::close(Self) -> Unit
+-pub fn PipeWrite::fd(Self) -> Int
++pub fn PipeWrite::fd(Self) -> @types.Fd
+diff --git a/src/socket/moon.pkg b/src/socket/moon.pkg
+index 808c59d..2d700ef 100644
+--- a/src/socket/moon.pkg
++++ b/src/socket/moon.pkg
+@@ -4,0 +5 @@ import {
++  "moonbitlang/async/types" @async_types,
+@@ -15,2 +15,0 @@ options(
+-    "socket_fd_native.mbt": [ "native" ],
+-    "socket_fd_wasm.mbt": [ "wasm" ],
+diff --git a/src/socket/pkg.generated.mbti b/src/socket/pkg.generated.mbti
+index ecb51f8..9ebbf5f 100644
+--- a/src/socket/pkg.generated.mbti
++++ b/src/socket/pkg.generated.mbti
+@@ -5,0 +6 @@ import {
++  "moonbitlang/async/types",
+@@ -48 +49 @@ pub fn Tcp::enable_keepalive(Self, idle_before_keep_alive? : Int, keep_alive_cou
+-pub fn Tcp::fd(Self) -> Int
++pub fn Tcp::fd(Self) -> @types.Fd
+@@ -62 +63 @@ pub fn TcpServer::close(Self) -> Unit
+-pub fn TcpServer::fd(Self) -> Int
++pub fn TcpServer::fd(Self) -> @types.Fd
+@@ -75 +76 @@ pub fn UdpClient::connect(Self, Addr) -> Unit raise
+-pub fn UdpClient::fd(Self) -> Int
++pub fn UdpClient::fd(Self) -> @types.Fd
+@@ -93 +94 @@ pub fn UdpServer::close(Self) -> Unit
+-pub fn UdpServer::fd(Self) -> Int
++pub fn UdpServer::fd(Self) -> @types.Fd
+diff --git a/src/socket/socket_fd_native.mbt b/src/socket/socket_fd_native.mbt
+deleted file mode 100644
+index 079e53a..0000000
+--- a/src/socket/socket_fd_native.mbt
++++ /dev/null
+@@ -1,4 +0,0 @@
+-///|
+-fn socket_fd_to_int(fd : Int) -> Int {
+-  fd
+-}
+diff --git a/src/socket/socket_fd_wasm.mbt b/src/socket/socket_fd_wasm.mbt
+deleted file mode 100644
+index 93e4a6f..0000000
+--- a/src/socket/socket_fd_wasm.mbt
++++ /dev/null
+@@ -1,9 +0,0 @@
+-///|
+-fn socket_fd_to_int(fd : UInt64) -> Int {
+-  let max_int = 2147483647
+-  let max_uint64 = max_int.to_uint64()
+-  if fd > max_uint64 {
+-    abort("socket fd value too large to fit in Int")
+-  }
+-  fd.reinterpret_as_int64().to_int()
+-}
+diff --git a/src/socket/socket_native.mbt b/src/socket/socket_native.mbt
+index ea64d34..c7910d6 100644
+--- a/src/socket/socket_native.mbt
++++ b/src/socket/socket_native.mbt
+@@ -58,2 +58,2 @@ pub fn Tcp::close(self : Tcp) -> Unit {
+-pub fn Tcp::fd(self : Tcp) -> Int {
+-  socket_fd_to_int(self.inner.fd())
++pub fn Tcp::fd(self : Tcp) -> @async_types.Fd {
++  self.inner.fd()
+@@ -149,2 +149,2 @@ pub fn TcpServer::close(self : TcpServer) -> Unit {
+-pub fn TcpServer::fd(self : TcpServer) -> Int {
+-  socket_fd_to_int(self.inner.fd())
++pub fn TcpServer::fd(self : TcpServer) -> @async_types.Fd {
++  self.inner.fd()
+@@ -210,2 +210,2 @@ pub fn UdpClient::close(self : UdpClient) -> Unit {
+-pub fn UdpClient::fd(self : UdpClient) -> Int {
+-  socket_fd_to_int(self.inner.fd())
++pub fn UdpClient::fd(self : UdpClient) -> @async_types.Fd {
++  self.inner.fd()
+@@ -329,2 +329,2 @@ pub fn UdpServer::close(self : UdpServer) -> Unit {
+-pub fn UdpServer::fd(self : UdpServer) -> Int {
+-  socket_fd_to_int(self.inner.fd())
++pub fn UdpServer::fd(self : UdpServer) -> @async_types.Fd {
++  self.inner.fd()
+diff --git a/src/stdio/moon.pkg b/src/stdio/moon.pkg
+index 177fca7..4c12a4a 100644
+--- a/src/stdio/moon.pkg
++++ b/src/stdio/moon.pkg
+@@ -2,0 +3 @@ import {
++  "moonbitlang/async/types" @async_types,
+@@ -20,2 +20,0 @@ options(
+-    "stdio_fd_native.mbt": [ "native" ],
+-    "stdio_fd_wasm.mbt": [ "wasm" ],
+diff --git a/src/stdio/pkg.generated.mbti b/src/stdio/pkg.generated.mbti
+index 2a939d1..e745097 100644
+--- a/src/stdio/pkg.generated.mbti
++++ b/src/stdio/pkg.generated.mbti
+@@ -5,0 +6 @@ import {
++  "moonbitlang/async/types",
+@@ -21 +22 @@ pub struct Input {
+-pub fn Input::fd(Self) -> Int raise
++pub fn Input::fd(Self) -> @types.Fd raise
+@@ -28 +29 @@ pub struct Output {
+-pub fn Output::fd(Self) -> Int raise
++pub fn Output::fd(Self) -> @types.Fd raise
+diff --git a/src/stdio/stdio_fd_native.mbt b/src/stdio/stdio_fd_native.mbt
+deleted file mode 100644
+index 6dabe69..0000000
+--- a/src/stdio/stdio_fd_native.mbt
++++ /dev/null
+@@ -1,4 +0,0 @@
+-///|
+-fn stdio_fd_to_int(fd : Int) -> Int {
+-  fd
+-}
+diff --git a/src/stdio/stdio_fd_wasm.mbt b/src/stdio/stdio_fd_wasm.mbt
+deleted file mode 100644
+index d6622cf..0000000
+--- a/src/stdio/stdio_fd_wasm.mbt
++++ /dev/null
+@@ -1,8 +0,0 @@
+-///|
+-fn stdio_fd_to_int(fd : UInt64) -> Int {
+-  let max_int = 2147483647
+-  if fd > max_int.to_uint64() {
+-    abort("stdio fd value too large to fit in Int")
+-  }
+-  fd.reinterpret_as_int64().to_int()
+-}
+diff --git a/src/stdio/stdio_native.mbt b/src/stdio/stdio_native.mbt
+index e149628..9349d8c 100644
+--- a/src/stdio/stdio_native.mbt
++++ b/src/stdio/stdio_native.mbt
+@@ -12,3 +12,2 @@ pub struct Output {
+-pub fn Input::fd(self : Input) -> Int raise {
+-  let fd = self.inner.fd()
+-  stdio_fd_to_int(fd)
++pub fn Input::fd(self : Input) -> @async_types.Fd raise {
++  self.inner.fd()
+@@ -18,3 +17,2 @@ pub fn Input::fd(self : Input) -> Int raise {
+-pub fn Output::fd(self : Output) -> Int raise {
+-  let fd = self.inner.fd()
+-  stdio_fd_to_int(fd)
++pub fn Output::fd(self : Output) -> @async_types.Fd raise {
++  self.inner.fd()
+diff --git a/src/stdio/stdio_native_test.mbt b/src/stdio/stdio_native_test.mbt
+index 1f31e5e..7fbcdc6 100644
+--- a/src/stdio/stdio_native_test.mbt
++++ b/src/stdio/stdio_native_test.mbt
+@@ -12 +12,10 @@ async test "write stderr" {
+-test "fd values" {
++#cfg(platform="windows")
++test "fd values on windows" {
++  ignore(stdin.fd())
++  ignore(stdout.fd())
++  ignore(stderr.fd())
++}
++
++///|
++#cfg(not(platform="windows"))
++test "fd values on unix" {
