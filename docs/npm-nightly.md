@@ -10,27 +10,15 @@ violate SemVer, it is extended until it includes a hexadecimal letter. If that
 commit version is already present, the workflow validates the package and
 skips publishing it again.
 
-The npm job is disabled unless the repository variable
-`NPM_PUBLISH_ENABLED` is exactly `true`. This keeps the GitHub nightly release
-working while npm ownership and authentication are being bootstrapped.
+The npm job is enabled only when the repository variable
+`NPM_PUBLISH_ENABLED` is exactly `true`. Publishing uses npm trusted publishing
+with GitHub's short-lived OIDC credential; the repository must not store an
+`NPM_TOKEN` publishing secret.
 
-## Bootstrap the package
+## Trusted publishing configuration
 
-1. Confirm that the public `@p0nyyy/pumd` package name remains available on npm.
-2. Create a granular npm access token with the shortest practical expiration.
-   Set **Packages and scopes** to **Read and write** for **All Packages**, because
-   `@p0nyyy/pumd` cannot be selected before its first publication, and enable
-   **Bypass 2FA** for the non-interactive workflow. Save it as the GitHub Actions
-   repository secret `NPM_TOKEN`. Do not grant organization-management access.
-3. Set the GitHub Actions repository variable `NPM_PUBLISH_ENABLED` to `true`.
-4. Manually run `.github/workflows/nightly.yml` on `main`. The first successful
-   run creates the package and publishes the commit version with the `nightly`
-   dist-tag.
-
-## Switch to trusted publishing
-
-After the first package version exists, open the `@p0nyyy/pumd` package settings
-on npm and add a GitHub Actions trusted publisher with these exact values:
+The `@p0nyyy/pumd` package has a GitHub Actions trusted publisher with these
+values:
 
 - Organization or user: `RainbowDashy`
 - Repository: `pumd`
@@ -38,11 +26,9 @@ on npm and add a GitHub Actions trusted publisher with these exact values:
 - Environment: none
 - Allowed action: `npm publish`
 
-Run the workflow again after a new commit and confirm that the npm publication
-succeeds through trusted publishing. Then delete the `NPM_TOKEN` repository
-secret and revoke the temporary token on npm. Keep `NPM_PUBLISH_ENABLED=true`;
-the workflow's `id-token: write` permission supplies the short-lived OIDC
-credential used by npm.
+Keep `NPM_PUBLISH_ENABLED=true`; the workflow's `id-token: write` permission
+supplies the OIDC credential used by npm. A workflow run on a branch other than
+`main` builds and tests the binaries but skips both publication jobs.
 
 ## Publish stable versions later
 

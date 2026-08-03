@@ -296,8 +296,6 @@ jobs:
 
       - name: Publish the npm nightly
         shell: bash
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           if npm view "@p0nyyy/pumd@$PUMD_NPM_VERSION" version > /dev/null 2>&1; then
             printf '@p0nyyy/pumd@%s is already published; skipping immutable version\n' "$PUMD_NPM_VERSION"
