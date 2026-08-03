@@ -124,6 +124,235 @@ async test "publish creates then populates one document through injected HTTP" {
 }
 
 ///|
+async test "Project Authorization selects only its provider and reaches HTTP" {
+  let project_calls : Array[Unit] = []
+  let adc_calls : Array[Unit] = []
+  let fake = FakeHttpClient::{
+    requests: [],
+    responses: [
+      @google_http.HttpResponse::new(200, {}, "{\"documentId\":\"project-1\"}"),
+      @google_http.HttpResponse::new(200, {}, "{}"),
+    ],
+  }
+  let result = publish_markdown_with_authorization(
+    "Hello",
+    "proposal",
+    Project,
+    fn() {
+      project_calls.push(())
+      Ok("project-token")
+    },
+    fn() {
+      adc_calls.push(())
+      Ok("adc-token")
+    },
+    fake,
+  )
+  guard result is Ok(success) else { fail("project publishing must succeed") }
+  inspect(success.document_id, content="project-1")
+  assert_eq(project_calls.length(), 1)
+  assert_eq(adc_calls.length(), 0)
+  assert_eq(fake.requests.length(), 2)
+  inspect(
+    fake.requests[0].headers.get("Authorization").unwrap(),
+    content="Bearer project-token",
+  )
+}
+
+///|
+async test "ADC selects only its provider and reaches HTTP" {
+  let project_calls : Array[Unit] = []
+  let adc_calls : Array[Unit] = []
+  let fake = FakeHttpClient::{
+    requests: [],
+    responses: [
+      @google_http.HttpResponse::new(200, {}, "{\"documentId\":\"adc-1\"}"),
+      @google_http.HttpResponse::new(200, {}, "{}"),
+    ],
+  }
+  let result = publish_markdown_with_authorization(
+    "Hello",
+    "proposal",
+    Adc,
+    fn() {
+      project_calls.push(())
+      Ok("project-token")
+    },
+    fn() {
+      adc_calls.push(())
+      Ok("adc-token")
+    },
+    fake,
+  )
+  guard result is Ok(success) else { fail("ADC publishing must succeed") }
+  inspect(success.document_id, content="adc-1")
+  assert_eq(project_calls.length(), 0)
+  assert_eq(adc_calls.length(), 1)
+  assert_eq(fake.requests.length(), 2)
+  inspect(
+    fake.requests[0].headers.get("Authorization").unwrap(),
+    content="Bearer adc-token",
+  )
+}
+
+///|
+async test "authorization provider failures never fall back and give mode-specific guidance" {
+  let project_calls : Array[Unit] = []
+  let adc_calls : Array[Unit] = []
+  let fake = FakeHttpClient::{ requests: [], responses: [] }
+  let project_failure = publish_markdown_with_authorization(
+    "Hello",
+    "proposal",
+    Project,
+    fn() {
+      project_calls.push(())
+      Err(CredentialsRefreshFailed)
+    },
+    fn() {
+      adc_calls.push(())
+      Ok("must-not-be-used")
+    },
+    fake,
+  )
+  guard project_failure is Err(project_error) else {
+    fail("expected project failure")
+  }
+  assert_eq(project_calls.length(), 1)
+  assert_eq(adc_calls.length(), 0)
+  assert_eq(fake.requests.length(), 0)
+  let project_message = project_error.user_message()
+  assert_true(project_message.contains("Project Authorization"))
+  assert_true(
+    project_message.contains(
+      "pumd auth setup --client-file ... --credential-store=file",
+    ),
+  )
+
+  let project_rejection = publish_markdown_with_authorization(
+    "Hello",
+    "proposal",
+    Project,
+    fn() { Err(CredentialsRejected) },
+    fn() {
+      adc_calls.push(())
+      Err(CredentialsUnavailable)
+    },
+    fake,
+  )
+  guard project_rejection is Err(rejection_error) else {
+    fail("expected rejection")
+  }
+  assert_eq(adc_calls.length(), 0)
+  assert_true(rejection_error.user_message().contains("Project Authorization"))
+  assert_true(
+    rejection_error
+    .user_message()
+    .contains("pumd auth setup --client-file ... --credential-store=file"),
+  )
+
+  let adc_failure = publish_markdown_with_authorization(
+    "Hello",
+    "proposal",
+    Adc,
+    fn() {
+      project_calls.push(())
+      Ok("must-not-be-used")
+    },
+    fn() {
+      adc_calls.push(())
+      Err(CredentialsRejected)
+    },
+    fake,
+  )
+  guard adc_failure is Err(adc_error) else { fail("expected ADC failure") }
+  assert_eq(project_calls.length(), 1)
+  assert_eq(adc_calls.length(), 1)
+  assert_eq(fake.requests.length(), 0)
+  assert_true(
+    adc_error.user_message().contains("Application Default Credentials"),
+  )
+  assert_true(adc_error.user_message().contains("gcloud auth"))
+}
+
+///|
+async test "preflight failures do not invoke either authorization provider" {
+  let project_calls : Array[Unit] = []
+  let adc_calls : Array[Unit] = []
+  let fake = FakeHttpClient::{ requests: [], responses: [] }
+  let result = publish_path_with_authorization(
+    "missing.md",
+    fn(_) { Err("private source error") },
+    Project,
+    fn() {
+      project_calls.push(())
+      Ok("must-not-be-used")
+    },
+    fn() {
+      adc_calls.push(())
+      Ok("must-not-be-used")
+    },
+    fake,
+  )
+  guard result is Err(SourceAccess(path="missing.md")) else {
+    fail("expected source error")
+  }
+  assert_eq(project_calls.length(), 0)
+  assert_eq(adc_calls.length(), 0)
+  assert_eq(fake.requests.length(), 0)
+
+  let render_result = publish_markdown_with_authorization(
+    "![diagram](diagram.png)",
+    "proposal",
+    Adc,
+    fn() {
+      project_calls.push(())
+      Ok("must-not-be-used")
+    },
+    fn() {
+      adc_calls.push(())
+      Ok("must-not-be-used")
+    },
+    fake,
+  )
+  guard render_result is Err(Rendering(_)) else {
+    fail("expected rendering error")
+  }
+  assert_eq(project_calls.length(), 0)
+  assert_eq(adc_calls.length(), 0)
+  assert_eq(fake.requests.length(), 0)
+
+  let invalid_document = @pumd.DesiredDocument::{
+    metadata: { title: None, locale: None },
+    render_metadata: {
+      style_profile_id: "pumd.default",
+      style_profile_version: 2,
+    },
+    content: [@pumd.StructuralElement::Table({ rows: [], provenance: None })],
+    provenance: None,
+  }
+  let planning_result = publish_desired_document_with_authorization(
+    invalid_document,
+    "proposal",
+    Project,
+    fn() {
+      project_calls.push(())
+      Ok("must-not-be-used")
+    },
+    fn() {
+      adc_calls.push(())
+      Ok("must-not-be-used")
+    },
+    fake,
+  )
+  guard planning_result is Err(Planning(_)) else {
+    fail("expected planning error")
+  }
+  assert_eq(project_calls.length(), 0)
+  assert_eq(adc_calls.length(), 0)
+  assert_eq(fake.requests.length(), 0)
+}
+
+///|
 async test "complete supported document still publishes through the public seam" {
   let source =
     #|# Heading 🚀
@@ -271,7 +500,7 @@ async test "authentication failure produces zero HTTP" {
   )
   guard result is Err(error) else { assert_true(false) }
   guard error
-    is Authentication(problem=CredentialsUnavailable, created_document=None) else {
+    is Authentication(problem=CredentialsUnavailable, created_document=None, ..) else {
     assert_true(false)
   }
   assert_true(error.user_message().contains("Application Default Credentials"))
@@ -282,10 +511,12 @@ async test "authentication failure produces zero HTTP" {
 ///|
 test "authentication guidance distinguishes invalid and unrefreshable ADC" {
   let invalid_error : PublishError = Authentication(
+    authorization_mode=Adc,
     problem=CredentialsInvalid,
     created_document=None,
   )
   let refresh_error : PublishError = Authentication(
+    authorization_mode=Adc,
     problem=CredentialsRefreshFailed,
     created_document=None,
   )
@@ -312,7 +543,7 @@ async test "creation permission failure is actionable and never populates" {
     fake,
   )
   guard result is Err(error) else { assert_true(false) }
-  guard error is Permission(stage=DocumentCreation, created_document=None) else {
+  guard error is Permission(stage=DocumentCreation, created_document=None, ..) else {
     assert_true(false)
   }
   let message = error.user_message()
@@ -365,7 +596,7 @@ async test "creation rejects expired credentials as authentication failure" {
   )
   guard result is Err(error) else { assert_true(false) }
   guard error
-    is Authentication(problem=CredentialsRejected, created_document=None) else {
+    is Authentication(problem=CredentialsRejected, created_document=None, ..) else {
     assert_true(false)
   }
   let message = error.user_message()
@@ -500,7 +731,8 @@ async test "population permission failure retains the created document identity"
   guard error
     is Permission(
       stage=DocumentPopulation,
-      created_document=Some(created_document)
+      created_document=Some(created_document),
+      ..
     ) else {
     assert_true(false)
   }
@@ -575,7 +807,8 @@ async test "population authentication rejection retains created identity" {
   guard error
     is Authentication(
       problem=CredentialsRejected,
-      created_document=Some(created_document)
+      created_document=Some(created_document),
+      ..
     ) else {
     assert_true(false)
   }

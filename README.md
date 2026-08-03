@@ -136,7 +136,11 @@ the vendored copy with the recorded native Windows compatibility patches.
 Other MoonBit targets and other dependency versions are not part of the
 validated Milestone 2 contract.
 
-### Enable Google Docs and configure authorized-user ADC
+### Set up Project Authorization
+
+Project Authorization is the tracer-bullet authorization flow. You select the
+Google Cloud project, provide its Desktop OAuth client, and own its consent
+configuration and quota.
 
 1. Create or select a Google Cloud project and enable the **Google Docs API**.
    With the Google Cloud CLI, the enablement command is:
@@ -149,37 +153,56 @@ validated Milestone 2 contract.
    include the Google account that will publish as a test user.
 3. Create an OAuth client ID with application type **Desktop app**, then download
    its client JSON as `oauth-client.json`.
-4. Use that client only to create authorized-user Application Default
-   Credentials (ADC), requesting the required `drive.file` scope:
+4. From the directory containing the downloaded client definition, run the
+   explicit Project Authorization setup command:
 
    ```console
-   gcloud auth application-default login --client-id-file=oauth-client.json --scopes=https://www.googleapis.com/auth/drive.file
+   pumd auth setup --client-file oauth-client.json --credential-store=file
    ```
 
-`oauth-client.json` is the Desktop client definition; it is not itself ADC.
-The command above writes an `authorized_user` ADC file. `pumd` uses the
-authorized-user refresh token from that file and requires exactly this scope:
-`https://www.googleapis.com/auth/drive.file`.
+`oauth-client.json` is the Desktop client definition, not a refresh credential.
+The authorization request requires exactly
+`https://www.googleapis.com/auth/drive.file`; it requests no identity scopes.
 
-For the normal local setup, leave `GOOGLE_APPLICATION_CREDENTIALS` unset and
-`pumd` will look for the gcloud ADC file at `$HOME/.config/gcloud/application_default_credentials.json`,
-or at `%APPDATA%\gcloud\application_default_credentials.json` when `HOME` is not
-set. If `GOOGLE_APPLICATION_CREDENTIALS` is set, the pinned auth library checks
-that path first. It may point to a valid `authorized_user` ADC JSON file, but it
-must not point to `oauth-client.json`. An unreadable, invalid, or unsupported
-file at the override path is ignored and discovery continues at the well-known
-location. A valid service-account JSON is detected differently: the library
-selects it, but its service-account token exchange is not implemented in the
-pinned version, so publication fails instead of falling back. Service-account
-credentials are therefore not supported by the current publisher. Unset a
-stale or confusing override to use the gcloud authorized-user ADC file.
+`--credential-store=file` is a deliberate, reduced-protection opt-in. It stores
+the refresh credential in a local file with owner-only permissions where the
+platform supports them; Windows relies on the user profile's normal ACLs.
+Select it only when that trade-off is appropriate (for example, headless or
+automation use); `pumd` does not silently choose file storage. This
+tracer-bullet flow does not claim an operating-system credential-vault
+integration or a fallback to one.
 
-### Publish a Markdown file
-
-From the repository root, the exact Milestone 2 publish command is:
+Inspect the configured Project Authorization state without publishing:
 
 ```console
-moon run --target native cmd/pumd -- publish proposal.md
+pumd auth status
+```
+
+The stored refresh credential is used to obtain fresh access tokens when
+needed. If it is revoked, expires without being refreshable, the OAuth consent
+configuration changes, or the requested scope is no longer granted, repeat
+`pumd auth setup --client-file oauth-client.json --credential-store=file` to
+reauthorize.
+
+### Explicit ADC route (transition only)
+
+ADC remains available as an explicitly selectable route:
+
+```console
+pumd publish --auth=adc document.md
+```
+
+This route continues to use authorized-user ADC with exactly the `drive.file`
+scope and no identity scopes. It does not fall back to Project Authorization,
+and Project Authorization does not fall back to ADC. The global default has not
+changed yet: omitting `--auth` still selects ADC during this transition.
+
+### Publish a Markdown file with Project Authorization
+
+After setup, the explicit Project Authorization publish command is:
+
+```console
+pumd publish --auth=project document.md
 ```
 
 Each successful invocation creates a new Google Doc, including when the same
@@ -198,14 +221,14 @@ edit URL: https://docs.google.com/document/d/1AbCdEfGhIjKlMnOpQrStUvWxYz/edit
 Images are not supported in Milestone 2. Both direct images such as
 `![diagram](diagram.png)` and reference images produce a source-located
 unsupported diagnostic. Source reading and decoding, rendering (including this
-image check), and Desired Document planning all finish before ADC is requested
-or any HTTP request is sent, so an image blocks publication before credentials
-are read and before any remote document can be created or changed.
+image check), and Desired Document planning all finish before authorization is
+requested or any HTTP request is sent, so an image blocks publication before
+credentials are read and before any remote document can be created or changed.
 
 Ordered lists publish as native Google Docs lists when they start at `1`, with
 either a period or parenthesis delimiter. Google Docs' create-bullets request
 does not expose a writable starting number, so a Markdown list starting at any
-other number fails Desired Document planning before ADC or HTTP instead of being
+other number fails Desired Document planning before authorization or HTTP instead of being
 silently renumbered.
 
 ### Recover from publication failures
@@ -213,10 +236,12 @@ silently renumbered.
 - For source access, decoding, rendering, or Desired Document planning errors,
   fix the local input and run the publish command again. These failures happen
   before credential access or remote mutation, so no Google Doc was created.
-- Authentication errors distinguish unavailable, invalid, unrefreshable, and
-  Google-rejected ADC. Re-run the authorized-user ADC command above. For a
-  permission failure, confirm that ADC was minted with the exact `drive.file`
-  scope and that the Google Docs API is enabled in the OAuth client's project.
+- For a Project Authorization authentication failure, run `pumd auth status`;
+  then repeat the setup command above if reauthorization is required. For a
+  permission failure, confirm the exact `drive.file` scope and that the Google
+  Docs API is enabled in the selected project's OAuth client. For the explicit
+  ADC route, recreate its ADC separately; neither route falls back to the
+  other.
 - If Google throttles a request, wait before trying again. For another explicit
   5xx response, wait and retry later; report other unexpected HTTP statuses
   before retrying.
@@ -233,11 +258,12 @@ Errors are classified without printing credential or access-token contents.
 ### Opt-in live integration test
 
 The live smoke test is deliberately not part of the default test suite. Running
-it **creates and leaves a real Google Doc in the authenticated account's
-Drive**. The MoonBit test publishes a mixed Markdown fixture through the
-production ADC and Google Docs path, reads the resulting document back through
-the narrow Docs adapter, verifies representative text and native structure, and
-prints the real document URL:
+it **creates and leaves a real Google Doc in the authorized account's Drive**.
+Run it only after deliberately configuring the authorization route being
+tested. The MoonBit test publishes a mixed Markdown fixture through the live
+Google Docs path, reads the resulting document back through the narrow Docs
+adapter, verifies representative text and native structure, and prints the real
+document URL:
 
 ```console
 moon build --target native cmd/pumd

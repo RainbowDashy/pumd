@@ -19,11 +19,18 @@ pub(all) enum AuthenticationProblem {
 } derive(Eq, @debug.Debug)
 
 ///|
+pub(all) enum AuthorizationMode {
+  Project
+  Adc
+} derive(Eq, @debug.Debug)
+
+///|
 pub(all) enum PublishError {
   SourceAccess(path~ : String)
   Rendering(Array[@pumd.RenderingDiagnostic])
   Planning(String)
   Authentication(
+    authorization_mode~ : AuthorizationMode,
     problem~ : AuthenticationProblem,
     created_document~ : PublishSuccess?
   )
@@ -32,6 +39,7 @@ pub(all) enum PublishError {
   AmbiguousPopulation(PublishSuccess)
   Population(created_document~ : PublishSuccess, message~ : String)
   Permission(
+    authorization_mode~ : AuthorizationMode,
     stage~ : PublicationRemoteStage,
     created_document~ : PublishSuccess?
   )
@@ -53,6 +61,9 @@ pub fn canonical_document_url(document_id : String) -> String {
 
 ///|
 let adc_setup_hint = "Run `gcloud auth application-default login --client-id-file=oauth-client.json --scopes=https://www.googleapis.com/auth/drive.file`."
+
+///|
+let project_setup_hint = "Run `pumd auth setup --client-file ... --credential-store=file`."
 
 ///|
 fn remote_stage_name(stage : PublicationRemoteStage) -> String {
@@ -89,14 +100,22 @@ let generic_remote_recovery_guidance = " Check the reported HTTP status: for a 5
 
 ///|
 fn classified_google_error(
+  authorization_mode : AuthorizationMode,
   stage : PublicationRemoteStage,
   kind : GoogleErrorKind?,
   created_document : PublishSuccess?,
 ) -> PublishError? {
   match kind {
     Some(Unauthenticated) =>
-      Some(Authentication(problem=CredentialsRejected, created_document~))
-    Some(PermissionDenied) => Some(Permission(stage~, created_document~))
+      Some(
+        Authentication(
+          authorization_mode~,
+          problem=CredentialsRejected,
+          created_document~,
+        ),
+      )
+    Some(PermissionDenied) =>
+      Some(Permission(authorization_mode~, stage~, created_document~))
     Some(Throttled) => Some(Throttled(stage~, created_document~))
     None => None
   }
@@ -121,17 +140,29 @@ pub fn PublishError::user_message(self : PublishError) -> String {
       message.to_string()
     }
     Planning(message) => "Desired Document planning failed: " + message
-    Authentication(problem~, created_document~) => {
-      let guidance = match problem {
-        CredentialsUnavailable =>
+    Authentication(authorization_mode~, problem~, created_document~) => {
+      let guidance = match (authorization_mode, problem) {
+        (Project, CredentialsUnavailable) =>
+          "Project Authorization credentials are unavailable. " +
+          project_setup_hint
+        (Project, CredentialsInvalid) =>
+          "Project Authorization credentials are invalid. Recreate them before retrying. " +
+          project_setup_hint
+        (Project, CredentialsRefreshFailed) =>
+          "Project Authorization credentials are expired or could not be refreshed. Recreate them before retrying. " +
+          project_setup_hint
+        (Project, CredentialsRejected) =>
+          "Google rejected the Project Authorization credentials; set them up again before retrying. " +
+          project_setup_hint
+        (Adc, CredentialsUnavailable) =>
           "Application Default Credentials are unavailable. " + adc_setup_hint
-        CredentialsInvalid =>
+        (Adc, CredentialsInvalid) =>
           "Application Default Credentials are invalid. Recreate them before retrying. " +
           adc_setup_hint
-        CredentialsRefreshFailed =>
+        (Adc, CredentialsRefreshFailed) =>
           "Application Default Credentials are expired or could not be refreshed. Recreate them before retrying. " +
           adc_setup_hint
-        CredentialsRejected =>
+        (Adc, CredentialsRejected) =>
           "Google rejected the Application Default Credentials; refresh ADC before retrying. " +
           adc_setup_hint
       }
@@ -154,11 +185,19 @@ pub fn PublishError::user_message(self : PublishError) -> String {
       ": " +
       message +
       generic_remote_recovery_guidance
-    Permission(stage~, created_document~) =>
+    Permission(authorization_mode~, stage~, created_document~) => {
+      let guidance = match authorization_mode {
+        Project =>
+          "Check that Project Authorization is configured with https://www.googleapis.com/auth/drive.file."
+        Adc =>
+          "Check that ADC includes https://www.googleapis.com/auth/drive.file."
+      }
       remote_stage_name(stage) +
       " permission failed" +
       format_document_identity(created_document) +
-      ": Google denied permission. Check that ADC includes https://www.googleapis.com/auth/drive.file."
+      ": Google denied permission. " +
+      guidance
+    }
     Throttled(stage~, created_document~) =>
       remote_stage_name(stage) +
       " was throttled" +
@@ -193,11 +232,35 @@ pub async fn publish_path(
   get_token : async () -> Result[String, AuthenticationProblem],
   http : &@google_http.HttpClient,
 ) -> Result[PublishSuccess, PublishError] {
+  publish_path_with_authorization(
+    path,
+    read_source,
+    Adc,
+    get_token,
+    get_token,
+    http,
+  )
+}
+
+///|
+/// Publish a path using exactly the provider selected by `authorization_mode`.
+/// Both providers are injected so callers can compose Project Authorization and
+/// ADC without giving this boundary permission to fall back between them.
+pub async fn publish_path_with_authorization(
+  path : String,
+  read_source : async (String) -> Result[String, String],
+  authorization_mode : AuthorizationMode,
+  get_project_token : async () -> Result[String, AuthenticationProblem],
+  get_adc_token : async () -> Result[String, AuthenticationProblem],
+  http : &@google_http.HttpClient,
+) -> Result[PublishSuccess, PublishError] {
   let (source, title) = match prepare_source_path(path, read_source) {
     Ok(prepared) => prepared
     Err(error) => return Err(error)
   }
-  publish_markdown(source, title, get_token, http)
+  publish_markdown_with_authorization(
+    source, title, authorization_mode, get_project_token, get_adc_token, http,
+  )
 }
 
 ///|
@@ -207,11 +270,33 @@ pub async fn publish_markdown(
   get_token : async () -> Result[String, AuthenticationProblem],
   http : &@google_http.HttpClient,
 ) -> Result[PublishSuccess, PublishError] {
+  publish_markdown_with_authorization(
+    source,
+    title,
+    Adc,
+    get_token,
+    get_token,
+    http,
+  )
+}
+
+///|
+/// Render and publish Markdown with the explicitly selected authorization mode.
+pub async fn publish_markdown_with_authorization(
+  source : String,
+  title : String,
+  authorization_mode : AuthorizationMode,
+  get_project_token : async () -> Result[String, AuthenticationProblem],
+  get_adc_token : async () -> Result[String, AuthenticationProblem],
+  http : &@google_http.HttpClient,
+) -> Result[PublishSuccess, PublishError] {
   let document = match @pumd.render_markdown(source) {
     Ok(document) => document
     Err(diagnostics) => return Err(Rendering(diagnostics))
   }
-  publish_desired_document(document, title, get_token, http)
+  publish_desired_document_with_authorization(
+    document, title, authorization_mode, get_project_token, get_adc_token, http,
+  )
 }
 
 ///|
@@ -221,20 +306,54 @@ pub async fn publish_desired_document(
   get_token : async () -> Result[String, AuthenticationProblem],
   http : &@google_http.HttpClient,
 ) -> Result[PublishSuccess, PublishError] {
+  publish_desired_document_with_authorization(
+    document,
+    title,
+    Adc,
+    get_token,
+    get_token,
+    http,
+  )
+}
+
+///|
+/// Publish a prepared Desired Document using exactly one selected provider.
+/// Planning completes before either provider is invoked.
+pub async fn publish_desired_document_with_authorization(
+  document : @pumd.DesiredDocument,
+  title : String,
+  authorization_mode : AuthorizationMode,
+  get_project_token : async () -> Result[String, AuthenticationProblem],
+  get_adc_token : async () -> Result[String, AuthenticationProblem],
+  http : &@google_http.HttpClient,
+) -> Result[PublishSuccess, PublishError] {
   let plan = match prepare_docs_update_plan(document) {
     Ok(plan) => plan
     Err(error) => return Err(Planning(error.message()))
   }
-  let token = match get_token() {
+  let token_result = match authorization_mode {
+    Project => get_project_token()
+    Adc => get_adc_token()
+  }
+  let token = match token_result {
     Ok(token) => token
-    Err(problem) => return Err(Authentication(problem~, created_document=None))
+    Err(problem) =>
+      return Err(
+        Authentication(authorization_mode~, problem~, created_document=None),
+      )
   }
   let client = @google_core.GoogleClient::new(fn() { token }, http=Some(http))
   let document_id = match create_document(client, title) {
     Ok(document_id) => document_id
     Err(AdapterTransport(_)) => return Err(AmbiguousCreation)
     Err(AdapterHttpStatus(status~, kind~)) => {
-      match classified_google_error(DocumentCreation, kind, None) {
+      match
+        classified_google_error(
+          authorization_mode,
+          DocumentCreation,
+          kind,
+          None,
+        ) {
         Some(error) => return Err(error)
         None => ()
       }
@@ -256,6 +375,7 @@ pub async fn publish_desired_document(
     Err(AdapterHttpStatus(status~, kind~)) =>
       match
         classified_google_error(
+          authorization_mode,
           DocumentPopulation,
           kind,
           Some(created_document),
@@ -361,11 +481,17 @@ async fn application_default_access_token_with(
 ) -> Result[String, PublishError] {
   let auth_client = match detect_credentials() {
     Ok(client) => client
-    Err(problem) => return Err(Authentication(problem~, created_document=None))
+    Err(problem) =>
+      return Err(
+        Authentication(authorization_mode=Adc, problem~, created_document=None),
+      )
   }
   match acquire_token(auth_client) {
     Ok(token) => Ok(token)
-    Err(problem) => Err(Authentication(problem~, created_document=None))
+    Err(problem) =>
+      Err(
+        Authentication(authorization_mode=Adc, problem~, created_document=None),
+      )
   }
 }
 

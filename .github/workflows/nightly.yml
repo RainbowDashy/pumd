@@ -105,7 +105,7 @@ jobs:
             printf 'expected pumd without arguments to exit 1, got %s\n%s\n' "$status" "$output" >&2
             exit 1
           fi
-          if [[ "$output" != *"usage: pumd publish <markdown-path>"* ]]; then
+          if [[ "$output" != *"Project Authorization usage: pumd auth <setup|status> or pumd publish [--auth=project|adc] <markdown-path>"* ]]; then
             printf 'pumd did not print its usage message:\n%s\n' "$output" >&2
             exit 1
           fi
@@ -119,7 +119,7 @@ jobs:
           if ($LASTEXITCODE -ne 1) {
             throw "expected pumd without arguments to exit 1, got $LASTEXITCODE"
           }
-          if ($output -notmatch 'usage: pumd publish <markdown-path>') {
+          if ($output -notmatch 'Project Authorization usage: pumd auth <setup\|status> or pumd publish \[--auth=project\|adc\] <markdown-path>') {
             throw "pumd did not print its usage message: $output"
           }
           exit 0
@@ -289,7 +289,7 @@ jobs:
             printf 'expected packed pumd without arguments to exit 1, got %s\n%s\n' "$status" "$output" >&2
             exit 1
           fi
-          if [[ "$output" != *"usage: pumd publish <markdown-path>"* ]]; then
+          if [[ "$output" != *"Project Authorization usage: pumd auth <setup|status> or pumd publish [--auth=project|adc] <markdown-path>"* ]]; then
             printf 'packed pumd did not print its usage message:\n%s\n' "$output" >&2
             exit 1
           fi

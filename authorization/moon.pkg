@@ -1,0 +1,14 @@
+import {
+  "moonbitlang/core/json",
+  "moonbitlang/core/string",
+  "moonbitlang/core/encoding/utf8",
+  "moonbitlang/core/env",
+  "moonbitlang/x/codec/base64",
+  "moonbitlang/x/crypto",
+  "moonbitlang/async",
+  "moonbitlang/async/http" @async_http,
+  "moonbitlang/async/socket",
+  "moonbitlang/async/fs",
+  "moonbitlang/async/process",
+  "ryota0624/googleapis/http" @google_http,
+}

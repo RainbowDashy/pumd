@@ -1,10 +1,12 @@
 import {
+  "rainbowdashy/pumd/authorization",
   "rainbowdashy/pumd/cmd/pumd/args",
   "rainbowdashy/pumd/publish",
   "moonbitlang/async",
   "moonbitlang/async/stdio",
   "moonbitlang/x/fs",
   "moonbitlang/x/sys",
+  "ryota0624/googleapis/http" @google_http,
 }
 
 pkgtype(kind: "executable")

@@ -94,7 +94,7 @@ async fn run_publish_cli_in_directory(
       return Err("could not write live smoke Markdown: " + message)
   }
   let (exit_code, stdout, stderr) = @process.collect_output(pumd, [
-    "publish", markdown_path,
+    "publish", "--auth=adc", markdown_path,
   ])
   let stdout_text = stdout.text() catch {
     _ => return Err("could not decode pumd stdout")
