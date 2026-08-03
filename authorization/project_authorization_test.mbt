@@ -48,11 +48,12 @@ async test "Project Authorization setup constructs a PKCE desktop request with e
       Ok({ access_token: "transient", refresh_token: Some("refresh-token") })
     },
     store: {
-      load: fn() { Err("not configured") },
+      load: fn() { Err(CredentialStoreError::NotConfigured) },
       replace: fn(authorization) {
         saved = Some(authorization)
         Ok(())
       },
+      delete: fn() { Ok(()) },
     },
   }
   let result = setup_project_authorization(document, dependencies)
@@ -128,6 +129,7 @@ async test "Project Authorization status redacts secrets and refresh failures re
   let store : CredentialStore = {
     load: fn() { Ok(stored) },
     replace: fn(_) { Ok(()) },
+    delete: fn() { Ok(()) },
   }
   match project_authorization_status(store) {
     Ok(status) => {
@@ -171,11 +173,12 @@ async test "Project Authorization listener and token failures never replace the 
       Ok({ access_token: "", refresh_token: None })
     },
     store: {
-      load: fn() { Err("not configured") },
+      load: fn() { Err(CredentialStoreError::NotConfigured) },
       replace: fn(_) {
         replacement_calls = replacement_calls + 1
         Ok(())
       },
+      delete: fn() { Ok(()) },
     },
   }
   guard setup_project_authorization(document, listener_failure) is Err(_) else {
@@ -198,11 +201,12 @@ async test "Project Authorization listener and token failures never replace the 
     report_authorization_url: fn(_) { () },
     exchange_code: fn(_) { Ok({ access_token: "access", refresh_token: None }) },
     store: {
-      load: fn() { Err("not configured") },
+      load: fn() { Err(CredentialStoreError::NotConfigured) },
       replace: fn(_) {
         replacement_calls = replacement_calls + 1
         Ok(())
       },
+      delete: fn() { Ok(()) },
     },
   }
   guard setup_project_authorization(document, missing_refresh) is Err(_) else {
@@ -309,6 +313,7 @@ async test "stored Project Authorization refreshes silently without replacement"
       replace_calls = replace_calls + 1
       Ok(())
     },
+    delete: fn() { Ok(()) },
   }
   let token = project_access_token(store, fn(request) {
     refresh_request = Some(request)
@@ -326,6 +331,34 @@ async test "stored Project Authorization refreshes silently without replacement"
   assert_true(status.configured)
   assert_eq(load_calls, 3)
   assert_eq(replace_calls, 0)
+}
+
+///|
+async test "stored Project Authorization never sends refresh material to a non-Google endpoint" {
+  let stored : StoredAuthorization = {
+    version: 1,
+    client_id: "desktop-client",
+    client_secret: "client-secret",
+    refresh_token: "stored-refresh",
+    token_uri: "https://attacker.example/token",
+    scope: drive_file_scope,
+  }
+  let mut refresh_calls = 0
+  let result = project_access_token(
+    {
+      load: fn() { Ok(stored) },
+      replace: fn(_) { Ok(()) },
+      delete: fn() { Ok(()) },
+    },
+    fn(_) {
+      refresh_calls = refresh_calls + 1
+      Ok({ access_token: "must-not-be-returned", refresh_token: None })
+    },
+  )
+  guard result is Err(ReauthorizationRequired) else {
+    fail("a non-Google stored token endpoint must require reauthorization")
+  }
+  assert_eq(refresh_calls, 0)
 }
 
 ///|
@@ -358,8 +391,8 @@ async test "explicit file store round-trips one active authorization without acc
   }
   let replacement = (store.replace)(second)
   guard replacement is Ok(_) else {
-    guard replacement is Err(error) else { fail("replacement failed") }
-    fail("replacement must succeed: " + error)
+    guard replacement is Err(_) else { fail("replacement failed") }
+    fail("replacement must succeed")
   }
   guard (store.load)() is Ok(second_loaded) else {
     fail("replacement must load")
@@ -368,7 +401,131 @@ async test "explicit file store round-trips one active authorization without acc
   assert_eq(second_loaded.refresh_token, "second-refresh")
   let raw = @fs.read_file(directory + "/project-authorization.json").text()
   assert_false(raw.contains("access_token"))
+  guard (store.delete)() is Ok(_) else {
+    fail("file store delete must succeed")
+  }
+  guard (store.load)() is Err(CredentialStoreError::NotConfigured) else {
+    fail("deleted authorization must be reported as not configured")
+  }
+  guard (store.delete)() is Ok(_) else {
+    fail("file store delete must be idempotent")
+  }
   @fs.rmdir(directory, recursive=true)
+}
+
+///|
+async test "macOS Keychain adapter preserves prior values and redacts backend failures" {
+  let first : StoredAuthorization = {
+    version: 1,
+    client_id: "first-client",
+    client_secret: "first-secret",
+    refresh_token: "first-refresh",
+    token_uri: "https://oauth2.googleapis.com/token",
+    scope: drive_file_scope,
+  }
+  let second : StoredAuthorization = {
+    ..first,
+    client_id: "second-client",
+    refresh_token: "second-refresh",
+  }
+  let first_document =
+    #|{"version":1,"client_id":"first-client","client_secret":"first-secret","refresh_token":"first-refresh","token_uri":"https://oauth2.googleapis.com/token","scope":"https://www.googleapis.com/auth/drive.file"}
+  let mut saved : String? = Some(first_document)
+  let mut fail_replace = false
+  let store = macos_keychain_credential_store_with_backend({
+    load: fn() {
+      match saved {
+        Some(value) => Ok(value)
+        None => Err(CredentialStoreError::NotConfigured)
+      }
+    },
+    replace: fn(value) {
+      if fail_replace {
+        Err(CredentialStoreError::Unavailable)
+      } else {
+        saved = Some(value)
+        Ok(())
+      }
+    },
+    delete: fn() {
+      saved = None
+      Ok(())
+    },
+  })
+  guard (store.load)() is Ok(before) else { fail("fake keychain must load") }
+  assert_eq(before.refresh_token, "first-refresh")
+  fail_replace = true
+  guard (store.replace)(second) is Err(CredentialStoreError::Unavailable) else {
+    fail("keychain replacement failure must be classified")
+  }
+  guard (store.load)() is Ok(after) else {
+    fail("failed replacement must preserve prior value")
+  }
+  assert_eq(after.refresh_token, "first-refresh")
+  fail_replace = false
+  guard (store.replace)(second) is Ok(_) else {
+    fail("keychain update must replace the existing value")
+  }
+  guard (store.load)() is Ok(updated) else {
+    fail("updated keychain authorization must load")
+  }
+  assert_eq(updated.refresh_token, "second-refresh")
+  guard (store.delete)() is Ok(_) else { fail("keychain delete must succeed") }
+  guard (store.load)() is Err(CredentialStoreError::NotConfigured) else {
+    fail("deleted keychain authorization must be absent")
+  }
+}
+
+///|
+async test "macOS Keychain adapter maps denied and unavailable without secret errors" {
+  let secret = "never-display-keychain-secret"
+  let denied = macos_keychain_credential_store_with_backend({
+    load: fn() { Err(CredentialStoreError::Denied) },
+    replace: fn(_) { Err(CredentialStoreError::Denied) },
+    delete: fn() { Err(CredentialStoreError::Denied) },
+  })
+  guard (denied.load)() is Err(CredentialStoreError::Denied) else {
+    fail("denied keychain access must be classified")
+  }
+  guard (denied.replace)({
+      version: 1,
+      client_id: "client",
+      client_secret: secret,
+      refresh_token: secret,
+      token_uri: "https://oauth2.googleapis.com/token",
+      scope: drive_file_scope,
+    })
+    is Err(error) else {
+    fail("denied replacement must fail")
+  }
+  guard error is CredentialStoreError::Denied else {
+    fail("denied error must contain no secret diagnostic")
+  }
+  let unavailable = macos_keychain_credential_store_with_backend({
+    load: fn() { Err(CredentialStoreError::Unavailable) },
+    replace: fn(_) { Err(CredentialStoreError::Unavailable) },
+    delete: fn() { Err(CredentialStoreError::Unavailable) },
+  })
+  guard (unavailable.delete)() is Err(CredentialStoreError::Unavailable) else {
+    fail("unavailable keychain access must be classified")
+  }
+}
+
+///|
+async test "production keychain selection has no file fallback on unsupported platforms" {
+  let keychain = macos_keychain_credential_store_with_backend({
+    load: fn() { Err(CredentialStoreError::NotConfigured) },
+    replace: fn(_) { Ok(()) },
+    delete: fn() { Ok(()) },
+  })
+  guard production_credential_store_with_keychain(
+      CredentialStoreKind::Keychain,
+      false,
+      keychain,
+    )
+    is Err(StorageUnavailable) else {
+    fail("unsupported Keychain must not silently select a file store")
+  }
 }
 
 ///|
@@ -386,7 +543,8 @@ async test "browser fallback continues setup and store failure preserves the pri
   let mut reported_urls = 0
   let store : CredentialStore = {
     load: fn() { Ok(previous) },
-    replace: fn(_) { Err("atomic replacement failed") },
+    replace: fn(_) { Err(CredentialStoreError::Unavailable) },
+    delete: fn() { Ok(()) },
   }
   let result = setup_project_authorization(document, {
     random_bytes: fn(_) { Ok(b"abcdabcdabcdabcdabcdabcdabcdabcd") },

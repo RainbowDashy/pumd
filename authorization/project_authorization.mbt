@@ -17,6 +17,16 @@ pub(all) enum ProjectAuthorizationError {
 }
 
 ///|
+/// Non-secret outcomes of credential-store operations.
+pub(all) enum CredentialStoreError {
+  NotConfigured
+  Denied
+  Unavailable
+  Malformed
+  Unsupported
+}
+
+///|
 pub fn ProjectAuthorizationError::user_message(
   self : ProjectAuthorizationError,
 ) -> String {
@@ -25,7 +35,7 @@ pub fn ProjectAuthorizationError::user_message(
       "Project Authorization client file is invalid: " + message
     SetupFailed(message) => "Project Authorization setup failed: " + message
     ReauthorizationRequired =>
-      "Project Authorization needs reauthorization. Run `pumd auth setup --client-file <path> --credential-store=file`."
+      "Project Authorization needs reauthorization. Run `pumd auth setup`, or repeat setup with the explicitly selected credential-store option."
     StorageUnavailable =>
       "Project Authorization credential store is unavailable."
   }
@@ -34,6 +44,9 @@ pub fn ProjectAuthorizationError::user_message(
 ///|
 /// The only Google scope used by Project Authorization.
 pub let drive_file_scope = "https://www.googleapis.com/auth/drive.file"
+
+///|
+let google_token_uri = "https://oauth2.googleapis.com/token"
 
 ///|
 /// A durable Project Authorization grant. It deliberately has no access token.
@@ -87,8 +100,9 @@ pub(all) struct TokenRefreshRequest {
 ///|
 /// An injectable store. `replace` must atomically preserve the old grant on failure.
 pub(all) struct CredentialStore {
-  load : async () -> Result[StoredAuthorization, String]
-  replace : async (StoredAuthorization) -> Result[Unit, String]
+  load : async () -> Result[StoredAuthorization, CredentialStoreError]
+  replace : async (StoredAuthorization) -> Result[Unit, CredentialStoreError]
+  delete : async () -> Result[Unit, CredentialStoreError]
 }
 
 ///|
@@ -107,6 +121,16 @@ pub(all) struct SetupDependencies {
   report_authorization_url : (String) -> Unit
   exchange_code : async (TokenExchangeRequest) -> Result[OAuthToken, String]
   store : CredentialStore
+}
+
+///|
+fn valid_stored_authorization(authorization : StoredAuthorization) -> Bool {
+  authorization.version == 1 &&
+  authorization.scope == drive_file_scope &&
+  !authorization.client_id.is_empty() &&
+  !authorization.client_secret.is_empty() &&
+  authorization.token_uri == google_token_uri &&
+  !authorization.refresh_token.is_empty()
 }
 
 ///|
@@ -357,12 +381,7 @@ pub async fn project_authorization_status(
 ) -> Result[ProjectAuthorizationStatus, ProjectAuthorizationError] {
   match (store.load)() {
     Ok(authorization) =>
-      if authorization.version != 1 ||
-        authorization.scope != drive_file_scope ||
-        authorization.client_id.is_empty() ||
-        authorization.client_secret.is_empty() ||
-        authorization.token_uri.is_empty() ||
-        authorization.refresh_token.is_empty() {
+      if !valid_stored_authorization(authorization) {
         Err(ReauthorizationRequired)
       } else {
         Ok({
@@ -372,14 +391,15 @@ pub async fn project_authorization_status(
           scope: drive_file_scope,
         })
       }
-    Err("not configured") =>
+    Err(CredentialStoreError::NotConfigured) =>
       Ok({
         configured: false,
         client_id: None,
         token_uri: None,
         scope: drive_file_scope,
       })
-    Err(_) => Err(ReauthorizationRequired)
+    Err(CredentialStoreError::Malformed) => Err(ReauthorizationRequired)
+    Err(_) => Err(StorageUnavailable)
   }
 }
 
@@ -410,14 +430,12 @@ pub async fn project_access_token(
 ) -> Result[String, ProjectAuthorizationError] {
   let authorization = match (store.load)() {
     Ok(authorization) => authorization
-    Err(_) => return Err(ReauthorizationRequired)
+    Err(CredentialStoreError::NotConfigured)
+    | Err(CredentialStoreError::Malformed) =>
+      return Err(ReauthorizationRequired)
+    Err(_) => return Err(StorageUnavailable)
   }
-  if authorization.version != 1 ||
-    authorization.scope != drive_file_scope ||
-    authorization.client_id.is_empty() ||
-    authorization.client_secret.is_empty() ||
-    authorization.refresh_token.is_empty() ||
-    authorization.token_uri.is_empty() {
+  if !valid_stored_authorization(authorization) {
     return Err(ReauthorizationRequired)
   }
   match
@@ -549,10 +567,10 @@ pub fn default_project_authorization_directory() -> Result[
 fn required_stored_string(
   fields : Map[String, Json],
   name : String,
-) -> Result[String, String] {
+) -> Result[String, CredentialStoreError] {
   match fields.get(name) {
     Some(String(value)) if !value.is_empty() => Ok(value)
-    _ => Err("invalid stored authorization")
+    _ => Err(CredentialStoreError::Malformed)
   }
 }
 
@@ -572,26 +590,33 @@ fn authorization_json(authorization : StoredAuthorization) -> String {
 ///|
 async fn load_authorization_file(
   path : String,
-) -> Result[StoredAuthorization, String] {
+) -> Result[StoredAuthorization, CredentialStoreError] {
   if !@fs.exists(path) {
-    return Err("not configured")
+    return Err(CredentialStoreError::NotConfigured)
   }
   let data = @fs.read_file(path) catch {
-    _ => return Err("invalid stored authorization")
+    _ => return Err(CredentialStoreError::Malformed)
   }
   let text = data.text() catch {
-    _ => return Err("invalid stored authorization")
+    _ => return Err(CredentialStoreError::Malformed)
   }
+  stored_authorization_json(text)
+}
+
+///|
+fn stored_authorization_json(
+  text : String,
+) -> Result[StoredAuthorization, CredentialStoreError] {
   let json = @json.parse(text) catch {
-    _ => return Err("invalid stored authorization")
+    _ => return Err(CredentialStoreError::Malformed)
   }
   let fields = match json {
     Object(fields) => fields
-    _ => return Err("invalid stored authorization")
+    _ => return Err(CredentialStoreError::Malformed)
   }
   let version = match fields.get("version") {
     Some(Number(number, ..)) if number == 1.0 => 1
-    _ => return Err("invalid stored authorization")
+    _ => return Err(CredentialStoreError::Malformed)
   }
   let client_id = match required_stored_string(fields, "client_id") {
     Ok(x) => x
@@ -614,7 +639,7 @@ async fn load_authorization_file(
     Err(e) => return Err(e)
   }
   if scope != drive_file_scope {
-    return Err("invalid stored authorization")
+    return Err(CredentialStoreError::Malformed)
   }
   Ok({ version, client_id, client_secret, refresh_token, token_uri, scope })
 }
@@ -624,10 +649,10 @@ async fn replace_authorization_file(
   parent : String,
   path : String,
   authorization : StoredAuthorization,
-) -> Result[Unit, String] {
+) -> Result[Unit, CredentialStoreError] {
   if !@fs.exists(parent) {
     @fs.mkdir(parent, permission=0o700, recursive=true) catch {
-      _ => return Err("credential store unavailable")
+      _ => return Err(CredentialStoreError::Unavailable)
     }
   }
   let is_windows = match @env.get_env_var("OS") {
@@ -636,12 +661,12 @@ async fn replace_authorization_file(
   }
   if !is_windows {
     @fs.chmod(parent, 0o700) catch {
-      _ => return Err("credential store unavailable")
+      _ => return Err(CredentialStoreError::Unavailable)
     }
   }
   let suffix = match secure_random_bytes(16) {
     Ok(bytes) => base64url(bytes[:])
-    Err(_) => return Err("credential store unavailable")
+    Err(_) => return Err(CredentialStoreError::Unavailable)
   }
   let temp = path + ".tmp-" + suffix
   let file = @fs.open(
@@ -650,23 +675,23 @@ async fn replace_authorization_file(
     create_mode=@fs.CreateMode::CreateNew,
     permission=0o600,
   ) catch {
-    _ => return Err("credential store unavailable")
+    _ => return Err(CredentialStoreError::Unavailable)
   }
-  let write_outcome : Result[Unit, String] = try {
+  let write_outcome : Result[Unit, CredentialStoreError] = try {
     file.write(authorization_json(authorization))
     file.sync()
     Ok(())
   } catch {
-    _ => Err("credential store write failed")
+    _ => Err(CredentialStoreError::Unavailable)
   }
-  let outcome : Result[Unit, String] = match write_outcome {
+  let outcome : Result[Unit, CredentialStoreError] = match write_outcome {
     Ok(_) => {
       file.close()
       try {
         @fs.rename(temp, path, replace=true)
         Ok(())
       } catch {
-        _ => Err("credential store replacement failed")
+        _ => Err(CredentialStoreError::Unavailable)
       }
     }
     Err(error) => {
@@ -686,6 +711,24 @@ async fn replace_authorization_file(
 }
 
 ///|
+async fn delete_authorization_file(
+  path : String,
+) -> Result[Unit, CredentialStoreError] {
+  if !@fs.exists(path) {
+    return Ok(())
+  }
+  @fs.remove(path) catch {
+    _ =>
+      return if @fs.exists(path) {
+        Err(CredentialStoreError::Unavailable)
+      } else {
+        Ok(())
+      }
+  }
+  Ok(())
+}
+
+///|
 /// Production explicit file credential store. Replacement is write/sync/close then atomic rename.
 pub fn file_credential_store(config_directory : String) -> CredentialStore {
   let path = config_directory + "/project-authorization.json"
@@ -694,6 +737,7 @@ pub fn file_credential_store(config_directory : String) -> CredentialStore {
     replace: async fn(authorization) {
       replace_authorization_file(config_directory, path, authorization)
     },
+    delete: async fn() { delete_authorization_file(path) },
   }
 }
 
@@ -801,16 +845,15 @@ pub fn production_setup_dependencies(
 }
 
 ///|
-/// Production high-level setup using the default explicit file credential store.
+/// Production high-level setup using the default secure Keychain credential store.
 pub async fn setup_project_authorization_production(
   client_document : String,
   http : &@google_http.HttpClient,
 ) -> Result[ProjectAuthorizationStatus, ProjectAuthorizationError] {
-  let directory = match default_project_authorization_directory() {
-    Ok(directory) => directory
+  let store = match production_credential_store(CredentialStoreKind::Keychain) {
+    Ok(store) => store
     Err(error) => return Err(error)
   }
-  let store = file_credential_store(directory)
   setup_project_authorization(
     client_document,
     production_setup_dependencies(store, http),
@@ -822,13 +865,11 @@ pub async fn setup_project_authorization_production(
 pub async fn project_authorization_status_production(
   http : &@google_http.HttpClient,
 ) -> Result[ProjectAuthorizationStatus, ProjectAuthorizationError] {
-  let directory = match default_project_authorization_directory() {
-    Ok(directory) => directory
+  let store = match production_credential_store(CredentialStoreKind::Keychain) {
+    Ok(store) => store
     Err(error) => return Err(error)
   }
-  project_authorization_usable_status(file_credential_store(directory), async fn(
-    request,
-  ) {
+  project_authorization_usable_status(store, async fn(request) {
     refresh_with_http(http, request)
   })
 }
@@ -838,11 +879,11 @@ pub async fn project_authorization_status_production(
 pub async fn project_access_token_production(
   http : &@google_http.HttpClient,
 ) -> Result[String, ProjectAuthorizationError] {
-  let directory = match default_project_authorization_directory() {
-    Ok(directory) => directory
+  let store = match production_credential_store(CredentialStoreKind::Keychain) {
+    Ok(store) => store
     Err(error) => return Err(error)
   }
-  project_access_token(file_credential_store(directory), async fn(request) {
+  project_access_token(store, async fn(request) {
     refresh_with_http(http, request)
   })
 }
@@ -945,7 +986,7 @@ pub fn parse_installed_client(
       ),
     )
   }
-  if token_uri != "https://oauth2.googleapis.com/token" {
+  if token_uri != google_token_uri {
     return Err(
       InvalidClientFile(
         "`installed.token_uri` must be the Google HTTPS token endpoint",

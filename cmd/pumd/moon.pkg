@@ -4,6 +4,8 @@ import {
   "rainbowdashy/pumd/publish",
   "moonbitlang/async",
   "moonbitlang/async/stdio",
+  "moonbitlang/core/encoding/utf8",
+  "moonbitlang/core/string",
   "moonbitlang/x/fs",
   "moonbitlang/x/sys",
   "ryota0624/googleapis/http" @google_http,
@@ -12,5 +14,6 @@ import {
 pkgtype(kind: "executable")
 
 options(
+  "native-stub": [ "terminal_native.c" ],
   targets: { "main.mbt": [ "native" ] },
 )

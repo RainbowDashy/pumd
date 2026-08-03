@@ -138,51 +138,94 @@ validated Milestone 2 contract.
 
 ### Set up Project Authorization
 
-Project Authorization is the tracer-bullet authorization flow. You select the
-Google Cloud project, provide its Desktop OAuth client, and own its consent
-configuration and quota.
+Project Authorization is an opt-in authorization mode in this milestone: an
+author grants access through the OAuth identity of a Google Cloud project they
+select. It is currently supported by the native Apple-Silicon macOS build and
+defaults to the macOS Keychain for its durable authorization document.
 
-1. Create or select a Google Cloud project and enable the **Google Docs API**.
-   With the Google Cloud CLI, the enablement command is:
+Run the guided flow from an interactive terminal:
 
-   ```console
-   gcloud services enable docs.googleapis.com --project=YOUR_PROJECT_ID
-   ```
+```console
+pumd auth setup
+```
 
-2. Configure the project's OAuth consent screen. If the app is in testing,
-   include the Google account that will publish as a test user.
-3. Create an OAuth client ID with application type **Desktop app**, then download
-   its client JSON as `oauth-client.json`.
-4. From the directory containing the downloaded client definition, run the
-   explicit Project Authorization setup command:
+The guide requires the Google Cloud CLI. Install `gcloud` if prompted, then
+sign in before retrying:
 
-   ```console
-   pumd auth setup --client-file oauth-client.json --credential-store=file
-   ```
+```console
+gcloud auth login
+```
 
-`oauth-client.json` is the Desktop client definition, not a refresh credential.
-The authorization request requires exactly
-`https://www.googleapis.com/auth/drive.file`; it requests no identity scopes.
+It lists the Google accounts known to `gcloud`, preselects an active account
+when it is available, and then lists its Cloud projects. Selecting an existing,
+available project is the default path; creating a new project is an explicit
+optional choice. Before it creates a project or enables an API, `pumd` previews
+the precise mutation and asks for confirmation. Answering anything other than
+yes cancels before that requested cloud change. Guided setup enables only
+`docs.googleapis.com` (the Google Docs API); it does not enable a bundle of
+Google APIs.
 
-`--credential-store=file` is a deliberate, reduced-protection opt-in. It stores
-the refresh credential in a local file with owner-only permissions where the
-platform supports them; Windows relies on the user profile's normal ACLs.
-Select it only when that trade-off is appropriate (for example, headless or
-automation use); `pumd` does not silently choose file storage. This
-tracer-bullet flow does not claim an operating-system credential-vault
-integration or a fallback to one.
+Google does not allow `pumd` to manage OAuth consent settings or OAuth clients
+programmatically. The guide therefore previews and hands off the following
+steps to Google Cloud Console; it never overwrites an existing, conflicting, or
+unknown configuration:
 
-Inspect the configured Project Authorization state without publishing:
+- **Branding:** `https://console.cloud.google.com/auth/branding?project=PROJECT_ID`
+- **Audience:** `https://console.cloud.google.com/auth/audience?project=PROJECT_ID`
+- **Data Access / scopes:** `https://console.cloud.google.com/auth/scopes?project=PROJECT_ID`
+- **OAuth clients:** `https://console.cloud.google.com/auth/clients?project=PROJECT_ID`
+
+In the Console, create the minimum External/testing consent configuration, add
+the publishing account as a test user when required, configure only
+`https://www.googleapis.com/auth/drive.file`, and create a **Desktop app**
+client. Download that installed-client JSON when prompted. The direct OAuth
+flow accepts installed Desktop OAuth clients only and requests exactly
+`drive.file`; it requests no identity scopes.
+
+If you have already downloaded the Desktop client JSON, skip the project guide
+and use the direct shortcut instead:
+
+```console
+pumd auth setup --client-file oauth-client.json
+```
+
+The client JSON is a client definition, not a refresh credential. `pumd` opens
+the direct installed-app OAuth flow, then stores the resulting authorization in
+the macOS Keychain. It never silently falls back to a file. If macOS denies
+Keychain access or the login Keychain is unavailable, unlock it and allow
+access, then retry; choose file storage only deliberately.
+
+`--credential-store=file` is the explicit reduced-protection alternative. Use
+the same store selection consistently for setup, status, publishing, and
+logout:
+
+```console
+pumd auth setup --client-file oauth-client.json --credential-store=file
+pumd auth status --credential-store=file
+pumd publish --auth=project --credential-store=file document.md
+pumd auth logout --credential-store=file
+```
+
+The default Keychain forms are:
 
 ```console
 pumd auth status
+pumd publish --auth=project document.md
+pumd auth logout
 ```
 
-The stored refresh credential is used to obtain fresh access tokens when
-needed. If it is revoked, expires without being refreshable, the OAuth consent
-configuration changes, or the requested scope is no longer granted, repeat
-`pumd auth setup --client-file oauth-client.json --credential-store=file` to
-reauthorize.
+`auth status` checks whether the selected stored authorization is usable;
+`auth logout` removes it (and is harmless when it is already absent). Refresh
+credentials obtain fresh access tokens as needed. If refresh fails, consent or
+scope changed, or the credential was revoked, run setup again with the same
+credential-store choice. Diagnostic and status output redact OAuth client
+secrets, refresh credentials, and access tokens.
+
+Guided setup requires an interactive terminal. In noninteractive environments,
+use a previously configured Desktop client through `--client-file <path>` when
+that OAuth interaction is appropriate, or supply explicit automation
+credentials through the ADC route below; the guide does not infer a credential
+store or silently switch authorization modes.
 
 ### Explicit ADC route (transition only)
 
@@ -204,6 +247,8 @@ After setup, the explicit Project Authorization publish command is:
 ```console
 pumd publish --auth=project document.md
 ```
+
+For the explicit file store, add `--credential-store=file` as shown above.
 
 Each successful invocation creates a new Google Doc, including when the same
 Markdown file was published before. The document title is the source file name
@@ -237,11 +282,12 @@ silently renumbered.
   fix the local input and run the publish command again. These failures happen
   before credential access or remote mutation, so no Google Doc was created.
 - For a Project Authorization authentication failure, run `pumd auth status`;
-  then repeat the setup command above if reauthorization is required. For a
-  permission failure, confirm the exact `drive.file` scope and that the Google
-  Docs API is enabled in the selected project's OAuth client. For the explicit
-  ADC route, recreate its ADC separately; neither route falls back to the
-  other.
+  then repeat setup with the same credential-store choice if reauthorization is
+  required. For a Keychain denial, unlock the login Keychain and allow access;
+  `pumd` does not fall back to a file. For a permission failure, confirm the
+  exact `drive.file` scope and that `docs.googleapis.com` is enabled in the
+  selected project. For the explicit ADC route, recreate its ADC separately;
+  neither route falls back to the other.
 - If Google throttles a request, wait before trying again. For another explicit
   5xx response, wait and retry later; report other unexpected HTTP statuses
   before retrying.
@@ -268,6 +314,20 @@ document URL:
 ```console
 moon build --target native cmd/pumd
 moon test --target native -p rainbowdashy/pumd/publish --include-skipped --filter "live smoke publishes and reads a real Google Doc"
+```
+
+The packaged macOS Project Authorization smoke is also opt-in. It performs
+setup with the supplied Desktop client, replaces the active authorization in
+the default Keychain, and creates a real Google Doc. Run it only from Apple
+Silicon macOS with a dedicated account and project:
+
+```console
+PUMD_MACOS_PROJECT_AUTH_SMOKE=1 \
+PUMD_MACOS_SMOKE_BINARY=/absolute/path/to/packaged/pumd \
+PUMD_MACOS_SMOKE_CLIENT_FILE=/absolute/path/to/desktop-client.json \
+moon test --target native -p rainbowdashy/pumd/publish \
+  --include-skipped \
+  --filter "macOS Apple Silicon packaged artifact smoke publishes with Project Authorization"
 ```
 
 On success, its output includes lines with this form:

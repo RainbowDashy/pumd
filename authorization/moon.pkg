@@ -12,3 +12,11 @@ import {
   "moonbitlang/async/process",
   "ryota0624/googleapis/http" @google_http,
 }
+
+options(
+  "native-stub": [ "macos_keychain_native.c" ],
+  targets: {
+    "macos_keychain_native.mbt": [ "native" ],
+    "macos_keychain_stub.mbt": [ "not", "native" ],
+  },
+)
