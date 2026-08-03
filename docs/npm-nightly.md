@@ -34,5 +34,8 @@ supplies the OIDC credential used by npm. A workflow run on a branch other than
 
 Stable npm releases should use the same package layout but derive the exact
 version from a release tag and publish under the default `latest` dist-tag.
-Nightly publishing must continue to pass `--tag nightly` so a prerelease never
-replaces `latest`.
+The npm registry requires every package to retain a `latest` tag, so before the
+first stable release it points at the initial bootstrap nightly. Nightly
+publishing must continue to pass `--tag nightly`; subsequent nightlies advance
+only `nightly`, and the first stable publication replaces the bootstrap value
+of `latest`.
