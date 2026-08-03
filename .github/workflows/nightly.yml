@@ -270,7 +270,7 @@ jobs:
           version="$(node scripts/npm-nightly-version.cjs "$base_version" "$GITHUB_SHA")"
           npm pkg set version="$version"
           package_name="$(npm pack --pack-destination dist --json | node -e 'let input = ""; process.stdin.on("data", chunk => input += chunk).on("end", () => console.log(JSON.parse(input)[0].filename))')"
-          package_file="dist/$package_name"
+          package_file="./dist/$package_name"
           test -f "$package_file"
           echo "PUMD_NPM_VERSION=$version" >> "$GITHUB_ENV"
           echo "PUMD_NPM_PACKAGE=$package_file" >> "$GITHUB_ENV"
