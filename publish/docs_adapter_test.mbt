@@ -150,6 +150,119 @@ async test "batch update preserves UTF-16 ranges, links, list presets, and color
 }
 
 ///|
+async test "batch update reapplies quoted list decoration after native bullets" {
+  let profile = @pumd.builtin_style_profile()
+  let document : @pumd.DesiredDocument = {
+    metadata: { title: None, locale: None },
+    render_metadata: {
+      style_profile_id: profile.id,
+      style_profile_version: profile.version,
+    },
+    content: [
+      @pumd.StructuralElement::Paragraph({
+        runs: [
+          {
+            content: "zero",
+            style: profile.body_text,
+            link: None,
+            provenance: None,
+          },
+        ],
+        style: {
+          ..profile.body,
+          indent_start_points: Some(54),
+          indent_first_line_points: Some(36),
+          border_left: Some(profile.quote_border),
+        },
+        bullet: Some({ kind: @pumd.ListKind::Bullet, nesting_level: 0 }),
+        provenance: None,
+      }),
+      @pumd.StructuralElement::Paragraph({
+        runs: [
+          {
+            content: "one",
+            style: profile.body_text,
+            link: None,
+            provenance: None,
+          },
+        ],
+        style: {
+          ..profile.body,
+          indent_start_points: Some(90),
+          indent_first_line_points: Some(72),
+          border_left: Some(profile.quote_border),
+        },
+        bullet: Some({ kind: @pumd.ListKind::Bullet, nesting_level: 1 }),
+        provenance: None,
+      }),
+      @pumd.StructuralElement::Paragraph({
+        runs: [
+          {
+            content: "two",
+            style: profile.body_text,
+            link: None,
+            provenance: None,
+          },
+        ],
+        style: {
+          ..profile.body,
+          indent_start_points: Some(126),
+          indent_first_line_points: Some(108),
+          border_left: Some(profile.quote_border),
+        },
+        bullet: Some({ kind: @pumd.ListKind::Bullet, nesting_level: 2 }),
+        provenance: None,
+      }),
+    ],
+    provenance: None,
+  }
+  let fake = DocsAdapterFakeHttpClient::{
+    requests: [],
+    responses: [@google_http.HttpResponse::new(200, {}, "{}")],
+  }
+  match
+    batch_update_document(
+      docs_adapter_client(fake),
+      "doc-123",
+      compile_docs_update_plan(document),
+    ) {
+    Ok(_) => ()
+    Err(_) => assert_true(false)
+  }
+  let body = match fake.requests[0].body {
+    Some(body) => body
+    None => abort("batch update must have JSON")
+  }
+  assert_true(@json.valid(body))
+  assert_true(
+    body.contains(
+      "\"fields\":\"namedStyleType,lineSpacing,spaceAbove,spaceBelow,indentStart,indentFirstLine,borderLeft\"",
+    ),
+  )
+  let bullets0 = "\"createParagraphBullets\":{\"range\":{\"startIndex\":1,\"endIndex\":6}"
+  let decoration0 = "\"range\":{\"startIndex\":1,\"endIndex\":6},\"paragraphStyle\":{\"indentStart\":{\"magnitude\":54,\"unit\":\"PT\"}"
+  let bullets1 = "\"createParagraphBullets\":{\"range\":{\"startIndex\":6,\"endIndex\":11}"
+  let decoration1 = "\"range\":{\"startIndex\":6,\"endIndex\":10},\"paragraphStyle\":{\"indentStart\":{\"magnitude\":90,\"unit\":\"PT\"},\"indentFirstLine\":{\"magnitude\":72,\"unit\":\"PT\"},\"borderLeft\":{\"color\":{\"color\":{\"rgbColor\":{\"red\":0.7176470588235294,\"green\":0.7176470588235294,\"blue\":0.7176470588235294}}},\"width\":{\"magnitude\":1,\"unit\":\"PT\"},\"padding\":{\"magnitude\":6,\"unit\":\"PT\"},\"dashStyle\":\"SOLID\"}},\"fields\":\"indentStart,indentFirstLine,borderLeft\""
+  let bullets2 = "\"createParagraphBullets\":{\"range\":{\"startIndex\":10,\"endIndex\":16}"
+  let decoration2 = "\"range\":{\"startIndex\":10,\"endIndex\":14},\"paragraphStyle\":{\"indentStart\":{\"magnitude\":126,\"unit\":\"PT\"}"
+  match (body.find(bullets0), body.find(decoration0)) {
+    (Some(bullets_index), Some(decoration_index)) =>
+      assert_true(bullets_index < decoration_index)
+    _ => assert_true(false)
+  }
+  match (body.find(bullets1), body.find(decoration1)) {
+    (Some(bullets_index), Some(decoration_index)) =>
+      assert_true(bullets_index < decoration_index)
+    _ => assert_true(false)
+  }
+  match (body.find(bullets2), body.find(decoration2)) {
+    (Some(bullets_index), Some(decoration_index)) =>
+      assert_true(bullets_index < decoration_index)
+    _ => assert_true(false)
+  }
+}
+
+///|
 async test "create document separates malformed responses from HTTP status" {
   let malformed = DocsAdapterFakeHttpClient::{
     requests: [],

@@ -11,7 +11,7 @@ test "renders fenced code as editable paragraphs preserving blank lines and Unic
       inspect(
         document.to_snapshot(),
         content=(
-          #|profile pumd.default@1
+          #|profile pumd.default@2
           #|paragraph normal font=Roboto Mono size=10 line=1.0 before=0 after=0 background=#F1F3F4
           #|  text "let x = 1" font=Roboto Mono size=10 background=#F1F3F4
           #|paragraph normal font=Roboto Mono size=10 line=1.0 before=0 after=0 background=#F1F3F4

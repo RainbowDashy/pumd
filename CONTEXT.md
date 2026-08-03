@@ -11,3 +11,7 @@ _Avoid_: Document IR, request plan, API document
 **Style Profile**:
 The coherent set of native formatting defaults that publishing applies to body text and supported document elements. Version one has one built-in profile.
 _Avoid_: Stylesheet, theme, template
+
+**Blockquote**:
+A quoted block of Markdown content introduced by the `>` marker and published as visibly distinct native document content.
+_Avoid_: Backquote, backquote block marker

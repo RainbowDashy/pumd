@@ -1,5 +1,5 @@
 ///|
-test "public golden covers every version-one Style Profile role" {
+test "public golden covers every version-two Style Profile role" {
   let markdown =
     #|# Heading one
     #|## Heading two
@@ -25,7 +25,7 @@ test "public golden covers every version-one Style Profile role" {
   inspect(
     document.to_snapshot(),
     content=(
-      #|profile pumd.default@1
+      #|profile pumd.default@2
       #|paragraph heading-1 font=Arial size=24 line=1.15 before=20 after=8
       #|  text "Heading one" font=Arial size=24
       #|paragraph heading-2 font=Arial size=18 line=1.15 before=18 after=6
@@ -69,7 +69,7 @@ test "public golden covers every version-one Style Profile role" {
 test "render metadata retains the built-in profile outside native semantic equality" {
   let original = render_or_fail("profile contract")
   assert_eq(original.render_metadata.style_profile_id, "pumd.default")
-  assert_eq(original.render_metadata.style_profile_version, 1)
+  assert_eq(original.render_metadata.style_profile_version, 2)
   let changed : @pumd.DesiredDocument = {
     ..original,
     render_metadata: {
@@ -80,4 +80,14 @@ test "render metadata retains the built-in profile outside native semantic equal
   }
   assert_true(original.semantic_eq(changed))
   assert_true(original.to_snapshot() != changed.to_snapshot())
+}
+
+///|
+test "public Style Profile supplies version-two quote decorations" {
+  let profile = builtin_style_profile()
+  assert_eq(profile.version, 2)
+  assert_eq(profile.quote_indent_per_level_points, 18)
+  assert_eq(profile.quote_border.color, "#B7B7B7")
+  assert_eq(profile.quote_border.width_points, 1)
+  assert_eq(profile.quote_border.padding_points, 6)
 }

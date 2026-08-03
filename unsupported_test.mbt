@@ -88,14 +88,6 @@ test "golden diagnostics cover every directly exposed unsupported construct" {
     "Replace the indented code block with a fenced code block.",
   )
   assert_render_failure(
-    "> quote",
-    @pumd.DiagnosticKind::UnsupportedConstruct,
-    "blockquote",
-    0,
-    7,
-    "Remove the blockquote marker and use regular paragraphs instead.",
-  )
-  assert_render_failure(
     "<div>html</div>",
     @pumd.DiagnosticKind::UnsupportedConstruct,
     "html-block",
@@ -186,25 +178,17 @@ test "golden diagnostics cover every directly exposed unsupported construct" {
 }
 
 ///|
-test "rejected containers collect nested diagnostics in preorder" {
+test "containers collect nested diagnostics in preorder" {
   match @pumd.render_markdown("> ![alt](image.png)") {
     Ok(_) => assert_true(false)
     Err(diagnostics) => {
-      assert_eq(diagnostics.length(), 2)
+      assert_eq(diagnostics.length(), 1)
       assert_diagnostic(
         diagnostics[0],
         @pumd.DiagnosticKind::UnsupportedConstruct,
-        "blockquote",
-        0,
-        19,
-        "Remove the blockquote marker and use regular paragraphs instead.",
-      )
-      assert_diagnostic(
-        diagnostics[1],
-        @pumd.DiagnosticKind::UnsupportedConstruct,
         "image",
-        0,
-        17,
+        2,
+        19,
         "Replace the image with a text link.",
       )
     }
@@ -317,12 +301,12 @@ test "missing reference definitions still collect unsupported link-text children
 
 ///|
 test "collects unsupported diagnostics in stable source order" {
-  match @pumd.render_markdown("text\n\n---\n\n> quote") {
+  match @pumd.render_markdown("text\n\n---\n\n> ~~quote~~") {
     Ok(_) => assert_true(false)
     Err(diagnostics) => {
       assert_eq(diagnostics.length(), 2)
       assert_eq(diagnostics[0].node_kind, "thematic-break")
-      assert_eq(diagnostics[1].node_kind, "blockquote")
+      assert_eq(diagnostics[1].node_kind, "strikethrough")
     }
   }
 }

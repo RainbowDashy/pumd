@@ -9,6 +9,11 @@ pub enum DocsUpdateRequest {
     end_index~ : Int,
     style~ : @pumd.ParagraphStyle
   )
+  UpdateParagraphDecoration(
+    start_index~ : Int,
+    end_index~ : Int,
+    style~ : @pumd.ParagraphStyle
+  )
   CreateParagraphBullets(
     start_index~ : Int,
     end_index~ : Int,
@@ -132,7 +137,7 @@ fn append_paragraph(
     run_start = run_end
   }
   match paragraph.bullet {
-    Some(bullet) =>
+    Some(bullet) => {
       // Adapter contract: emit this operation in plan order and map the list
       // kind to a Docs bullet preset. Google Docs derives nesting from the
       // leading tabs already inserted above and consumes them here. Keep this
@@ -145,9 +150,29 @@ fn append_paragraph(
           bullet~,
         ),
       )
+      // Creating native bullets may replace Docs' paragraph indentation.
+      // Reapply only quote decoration, and use the post-consumption range: a
+      // nested list's leading tab is no longer part of the native paragraph.
+      if has_paragraph_decoration(paragraph.style) {
+        requests.push(
+          UpdateParagraphDecoration(
+            start_index=cursor,
+            end_index~,
+            style=paragraph.style,
+          ),
+        )
+      }
+    }
     None => ()
   }
   end_index
+}
+
+///|
+fn has_paragraph_decoration(style : @pumd.ParagraphStyle) -> Bool {
+  style.indent_start_points is Some(_) ||
+  style.indent_first_line_points is Some(_) ||
+  style.border_left is Some(_)
 }
 
 ///|
@@ -360,6 +385,31 @@ fn write_plan_paragraph_style(
   buffer.write_string(style.space_above_points.to_string())
   buffer.write_string(" after=")
   buffer.write_string(style.space_below_points.to_string())
+  match style.indent_start_points {
+    Some(points) => {
+      buffer.write_string(" indent-start=")
+      buffer.write_string(points.to_string())
+    }
+    None => ()
+  }
+  match style.indent_first_line_points {
+    Some(points) => {
+      buffer.write_string(" indent-first-line=")
+      buffer.write_string(points.to_string())
+    }
+    None => ()
+  }
+  match style.border_left {
+    Some(border) => {
+      buffer.write_string(" border-left=")
+      buffer.write_string(border.color)
+      buffer.write_string(" width=")
+      buffer.write_string(border.width_points.to_string())
+      buffer.write_string(" padding=")
+      buffer.write_string(border.padding_points.to_string())
+    }
+    None => ()
+  }
 }
 
 ///|
@@ -470,6 +520,14 @@ pub fn DocsUpdatePlan::to_snapshot(self : DocsUpdatePlan) -> String {
       }
       UpdateParagraphStyle(start_index~, end_index~, style~) => {
         buffer.write_string("paragraph-style ")
+        buffer.write_string(start_index.to_string())
+        buffer.write_string("..")
+        buffer.write_string(end_index.to_string())
+        buffer.write_char(' ')
+        write_plan_paragraph_style(style, buffer)
+      }
+      UpdateParagraphDecoration(start_index~, end_index~, style~) => {
+        buffer.write_string("paragraph-decoration ")
         buffer.write_string(start_index.to_string())
         buffer.write_string("..")
         buffer.write_string(end_index.to_string())

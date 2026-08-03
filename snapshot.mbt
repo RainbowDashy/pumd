@@ -91,6 +91,31 @@ fn write_paragraph(
     }
     None => ()
   }
+  match style.indent_start_points {
+    Some(points) => {
+      buffer.write_string(" indent-start=")
+      buffer.write_string(points.to_string())
+    }
+    None => ()
+  }
+  match style.indent_first_line_points {
+    Some(points) => {
+      buffer.write_string(" indent-first-line=")
+      buffer.write_string(points.to_string())
+    }
+    None => ()
+  }
+  match style.border_left {
+    Some(border) => {
+      buffer.write_string(" border-left=")
+      buffer.write_string(border.color)
+      buffer.write_string(" width=")
+      buffer.write_string(border.width_points.to_string())
+      buffer.write_string(" padding=")
+      buffer.write_string(border.padding_points.to_string())
+    }
+    None => ()
+  }
   match paragraph.bullet {
     Some(properties) => {
       buffer.write_string(" list=")

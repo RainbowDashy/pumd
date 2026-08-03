@@ -293,29 +293,39 @@ fn BlockParser::parse_list_item(
   marker_offset : Int,
   content_offset : Int,
 ) -> ListItem {
-  // Parse first line content
-  let content_buf = StringBuilder::new()
-  self.scanner.append_line_to(content_buf)
-  if char_is(self.scanner.peek(), '\n') {
-    self.scanner.advance(1)
-  }
-
-  // Parse content as blocks
-  let content = content_buf.to_string()
   let children : Array[Block] = []
-
-  // Check for task list checkbox: [ ], [x], or [X]
-  let (checked, actual_content) = parse_task_checkbox(content)
-  if !actual_content.is_empty() {
-    let inline_content = self.parse_inline_content(actual_content)
-    children.push(
-      Block::Paragraph(
-        children=inline_content,
-        span=Span::new(start, self.scanner.pos),
-        leading_trivia=Trivia::empty(),
-        trailing_trivia=Trivia::empty(),
-      ),
-    )
+  let mut checked : Bool? = None
+  let content_start = self.scanner.pos
+  let first_blockquote = if char_is(self.scanner.peek(), '>') {
+    self.try_parse_blockquote(content_start)
+  } else {
+    None
+  }
+  match first_blockquote {
+    Some(blockquote) => children.push(blockquote)
+    None => {
+      // Parse ordinary first-line content.
+      let content_buf = StringBuilder::new()
+      self.scanner.append_line_to(content_buf)
+      if char_is(self.scanner.peek(), '\n') {
+        self.scanner.advance(1)
+      }
+      let (task_state, actual_content) = parse_task_checkbox(
+        content_buf.to_string(),
+      )
+      checked = task_state
+      if !actual_content.is_empty() {
+        let inline_content = self.parse_inline_content(actual_content)
+        children.push(
+          Block::Paragraph(
+            children=inline_content,
+            span=Span::new(start, self.scanner.pos),
+            leading_trivia=Trivia::empty(),
+            trailing_trivia=Trivia::empty(),
+          ),
+        )
+      }
+    }
   }
 
   // Check for nested content (indented continuation)
@@ -341,9 +351,15 @@ fn BlockParser::parse_list_item(
         }
       }
       _ => {
-        // Not a nested list, restore and break
         self.scanner.restore(saved)
-        break
+        // An indented quote is another block continuation of this item.
+        match self.try_parse_blockquote(saved) {
+          Some(blockquote) => children.push(blockquote)
+          None => {
+            self.scanner.restore(saved)
+            break
+          }
+        }
       }
     }
   }

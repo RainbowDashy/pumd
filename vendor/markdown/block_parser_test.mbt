@@ -202,6 +202,235 @@ test "parse blockquote" {
 }
 
 ///|
+test "parse blockquote lazy paragraph continuation with document spans" {
+  let result = parse("> First quoted line\ncontinued quoted line\n")
+  match result.document.children[0] {
+    Block::Blockquote(children~, span=quote_span, ..) => {
+      @debug.debug_inspect(quote_span.from, content="0")
+      @debug.debug_inspect(quote_span.to, content="42")
+      match children[0] {
+        Block::Paragraph(children=paragraph_children, span=paragraph_span, ..) => {
+          @debug.debug_inspect(paragraph_span.from, content="2")
+          @debug.debug_inspect(paragraph_span.to, content="41")
+          match paragraph_children[0] {
+            Inline::Text(content~, span~) => {
+              @debug.debug_inspect(
+                content,
+                content=(
+                  #|"First quoted line"
+                ),
+              )
+              @debug.debug_inspect(span.from, content="2")
+              @debug.debug_inspect(span.to, content="19")
+            }
+            _ => fail("Expected first text")
+          }
+          match paragraph_children[1] {
+            Inline::SoftBreak(span~) => {
+              @debug.debug_inspect(span.from, content="19")
+              @debug.debug_inspect(span.to, content="20")
+            }
+            _ => fail("Expected soft break")
+          }
+          match paragraph_children[2] {
+            Inline::Text(content~, span~) => {
+              @debug.debug_inspect(
+                content,
+                content=(
+                  #|"continued quoted line"
+                ),
+              )
+              @debug.debug_inspect(span.from, content="20")
+              @debug.debug_inspect(span.to, content="41")
+            }
+            _ => fail("Expected continuation text")
+          }
+        }
+        _ => fail("Expected paragraph in blockquote")
+      }
+    }
+    _ => fail("Expected blockquote")
+  }
+}
+
+///|
+test "blockquote child spans use document code point offsets" {
+  let result = parse("> 😀 first\n> second\n")
+  match result.document.children[0] {
+    Block::Blockquote(children~, ..) =>
+      match children[0] {
+        Block::Paragraph(children=paragraph_children, span~, ..) => {
+          @debug.debug_inspect(span.from, content="2")
+          @debug.debug_inspect(span.to, content="18")
+          match paragraph_children[0] {
+            Inline::Text(span~, ..) => {
+              @debug.debug_inspect(span.from, content="2")
+              @debug.debug_inspect(span.to, content="9")
+            }
+            _ => fail("Expected first text")
+          }
+          match paragraph_children[1] {
+            Inline::SoftBreak(span~) => {
+              @debug.debug_inspect(span.from, content="9")
+              @debug.debug_inspect(span.to, content="10")
+            }
+            _ => fail("Expected soft break")
+          }
+          match paragraph_children[2] {
+            Inline::Text(span~, ..) => {
+              @debug.debug_inspect(span.from, content="12")
+              @debug.debug_inspect(span.to, content="18")
+            }
+            _ => fail("Expected second text")
+          }
+        }
+        _ => fail("Expected paragraph")
+      }
+    _ => fail("Expected blockquote")
+  }
+}
+
+///|
+test "parse nested blockquote children with document spans and definitions" {
+  let result = parse("> outer\n> > *nested*\n> tail\n> [ref]: /url\n")
+  match result.document.children[0] {
+    Block::Blockquote(children~, ..) =>
+      match children[1] {
+        Block::Blockquote(children=nested_children, span~, ..) => {
+          @debug.debug_inspect(span.from, content="10")
+          @debug.debug_inspect(span.to, content="28")
+          match nested_children[0] {
+            Block::Paragraph(children=paragraph_children, span~, ..) => {
+              @debug.debug_inspect(span.from, content="12")
+              @debug.debug_inspect(span.to, content="27")
+              match paragraph_children[0] {
+                Inline::Emphasis(children=emphasis_children, span~, ..) => {
+                  @debug.debug_inspect(span.from, content="12")
+                  @debug.debug_inspect(span.to, content="20")
+                  match emphasis_children[0] {
+                    Inline::Text(content~, span~) => {
+                      @debug.debug_inspect(
+                        content,
+                        content=(
+                          #|"nested"
+                        ),
+                      )
+                      @debug.debug_inspect(span.from, content="13")
+                      @debug.debug_inspect(span.to, content="19")
+                    }
+                    _ => fail("Expected nested text")
+                  }
+                }
+                _ => fail("Expected nested emphasis")
+              }
+            }
+            _ => fail("Expected nested paragraph")
+          }
+        }
+        _ => fail("Expected nested blockquote")
+      }
+    _ => fail("Expected blockquote")
+  }
+  @debug.debug_inspect(result.definitions.length(), content="1")
+  @debug.debug_inspect(result.definitions[0].label == "ref", content="true")
+  @debug.debug_inspect(result.definitions[0].span.from, content="30")
+  @debug.debug_inspect(result.definitions[0].span.to, content="41")
+}
+
+///|
+test "parse indented blockquote as a list item child with document spans" {
+  let result = parse("- Review note\n  > This assumption needs evidence.")
+  match result.document.children[0] {
+    Block::BulletList(items~, ..) => {
+      @debug.debug_inspect(items.length(), content="1")
+      match items[0].children[1] {
+        Block::Blockquote(children~, span~, ..) => {
+          @debug.debug_inspect(span.from, content="14")
+          @debug.debug_inspect(span.to, content="49")
+          match children[0] {
+            Block::Paragraph(children=paragraph_children, span~, ..) => {
+              @debug.debug_inspect(span.from, content="18")
+              @debug.debug_inspect(span.to, content="49")
+              match paragraph_children[0] {
+                Inline::Text(content~, span~) => {
+                  @debug.debug_inspect(
+                    content,
+                    content=(
+                      #|"This assumption needs evidence."
+                    ),
+                  )
+                  @debug.debug_inspect(span.from, content="18")
+                  @debug.debug_inspect(span.to, content="49")
+                }
+                _ => fail("Expected blockquote text")
+              }
+            }
+            _ => fail("Expected blockquote paragraph")
+          }
+        }
+        _ => fail("Expected list item blockquote")
+      }
+    }
+    _ => fail("Expected bullet list")
+  }
+}
+
+///|
+test "parse same-line blockquote as a list item's only child" {
+  let result = parse("- > quote")
+  match result.document.children[0] {
+    Block::BulletList(items~, ..) =>
+      match items[0].children[0] {
+        Block::Blockquote(children~, span~, ..) => {
+          @debug.debug_inspect(span.from, content="2")
+          @debug.debug_inspect(span.to, content="9")
+          match children[0] {
+            Block::Paragraph(children=paragraph_children, span~, ..) => {
+              @debug.debug_inspect(span.from, content="4")
+              @debug.debug_inspect(span.to, content="9")
+              match paragraph_children[0] {
+                Inline::Text(content~, span~) => {
+                  @debug.debug_inspect(
+                    content,
+                    content=(
+                      #|"quote"
+                    ),
+                  )
+                  @debug.debug_inspect(span.from, content="4")
+                  @debug.debug_inspect(span.to, content="9")
+                }
+                _ => fail("Expected quote text")
+              }
+            }
+            _ => fail("Expected quote paragraph")
+          }
+        }
+        _ => fail("Expected blockquote list-item child")
+      }
+    _ => fail("Expected bullet list")
+  }
+}
+
+///|
+test "blockquotes do not lazily continue through blank lines" {
+  let result = parse("> Quote\n\nParagraph\n")
+  let blocks = result.document.children
+  @debug.debug_inspect(blocks.length(), content="3")
+  match blocks[0] {
+    Block::Blockquote(span~, ..) => @debug.debug_inspect(span.to, content="8")
+    _ => fail("Expected blockquote")
+  }
+  match blocks[1] {
+    Block::BlankLines(count~, ..) => @debug.debug_inspect(count, content="1")
+    _ => fail("Expected blank line")
+  }
+  match blocks[2] {
+    Block::Paragraph(..) => ()
+    _ => fail("Expected following paragraph")
+  }
+}
+
+///|
 test "parse bullet list" {
   let result = parse("- Item 1\n- Item 2\n")
   match result.document.children[0] {
