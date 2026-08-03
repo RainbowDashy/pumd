@@ -25,7 +25,7 @@ The same builds are published to npm when npm publishing is enabled for the
 repository. Install the latest successful npm nightly globally with:
 
 ```console
-npm install --global pumd@nightly
+npm install --global @p0nyyy/pumd@nightly
 ```
 
 This installs the `pumd` command. The npm package requires Node.js 18 or newer

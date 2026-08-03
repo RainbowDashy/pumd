@@ -269,8 +269,8 @@ jobs:
           base_version="$(node -p "require('./package.json').version")"
           version="$(node scripts/npm-nightly-version.cjs "$base_version" "$GITHUB_SHA")"
           npm pkg set version="$version"
-          npm pack --pack-destination dist
-          package_file="dist/pumd-${version}.tgz"
+          package_name="$(npm pack --pack-destination dist --json | node -e 'let input = ""; process.stdin.on("data", chunk => input += chunk).on("end", () => console.log(JSON.parse(input)[0].filename))')"
+          package_file="dist/$package_name"
           test -f "$package_file"
           echo "PUMD_NPM_VERSION=$version" >> "$GITHUB_ENV"
           echo "PUMD_NPM_PACKAGE=$package_file" >> "$GITHUB_ENV"
@@ -299,8 +299,8 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          if npm view "pumd@$PUMD_NPM_VERSION" version > /dev/null 2>&1; then
-            printf 'pumd@%s is already published; skipping immutable version\n' "$PUMD_NPM_VERSION"
+          if npm view "@p0nyyy/pumd@$PUMD_NPM_VERSION" version > /dev/null 2>&1; then
+            printf '@p0nyyy/pumd@%s is already published; skipping immutable version\n' "$PUMD_NPM_VERSION"
           else
             npm publish "$PUMD_NPM_PACKAGE" --tag nightly --access public
           fi
