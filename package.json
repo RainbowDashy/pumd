@@ -2,6 +2,7 @@
   "name": "pumd",
   "version": "0.1.0",
   "description": "Publish local Markdown as a native Google Doc",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/RainbowDashy/pumd.git"

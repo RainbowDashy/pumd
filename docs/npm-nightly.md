@@ -15,16 +15,14 @@ working while npm ownership and authentication are being bootstrapped.
 
 ## Bootstrap the package
 
-1. Choose the project's public license, add its root license file, and declare
-   the corresponding SPDX identifier in `package.json`.
-2. Confirm that the unscoped `pumd` package name remains available on npm.
-3. Create a granular npm access token with the shortest practical expiration.
+1. Confirm that the unscoped `pumd` package name remains available on npm.
+2. Create a granular npm access token with the shortest practical expiration.
    Set **Packages and scopes** to **Read and write** for **All Packages**, because
    `pumd` cannot be selected before its first publication, and enable
    **Bypass 2FA** for the non-interactive workflow. Save it as the GitHub Actions
    repository secret `NPM_TOKEN`. Do not grant organization-management access.
-4. Set the GitHub Actions repository variable `NPM_PUBLISH_ENABLED` to `true`.
-5. Manually run `.github/workflows/nightly.yml` on `main`. The first successful
+3. Set the GitHub Actions repository variable `NPM_PUBLISH_ENABLED` to `true`.
+4. Manually run `.github/workflows/nightly.yml` on `main`. The first successful
    run creates the package and publishes the commit version with the `nightly`
    dist-tag.
 
