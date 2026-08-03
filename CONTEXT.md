@@ -15,3 +15,11 @@ _Avoid_: Stylesheet, theme, template
 **Blockquote**:
 A quoted block of Markdown content introduced by the `>` marker and published as visibly distinct native document content.
 _Avoid_: Backquote, backquote block marker
+
+**Managed Authorization**:
+An author's grant of Google access through the OAuth identity owned and operated by `pumd`. It is a future authorization mode intended to remove user-owned Google Cloud setup.
+_Avoid_: Default ADC, built-in credentials
+
+**Project Authorization**:
+An author's grant of Google access through the OAuth identity owned by a user-selected Google Cloud project. It is the default authorization and provides independent consent configuration and quota ownership.
+_Avoid_: BYO client, custom credentials
