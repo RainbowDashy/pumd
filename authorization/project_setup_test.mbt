@@ -5,6 +5,7 @@ fn completed_guided_setup_status() -> ProjectAuthorizationStatus {
     client_id: Some("desktop-client.apps.googleusercontent.com"),
     token_uri: Some("https://oauth2.googleapis.com/token"),
     scope: drive_file_scope,
+    project_id: None,
   }
 }
 
@@ -138,6 +139,7 @@ async test "guided Project Authorization uses the active accessible project and 
         client_id: Some("desktop-client.apps.googleusercontent.com"),
         token_uri: Some("https://oauth2.googleapis.com/token"),
         scope: drive_file_scope,
+        project_id: None,
       })
     },
   }
@@ -390,4 +392,45 @@ async test "guided Project Authorization maps unavailable gcloud and blocked pro
   let message = GuidedSetupError::OAuthSetupFailed.user_message()
   assert_false(message.contains("client-secret"))
   assert_false(message.contains("refresh-token"))
+}
+
+///|
+test "guided setup preserves credential-vault failure classes" {
+  guard GuidedSetupError::CredentialVaultDenied.project_authorization_error()
+    is ProjectAuthorizationError::StorageDenied else {
+    fail("vault denial must remain structured")
+  }
+  guard GuidedSetupError::CredentialVaultUnavailable.project_authorization_error()
+    is ProjectAuthorizationError::StorageUnavailable else {
+    fail("vault unavailability must remain structured")
+  }
+  guard GuidedSetupError::CredentialVaultUnsupported.project_authorization_error()
+    is ProjectAuthorizationError::UnsupportedPlatform else {
+    fail("unsupported vault must remain structured")
+  }
+}
+
+///|
+test "guided setup preserves gcloud prerequisite failure classes" {
+  guard GuidedSetupError::GcloudUnavailable.project_authorization_error()
+    is ProjectAuthorizationError::GcloudUnavailable else {
+    fail("missing gcloud must remain structured")
+  }
+  guard GuidedSetupError::GcloudUnauthenticated.project_authorization_error()
+    is ProjectAuthorizationError::GcloudUnauthenticated else {
+    fail("unauthenticated gcloud must remain structured")
+  }
+}
+
+///|
+async test "guided setup keeps a denied replacement actionable" {
+  let dependencies : GuidedSetupDependencies = {
+    ..guided_dependencies(GcloudStatus::Ready(Some("author@example.com"), None)),
+    complete_oauth: fn(_) { Err(ProjectAuthorizationError::StorageDenied) },
+  }
+  guard guide_project_authorization(dependencies) is Err(CredentialVaultDenied) else {
+    fail(
+      "guided setup must not collapse vault denial into generic OAuth failure",
+    )
+  }
 }

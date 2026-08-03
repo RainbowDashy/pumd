@@ -1,12 +1,13 @@
 ///|
 test "Project Authorization accepts a Google Desktop installed-client document" {
   let document =
-    #|{"installed":{"client_id":"desktop-client.apps.googleusercontent.com","client_secret":"client-secret","auth_uri":"https://accounts.google.com/o/oauth2/v2/auth","token_uri":"https://oauth2.googleapis.com/token","redirect_uris":["http://localhost"]}}
+    #|{"installed":{"client_id":"desktop-client.apps.googleusercontent.com","project_id":"review-project","client_secret":"client-secret","auth_uri":"https://accounts.google.com/o/oauth2/v2/auth","token_uri":"https://oauth2.googleapis.com/token","redirect_uris":["http://localhost"]}}
   match parse_installed_client(document) {
     Ok(client) => {
       assert_eq(client.client_id, "desktop-client.apps.googleusercontent.com")
       assert_eq(client.auth_uri, "https://accounts.google.com/o/oauth2/v2/auth")
       assert_eq(client.token_uri, "https://oauth2.googleapis.com/token")
+      assert_eq(client.project_id, Some("review-project"))
     }
     Err(error) => fail(error.user_message())
   }
@@ -15,7 +16,7 @@ test "Project Authorization accepts a Google Desktop installed-client document" 
 ///|
 async test "Project Authorization setup constructs a PKCE desktop request with exactly drive.file" {
   let document =
-    #|{"installed":{"client_id":"desktop-client.apps.googleusercontent.com","client_secret":"client-secret","auth_uri":"https://accounts.google.com/o/oauth2/v2/auth","token_uri":"https://oauth2.googleapis.com/token","redirect_uris":["http://localhost"]}}
+    #|{"installed":{"client_id":"desktop-client.apps.googleusercontent.com","project_id":"review-project","client_secret":"client-secret","auth_uri":"https://accounts.google.com/o/oauth2/v2/auth","token_uri":"https://oauth2.googleapis.com/token","redirect_uris":["http://localhost"]}}
   let random = b"abcdabcdabcdabcdabcdabcdabcdabcd"
   let callback_state = "YWJjZGFiY2RhYmNkYWJjZGFiY2RhYmNkYWJjZGFiY2Q"
   let mut exchanged : TokenExchangeRequest? = None
@@ -61,6 +62,7 @@ async test "Project Authorization setup constructs a PKCE desktop request with e
     Ok(status) => {
       assert_true(status.configured)
       assert_eq(status.scope, drive_file_scope)
+      assert_eq(status.project_id, Some("review-project"))
     }
     Err(error) => fail(error.user_message())
   }
@@ -72,6 +74,52 @@ async test "Project Authorization setup constructs a PKCE desktop request with e
   let stored = saved.unwrap()
   assert_eq(stored.refresh_token, "refresh-token")
   assert_eq(stored.scope, drive_file_scope)
+  assert_eq(stored.project_id, Some("review-project"))
+}
+
+///|
+async fn setup_with_store_replacement_error(
+  store_error : CredentialStoreError,
+) -> Result[ProjectAuthorizationStatus, ProjectAuthorizationError] {
+  let document =
+    #|{"installed":{"client_id":"desktop-client.apps.googleusercontent.com","client_secret":"client-secret","auth_uri":"https://accounts.google.com/o/oauth2/v2/auth","token_uri":"https://oauth2.googleapis.com/token","redirect_uris":["http://localhost"]}}
+  setup_project_authorization(document, {
+    random_bytes: fn(_) { Ok(b"abcdabcdabcdabcdabcdabcdabcdabcd") },
+    start_listener: fn() {
+      Ok({
+        redirect_uri: "http://127.0.0.1:1/oauth2/callback",
+        await_callback: fn() {
+          Ok("code=ok&state=YWJjZGFiY2RhYmNkYWJjZGFiY2RhYmNkYWJjZGFiY2Q")
+        },
+      })
+    },
+    launch_browser: fn(_) { Ok(()) },
+    report_authorization_url: fn(_) { () },
+    exchange_code: fn(_) {
+      Ok({ access_token: "access", refresh_token: Some("refresh") })
+    },
+    store: {
+      load: fn() { Err(CredentialStoreError::NotConfigured) },
+      replace: fn(_) { Err(store_error) },
+      delete: fn() { Ok(()) },
+    },
+  })
+}
+
+///|
+async test "setup preserves vault replacement failure classifications" {
+  guard setup_with_store_replacement_error(CredentialStoreError::Denied)
+    is Err(StorageDenied) else {
+    fail("denied replacement must remain distinct")
+  }
+  guard setup_with_store_replacement_error(CredentialStoreError::Unsupported)
+    is Err(UnsupportedPlatform) else {
+    fail("unsupported replacement must remain distinct")
+  }
+  guard setup_with_store_replacement_error(CredentialStoreError::Unavailable)
+    is Err(StorageUnavailable) else {
+    fail("unavailable replacement must remain distinct")
+  }
 }
 
 ///|
@@ -125,6 +173,7 @@ async test "Project Authorization status redacts secrets and refresh failures re
     refresh_token: "never-display-refresh-token",
     token_uri: "https://oauth2.googleapis.com/token",
     scope: drive_file_scope,
+    project_id: None,
   }
   let store : CredentialStore = {
     load: fn() { Ok(stored) },
@@ -150,6 +199,41 @@ async test "Project Authorization status redacts secrets and refresh failures re
       assert_false(message.contains("revoked"))
     }
     Ok(_) => fail("revoked credentials must not return an access token")
+  }
+}
+
+///|
+async test "Project Authorization keeps missing, denied, unavailable, and unsupported stores distinct" {
+  fn store_with(error : CredentialStoreError) -> CredentialStore {
+    {
+      load: fn() { Err(error) },
+      replace: fn(_) { Err(error) },
+      delete: fn() { Err(error) },
+    }
+  }
+  guard project_access_token(store_with(CredentialStoreError::NotConfigured), fn(
+      _,
+    ) {
+      Err("must not refresh")
+    })
+    is Err(NotConfigured) else {
+    fail("missing setup must remain distinct")
+  }
+  guard project_authorization_status(store_with(CredentialStoreError::Denied))
+    is Err(StorageDenied) else {
+    fail("vault denial must remain distinct")
+  }
+  guard project_authorization_status(
+      store_with(CredentialStoreError::Unavailable),
+    )
+    is Err(StorageUnavailable) else {
+    fail("vault unavailability must remain distinct")
+  }
+  guard project_authorization_status(
+      store_with(CredentialStoreError::Unsupported),
+    )
+    is Err(UnsupportedPlatform) else {
+    fail("unsupported platforms must remain distinct")
   }
 }
 
@@ -292,6 +376,95 @@ async test "OAuth HTTP exchange and refresh send exact form grants without expos
 }
 
 ///|
+async test "classified refresh distinguishes revoked grants from transient endpoint failures" {
+  let fake = OAuthHttpFake::{
+    requests: [],
+    responses: [
+      @google_http.HttpResponse::new(
+        400,
+        {},
+        "{\"error\":\"invalid_grant\",\"error_description\":\"private-revoked\"}",
+      ),
+      @google_http.HttpResponse::new(
+        400,
+        {},
+        "{\"error\":\"temporarily_unavailable\",\"error_description\":\"private-transient\"}",
+      ),
+      @google_http.HttpResponse::new(503, {}, "Bearer private-transient"),
+    ],
+  }
+  let request : TokenRefreshRequest = {
+    client_id: "desktop-client",
+    client_secret: "private-client-secret",
+    token_uri: "https://oauth2.googleapis.com/token",
+    refresh_token: "private-refresh-token",
+    scope: drive_file_scope,
+  }
+  guard refresh_with_http_classified(fake, request) is Err(Rejected) else {
+    fail("invalid_grant-style response must require reauthorization")
+  }
+  guard refresh_with_http_classified(fake, request) is Err(Transient) else {
+    fail("temporary OAuth failure must remain retryable")
+  }
+  guard refresh_with_http_classified(fake, request) is Err(Transient) else {
+    fail("server failure must remain retryable")
+  }
+}
+
+///|
+async test "classified Project Authorization refresh preserves revoked and transient states" {
+  let stored : StoredAuthorization = {
+    version: 1,
+    client_id: "desktop-client",
+    client_secret: "private-client-secret",
+    refresh_token: "private-refresh-token",
+    token_uri: "https://oauth2.googleapis.com/token",
+    scope: drive_file_scope,
+    project_id: None,
+  }
+  let store : CredentialStore = {
+    load: fn() { Ok(stored) },
+    replace: fn(_) { Ok(()) },
+    delete: fn() { Ok(()) },
+  }
+  guard project_access_token_classified(store, fn(_) { Err(Rejected) })
+    is Err(ReauthorizationRequired) else {
+    fail("revoked authorization must require setup")
+  }
+  guard project_access_token_classified(store, fn(_) { Err(Transient) })
+    is Err(RefreshTransient) else {
+    fail("transient refresh must preserve the stored grant for retry")
+  }
+}
+
+///|
+async test "status inspection preserves project context when reauthorization is required" {
+  let stored : StoredAuthorization = {
+    version: 1,
+    client_id: "desktop-client",
+    client_secret: "client-secret",
+    refresh_token: "stored-refresh",
+    token_uri: "https://oauth2.googleapis.com/token",
+    scope: drive_file_scope,
+    project_id: Some("status-project"),
+  }
+  let store : CredentialStore = {
+    load: fn() { Ok(stored) },
+    replace: fn(_) { Ok(()) },
+    delete: fn() { Ok(()) },
+  }
+  guard inspect_project_authorization_status(store, fn(_) { Err(Rejected) })
+    is Ok(inspection) else {
+    fail("revoked authorization must still produce a status inspection")
+  }
+  assert_true(inspection.status.configured)
+  assert_eq(inspection.status.project_id, Some("status-project"))
+  guard inspection.usability_error is Some(ReauthorizationRequired) else {
+    fail("status inspection must retain the reauthorization state")
+  }
+}
+
+///|
 async test "stored Project Authorization refreshes silently without replacement" {
   let stored : StoredAuthorization = {
     version: 1,
@@ -300,6 +473,7 @@ async test "stored Project Authorization refreshes silently without replacement"
     refresh_token: "stored-refresh",
     token_uri: "https://oauth2.googleapis.com/token",
     scope: drive_file_scope,
+    project_id: None,
   }
   let mut load_calls = 0
   let mut replace_calls = 0
@@ -342,6 +516,7 @@ async test "stored Project Authorization never sends refresh material to a non-G
     refresh_token: "stored-refresh",
     token_uri: "https://attacker.example/token",
     scope: drive_file_scope,
+    project_id: None,
   }
   let mut refresh_calls = 0
   let result = project_access_token(
@@ -375,6 +550,7 @@ async test "explicit file store round-trips one active authorization without acc
     refresh_token: "first-refresh",
     token_uri: "https://oauth2.googleapis.com/token",
     scope: drive_file_scope,
+    project_id: Some("file-store-project"),
   }
   guard (store.replace)(first) is Ok(_) else {
     fail("first store write must succeed")
@@ -384,6 +560,7 @@ async test "explicit file store round-trips one active authorization without acc
   }
   assert_eq(first_loaded.client_id, "first-client")
   assert_eq(first_loaded.refresh_token, "first-refresh")
+  assert_eq(first_loaded.project_id, Some("file-store-project"))
   let second : StoredAuthorization = {
     ..first,
     client_id: "second-client",
@@ -422,6 +599,7 @@ async test "macOS Keychain adapter preserves prior values and redacts backend fa
     refresh_token: "first-refresh",
     token_uri: "https://oauth2.googleapis.com/token",
     scope: drive_file_scope,
+    project_id: None,
   }
   let second : StoredAuthorization = {
     ..first,
@@ -494,6 +672,7 @@ async test "macOS Keychain adapter maps denied and unavailable without secret er
       refresh_token: secret,
       token_uri: "https://oauth2.googleapis.com/token",
       scope: drive_file_scope,
+      project_id: None,
     })
     is Err(error) else {
     fail("denied replacement must fail")
@@ -519,7 +698,7 @@ async test "production keychain selection has no file fallback on unsupported pl
     delete: fn() { Ok(()) },
   })
   guard production_credential_store_with_keychain(
-      CredentialStoreKind::Keychain,
+      CredentialStoreKind::Native,
       false,
       keychain,
     )
@@ -539,6 +718,7 @@ async test "browser fallback continues setup and store failure preserves the pri
     refresh_token: "previous-refresh",
     token_uri: "https://oauth2.googleapis.com/token",
     scope: drive_file_scope,
+    project_id: None,
   }
   let mut reported_urls = 0
   let store : CredentialStore = {

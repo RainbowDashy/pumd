@@ -1,17 +1,37 @@
 ///|
-test "publish defaults to ADC authorization" {
+test "publish defaults to native-vault Project Authorization" {
   match parse_command(["pumd", "publish", "proposal.md"]) {
-    Ok(Publish(path, Adc)) => inspect(path, content="proposal.md")
-    Ok(_) => fail("expected ADC publish command")
+    Ok(Publish(path, Project(Native))) => inspect(path, content="proposal.md")
+    Ok(_) => fail("expected native-vault Project Authorization publish command")
     Err(message) => fail(message)
   }
 }
 
 ///|
-test "publish defaults Project Authorization to the Keychain store" {
+test "publish defaults Project Authorization to the native vault" {
   match parse_command(["pumd", "publish", "--auth=project", "proposal.md"]) {
-    Ok(Publish(path, Project(Keychain))) => inspect(path, content="proposal.md")
+    Ok(Publish(path, Project(Native))) => inspect(path, content="proposal.md")
     Ok(_) => fail("expected Project Authorization publish command")
+    Err(message) => fail(message)
+  }
+}
+
+///|
+test "publish accepts the platform-neutral native store and legacy keychain alias" {
+  match
+    parse_command([
+      "pumd", "publish", "--auth=project", "--credential-store=native", "proposal.md",
+    ]) {
+    Ok(Publish(path, Project(Native))) => inspect(path, content="proposal.md")
+    Ok(_) => fail("expected native-vault Project Authorization publish command")
+    Err(message) => fail(message)
+  }
+  match
+    parse_command([
+      "pumd", "publish", "--auth=project", "--credential-store=keychain", "proposal.md",
+    ]) {
+    Ok(Publish(path, Project(Native))) => inspect(path, content="proposal.md")
+    Ok(_) => fail("expected compatibility alias to select the native vault")
     Err(message) => fail(message)
   }
 }
@@ -46,10 +66,20 @@ test "publish accepts explicit ADC authorization" {
 }
 
 ///|
-test "auth setup guides a Keychain setup without a client file" {
+test "publish accepts an explicit ephemeral access token environment" {
+  match parse_command(["pumd", "publish", "--auth=token-env", "proposal.md"]) {
+    Ok(Publish(path, AccessTokenEnvironment)) =>
+      inspect(path, content="proposal.md")
+    Ok(_) => fail("expected ephemeral access-token environment command")
+    Err(message) => fail(message)
+  }
+}
+
+///|
+test "auth setup guides a native-vault setup without a client file" {
   match parse_command(["pumd", "auth", "setup"]) {
-    Ok(AuthSetup(Guided, Keychain)) => ()
-    Ok(_) => fail("expected guided Keychain setup command")
+    Ok(AuthSetup(Guided, Native)) => ()
+    Ok(_) => fail("expected guided native-vault setup command")
     Err(message) => fail(message)
   }
 }
@@ -68,10 +98,10 @@ test "auth setup accepts an optional client file and file store in either order"
 }
 
 ///|
-test "auth setup accepts a direct client file with the default Keychain store" {
+test "auth setup accepts a direct client file with the default native store" {
   match
     parse_command(["pumd", "auth", "setup", "--client-file", "client.json"]) {
-    Ok(AuthSetup(Provided(client_file), Keychain)) =>
+    Ok(AuthSetup(Provided(client_file), Native)) =>
       inspect(client_file, content="client.json")
     Ok(_) => fail("expected direct Keychain setup command")
     Err(message) => fail(message)
@@ -79,10 +109,10 @@ test "auth setup accepts a direct client file with the default Keychain store" {
 }
 
 ///|
-test "auth status defaults to Keychain and accepts an explicit store" {
+test "auth status defaults to native vault and accepts an explicit store" {
   match parse_command(["pumd", "auth", "status"]) {
-    Ok(AuthStatus(Keychain)) => ()
-    Ok(_) => fail("expected Keychain authorization status command")
+    Ok(AuthStatus(Native)) => ()
+    Ok(_) => fail("expected native-vault authorization status command")
     Err(message) => fail(message)
   }
   match parse_command(["pumd", "auth", "status", "--credential-store=file"]) {
@@ -93,10 +123,10 @@ test "auth status defaults to Keychain and accepts an explicit store" {
 }
 
 ///|
-test "auth logout defaults to Keychain and accepts an explicit store" {
+test "auth logout defaults to native vault and accepts an explicit store" {
   match parse_command(["pumd", "auth", "logout"]) {
-    Ok(AuthLogout(Keychain)) => ()
-    Ok(_) => fail("expected Keychain authorization logout command")
+    Ok(AuthLogout(Native)) => ()
+    Ok(_) => fail("expected native-vault authorization logout command")
     Err(message) => fail(message)
   }
   match parse_command(["pumd", "auth", "logout", "--credential-store=file"]) {
@@ -113,7 +143,7 @@ test "auth logout rejects an invalid credential store" {
     Err(message) =>
       inspect(
         message,
-        content="Project Authorization usage: pumd auth logout [--credential-store=keychain|file]",
+        content="Project Authorization usage: pumd auth logout [--credential-store=native|file]",
       )
   }
 }
@@ -125,7 +155,7 @@ test "setup rejects a missing client file argument with Project Authorization us
     Err(message) =>
       inspect(
         message,
-        content="Project Authorization usage: pumd auth setup [--client-file <path>] [--credential-store=keychain|file]",
+        content="Project Authorization usage: pumd auth setup [--client-file <path>] [--credential-store=native|file]",
       )
   }
 }
@@ -137,7 +167,7 @@ test "publish rejects an unknown authorization mode with Project Authorization u
     Err(message) =>
       inspect(
         message,
-        content="Project Authorization usage: pumd publish [--auth=project|adc] [--credential-store=keychain|file] <markdown-path>",
+        content="Project Authorization usage: pumd publish [--auth=project|adc|token-env] [--credential-store=native|file] <markdown-path>",
       )
   }
 }
@@ -149,7 +179,7 @@ test "auth status rejects extra arguments with Project Authorization usage" {
     Err(message) =>
       inspect(
         message,
-        content="Project Authorization usage: pumd auth status [--credential-store=keychain|file]",
+        content="Project Authorization usage: pumd auth status [--credential-store=native|file]",
       )
   }
 }
@@ -161,7 +191,7 @@ test "publish rejects a missing Markdown path" {
     Err(message) =>
       inspect(
         message,
-        content="Project Authorization usage: pumd publish [--auth=project|adc] [--credential-store=keychain|file] <markdown-path>",
+        content="Project Authorization usage: pumd publish [--auth=project|adc|token-env] [--credential-store=native|file] <markdown-path>",
       )
   }
 }
@@ -173,7 +203,7 @@ test "publish rejects an option where its Markdown path belongs" {
     Err(message) =>
       inspect(
         message,
-        content="Project Authorization usage: pumd publish [--auth=project|adc] [--credential-store=keychain|file] <markdown-path>",
+        content="Project Authorization usage: pumd publish [--auth=project|adc|token-env] [--credential-store=native|file] <markdown-path>",
       )
   }
 }
@@ -217,13 +247,13 @@ test "ADC rejects a credential store option" {
 }
 
 ///|
-test "parse_publish_path remains available only for the bare ADC command" {
+test "parse_publish_path remains available only for explicit ADC" {
   match parse_publish_path(["pumd", "publish", "proposal.md"]) {
-    Ok(path) => inspect(path, content="proposal.md")
-    Err(message) => fail(message)
+    Ok(_) => fail("expected bare publish to use Project Authorization")
+    Err(message) => assert_true(message.contains("Project Authorization usage"))
   }
   match parse_publish_path(["pumd", "publish", "--auth=adc", "proposal.md"]) {
-    Ok(_) => fail("expected explicit ADC command to use parse_command")
-    Err(message) => assert_true(message.contains("Project Authorization usage"))
+    Ok(path) => inspect(path, content="proposal.md")
+    Err(message) => fail(message)
   }
 }

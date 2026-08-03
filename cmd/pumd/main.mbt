@@ -15,7 +15,8 @@ fn read_source(path : String) -> Result[String, String] {
 ///|
 fn credential_store_label(store : @args.CredentialStore) -> String {
   match store {
-    @args.CredentialStore::Keychain => "macOS Keychain"
+    @args.CredentialStore::Native =>
+      @authorization.native_credential_store_label()
     @args.CredentialStore::File => "file (explicit reduced-protection choice)"
   }
 }
@@ -28,8 +29,8 @@ fn credential_store_kind(
   @authorization.ProjectAuthorizationError,
 ] {
   match store {
-    @args.CredentialStore::Keychain =>
-      Ok(@authorization.CredentialStoreKind::Keychain)
+    @args.CredentialStore::Native =>
+      Ok(@authorization.CredentialStoreKind::Native)
     @args.CredentialStore::File =>
       match @authorization.default_project_authorization_directory() {
         Ok(directory) => Ok(@authorization.CredentialStoreKind::File(directory))
@@ -59,7 +60,12 @@ async fn credential_store_ready(
     Ok(_)
     | Err(@authorization.CredentialStoreError::NotConfigured)
     | Err(@authorization.CredentialStoreError::Malformed) => Ok(())
-    Err(_) => Err(@authorization.ProjectAuthorizationError::StorageUnavailable)
+    Err(@authorization.CredentialStoreError::Denied) =>
+      Err(@authorization.ProjectAuthorizationError::StorageDenied)
+    Err(@authorization.CredentialStoreError::Unsupported) =>
+      Err(@authorization.ProjectAuthorizationError::UnsupportedPlatform)
+    Err(@authorization.CredentialStoreError::Unavailable) =>
+      Err(@authorization.ProjectAuthorizationError::StorageUnavailable)
   }
 }
 
@@ -70,11 +76,25 @@ async fn report_project_authorization_failure(
 ) -> Unit {
   match (error, store) {
     (
-      @authorization.ProjectAuthorizationError::StorageUnavailable,
-      @args.CredentialStore::Keychain,
+      @authorization.ProjectAuthorizationError::StorageDenied,
+      @args.CredentialStore::Native,
     ) =>
       report_failure(
-        "macOS Keychain is unavailable or access was denied. Unlock the login Keychain and allow access, then retry. pumd did not fall back to file storage.",
+        "the native OS credential vault is locked or denied access. Unlock it and allow pumd, then retry. pumd did not fall back to file storage.",
+      )
+    (
+      @authorization.ProjectAuthorizationError::StorageUnavailable,
+      @args.CredentialStore::Native,
+    ) =>
+      report_failure(
+        "the native OS credential vault is unavailable or access was denied. Unlock the platform vault and allow access, then retry. pumd did not fall back to file storage.",
+      )
+    (
+      @authorization.ProjectAuthorizationError::UnsupportedPlatform,
+      @args.CredentialStore::Native,
+    ) =>
+      report_failure(
+        "this platform has no supported native credential vault. pumd did not fall back to file storage; select `--credential-store=file` explicitly only if reduced protection is acceptable.",
       )
     _ => report_failure(error.user_message())
   }
@@ -85,14 +105,26 @@ fn project_authentication_problem(
   error : @authorization.ProjectAuthorizationError,
 ) -> @publish.AuthenticationProblem {
   match error {
+    @authorization.ProjectAuthorizationError::NotConfigured =>
+      @publish.AuthenticationProblem::CredentialsNotConfigured
+    @authorization.ProjectAuthorizationError::GcloudUnavailable =>
+      @publish.AuthenticationProblem::GcloudUnavailable
+    @authorization.ProjectAuthorizationError::GcloudUnauthenticated =>
+      @publish.AuthenticationProblem::GcloudUnauthenticated
     @authorization.ProjectAuthorizationError::ReauthorizationRequired =>
+      @publish.AuthenticationProblem::CredentialsRejected
+    @authorization.ProjectAuthorizationError::RefreshTransient =>
       @publish.AuthenticationProblem::CredentialsRefreshFailed
+    @authorization.ProjectAuthorizationError::StorageDenied =>
+      @publish.AuthenticationProblem::CredentialVaultDenied
     @authorization.ProjectAuthorizationError::StorageUnavailable =>
       @publish.AuthenticationProblem::CredentialsUnavailable
     @authorization.ProjectAuthorizationError::InvalidClientFile(_) =>
       @publish.AuthenticationProblem::CredentialsInvalid
     @authorization.ProjectAuthorizationError::SetupFailed(_) =>
       @publish.AuthenticationProblem::CredentialsInvalid
+    @authorization.ProjectAuthorizationError::UnsupportedPlatform =>
+      @publish.AuthenticationProblem::UnsupportedPlatform
   }
 }
 
@@ -106,8 +138,8 @@ async fn project_access_token(
     Err(error) => return Err(project_authentication_problem(error))
   }
   match
-    @authorization.project_access_token(store, async fn(request) {
-      @authorization.refresh_with_http(http, request)
+    @authorization.project_access_token_classified(store, async fn(request) {
+      @authorization.refresh_with_http_classified(http, request)
     }) {
     Ok(token) => Ok(token)
     Err(error) => Err(project_authentication_problem(error))
@@ -128,27 +160,60 @@ async fn publish_file(
   path : String,
   authorization : @args.Authorization,
 ) -> Unit {
-  let http = @google_http.DefaultHttpClient::new()
-  let mode = match authorization {
-    @args.Authorization::Project(_) => @publish.AuthorizationMode::Project
-    @args.Authorization::Adc => @publish.AuthorizationMode::Adc
+  let prepared = match
+    @publish.prepare_publication_path(path, fn(source_path) {
+      read_source(source_path)
+    }) {
+    Ok(prepared) => prepared
+    Err(error) => return report_failure(error.user_message())
   }
-  match
-    @publish.publish_path_with_authorization(
-      path,
-      fn(source_path) { read_source(source_path) },
-      mode,
-      async fn() {
-        match authorization {
-          @args.Authorization::Project(store) =>
-            project_access_token(http, store)
-          @args.Authorization::Adc =>
-            Err(@publish.AuthenticationProblem::CredentialsInvalid)
-        }
-      },
-      adc_access_token,
-      http,
-    ) {
+  let http = @google_http.DefaultHttpClient::new()
+  let result = match authorization {
+    @args.Authorization::Project(store) =>
+      @publish.publish_prepared_with_project_onboarding(
+        prepared,
+        terminal_is_interactive(),
+        async fn() { project_access_token(http, store) },
+        fn() {
+          confirm_yes(
+            "Project Authorization is not configured. Run guided setup now?",
+          )
+        },
+        async fn() {
+          match run_guided_setup(store) {
+            Ok(status) => {
+              report_setup_success(status, store)
+              Ok(())
+            }
+            Err(error) => {
+              @stdio.stderr.write("pumd: " + error.user_message() + "\n")
+              Err(project_authentication_problem(error))
+            }
+          }
+        },
+        http,
+      )
+    @args.Authorization::Adc =>
+      @publish.publish_prepared(
+        prepared,
+        @publish.AuthorizationMode::Adc,
+        adc_access_token,
+        http,
+      )
+    @args.Authorization::AccessTokenEnvironment =>
+      @publish.publish_prepared(
+        prepared,
+        @publish.AuthorizationMode::Ephemeral,
+        fn() {
+          match @env.get_env_var("PUMD_ACCESS_TOKEN") {
+            Some(token) if !token.is_empty() => Ok(token)
+            _ => Err(@publish.AuthenticationProblem::CredentialsNotConfigured)
+          }
+        },
+        http,
+      )
+  }
+  match result {
     Ok(success) => {
       @stdio.stdout.write("document ID: " + success.document_id + "\n")
       @stdio.stdout.write("edit URL: " + success.url + "\n")
@@ -421,6 +486,22 @@ async fn finish_setup(
 }
 
 ///|
+async fn report_setup_success(
+  status : @authorization.ProjectAuthorizationStatus,
+  selection : @args.CredentialStore,
+) -> Unit {
+  @stdio.stdout.write("Project Authorization setup complete.\n")
+  @stdio.stdout.write(
+    "credential store: " + credential_store_label(selection) + "\n",
+  )
+  @stdio.stdout.write("scope: " + status.scope + "\n")
+  match status.project_id {
+    Some(project_id) => @stdio.stdout.write("project: " + project_id + "\n")
+    None => ()
+  }
+}
+
+///|
 async fn prepared_setup_store(
   selection : @args.CredentialStore,
 ) -> Result[
@@ -463,27 +544,21 @@ async fn setup_from_client_file(
   }
   let http = @google_http.DefaultHttpClient::new()
   match finish_setup(client_document, store, http) {
-    Ok(status) => {
-      @stdio.stdout.write("Project Authorization setup complete.\n")
-      @stdio.stdout.write(
-        "credential store: " + credential_store_label(selection) + "\n",
-      )
-      @stdio.stdout.write("scope: " + status.scope + "\n")
-    }
+    Ok(status) => report_setup_success(status, selection)
     Err(error) => report_project_authorization_failure(error, selection)
   }
 }
 
 ///|
-async fn guided_setup(selection : @args.CredentialStore) -> Unit {
-  if !terminal_is_interactive() {
-    return report_failure(
-      "guided Project Authorization requires an interactive terminal. Supply a preconfigured Desktop client with `pumd auth setup --client-file <path>` or use explicit automation credentials.",
-    )
-  }
+async fn run_guided_setup(
+  selection : @args.CredentialStore,
+) -> Result[
+  @authorization.ProjectAuthorizationStatus,
+  @authorization.ProjectAuthorizationError,
+] {
   let store = match prepared_setup_store(selection) {
     Ok(store) => store
-    Err(error) => return report_project_authorization_failure(error, selection)
+    Err(error) => return Err(error)
   }
   let adapter = @authorization.production_gcloud_adapter()
   let http = @google_http.DefaultHttpClient::new()
@@ -539,14 +614,21 @@ async fn guided_setup(selection : @args.CredentialStore) -> Unit {
     complete_oauth: async fn(document) { finish_setup(document, store, http) },
   })
   match result {
-    Ok(status) => {
-      @stdio.stdout.write("Project Authorization setup complete.\n")
-      @stdio.stdout.write(
-        "credential store: " + credential_store_label(selection) + "\n",
-      )
-      @stdio.stdout.write("scope: " + status.scope + "\n")
-    }
-    Err(error) => report_failure(error.user_message())
+    Ok(status) => Ok(status)
+    Err(error) => Err(error.project_authorization_error())
+  }
+}
+
+///|
+async fn guided_setup(selection : @args.CredentialStore) -> Unit {
+  if !terminal_is_interactive() {
+    return report_failure(
+      "guided Project Authorization requires an interactive terminal. Supply a preconfigured Desktop client with `pumd auth setup --client-file <path>` or use explicit automation credentials.",
+    )
+  }
+  match run_guided_setup(selection) {
+    Ok(status) => report_setup_success(status, selection)
+    Err(error) => report_project_authorization_failure(error, selection)
   }
 }
 
@@ -560,22 +642,39 @@ async fn report_project_authorization_status(
   }
   let http = @google_http.DefaultHttpClient::new()
   match
-    @authorization.project_authorization_usable_status(store, async fn(
+    @authorization.inspect_project_authorization_status(store, async fn(
       request,
     ) {
-      @authorization.refresh_with_http(http, request)
+      @authorization.refresh_with_http_classified(http, request)
     }) {
-    Ok(status) => {
-      let usability = if status.configured {
-        "usable"
-      } else {
-        "not configured"
+    Ok(inspection) => {
+      let status = inspection.status
+      let usability = match (status.configured, inspection.usability_error) {
+        (false, _) => "not configured"
+        (true, None) => "usable"
+        (
+          true,
+          Some(
+            @authorization.ProjectAuthorizationError::ReauthorizationRequired
+          ),
+        ) => "needs reauthorization"
+        (true, Some(@authorization.ProjectAuthorizationError::RefreshTransient)) =>
+          "refresh temporarily unavailable"
+        (true, Some(_)) => "unavailable"
       }
       @stdio.stdout.write("Project Authorization: " + usability + "\n")
       @stdio.stdout.write(
         "credential store: " + credential_store_label(selection) + "\n",
       )
       @stdio.stdout.write("scope: " + status.scope + "\n")
+      match status.project_id {
+        Some(project_id) => @stdio.stdout.write("project: " + project_id + "\n")
+        None => ()
+      }
+      match inspection.usability_error {
+        Some(error) => report_project_authorization_failure(error, selection)
+        None => ()
+      }
     }
     Err(error) => report_project_authorization_failure(error, selection)
   }
@@ -591,11 +690,26 @@ async fn logout_project_authorization(
   }
   match (store.delete)() {
     Ok(_) | Err(@authorization.CredentialStoreError::NotConfigured) => {
-      @stdio.stdout.write("Project Authorization removed.\n")
+      @stdio.stdout.write(
+        "Project Authorization credentials removed locally.\n",
+      )
       @stdio.stdout.write(
         "credential store: " + credential_store_label(selection) + "\n",
       )
+      @stdio.stdout.write(
+        "Google's remote authorization may still be active; revoke it separately in your Google Account if required.\n",
+      )
     }
+    Err(@authorization.CredentialStoreError::Denied) =>
+      report_project_authorization_failure(
+        @authorization.ProjectAuthorizationError::StorageDenied,
+        selection,
+      )
+    Err(@authorization.CredentialStoreError::Unsupported) =>
+      report_project_authorization_failure(
+        @authorization.ProjectAuthorizationError::UnsupportedPlatform,
+        selection,
+      )
     Err(_) =>
       report_project_authorization_failure(
         @authorization.ProjectAuthorizationError::StorageUnavailable,

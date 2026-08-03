@@ -138,10 +138,11 @@ validated Milestone 2 contract.
 
 ### Set up Project Authorization
 
-Project Authorization is an opt-in authorization mode in this milestone: an
-author grants access through the OAuth identity of a Google Cloud project they
-select. It is currently supported by the native Apple-Silicon macOS build and
-defaults to the macOS Keychain for its durable authorization document.
+Project Authorization is the default: an author grants access through the OAuth
+identity of a Google Cloud project they select. Durable authorization uses the
+platform-native vault by default: macOS Keychain on Apple Silicon, Secret
+Service on Linux x64, and Windows Credential Manager on Windows x64. Native
+vault failure never falls back to a credential file.
 
 Run the guided flow from an interactive terminal:
 
@@ -189,11 +190,11 @@ and use the direct shortcut instead:
 pumd auth setup --client-file oauth-client.json
 ```
 
-The client JSON is a client definition, not a refresh credential. `pumd` opens
-the direct installed-app OAuth flow, then stores the resulting authorization in
-the macOS Keychain. It never silently falls back to a file. If macOS denies
-Keychain access or the login Keychain is unavailable, unlock it and allow
-access, then retry; choose file storage only deliberately.
+`oauth-client.json` is a Google Desktop OAuth client configuration. It is not a
+user token, refresh credential, or service-account key. `pumd` opens the direct
+installed-app OAuth flow, then stores the resulting authorization in the native
+vault. If the vault is locked, denied, or unavailable, unlock or repair it and
+retry; choose file storage only deliberately.
 
 `--credential-store=file` is the explicit reduced-protection alternative. Use
 the same store selection consistently for setup, status, publishing, and
@@ -206,46 +207,60 @@ pumd publish --auth=project --credential-store=file document.md
 pumd auth logout --credential-store=file
 ```
 
-The default Keychain forms are:
+The default native-vault forms are:
 
 ```console
 pumd auth status
-pumd publish --auth=project document.md
+pumd publish document.md
 pumd auth logout
 ```
 
-`auth status` checks whether the selected stored authorization is usable;
-`auth logout` removes it (and is harmless when it is already absent). Refresh
-credentials obtain fresh access tokens as needed. If refresh fails, consent or
-scope changed, or the credential was revoked, run setup again with the same
-credential-store choice. Diagnostic and status output redact OAuth client
-secrets, refresh credentials, and access tokens.
+`auth status` reports the native/file store type, usability or reauthorization
+state, and the Google Cloud project when the downloaded client configuration
+provided it. `auth logout` removes local credentials idempotently; it does not
+claim that Google's remote grant was revoked. Refresh credentials obtain fresh
+access tokens as needed. A transient refresh failure leaves the stored grant in
+place for retry; a revoked or invalid grant requires setup again. Diagnostic and
+status output redact OAuth client secrets, refresh credentials, access tokens,
+authorization codes, and native vault diagnostics.
 
-Guided setup requires an interactive terminal. In noninteractive environments,
-use a previously configured Desktop client through `--client-file <path>` when
-that OAuth interaction is appropriate, or supply explicit automation
-credentials through the ADC route below; the guide does not infer a credential
-store or silently switch authorization modes.
+Guided setup requires an interactive terminal. On a first interactive publish,
+`pumd` offers guided setup only after source reading, rendering, validation, and
+Desired Document planning succeed, and then resumes that publish when setup
+succeeds. Declining performs no setup or remote mutation. Noninteractive publish
+never prompts, opens a browser, or waits for an OAuth callback; run `auth setup`
+deliberately or use one of the explicit automation routes below.
 
-### Explicit ADC route (transition only)
+### Explicit automation routes
 
-ADC remains available as an explicitly selectable route:
+ADC remains available only when explicitly selected:
 
 ```console
 pumd publish --auth=adc document.md
 ```
 
-This route continues to use authorized-user ADC with exactly the `drive.file`
-scope and no identity scopes. It does not fall back to Project Authorization,
-and Project Authorization does not fall back to ADC. The global default has not
-changed yet: omitting `--auth` still selects ADC during this transition.
+This route uses authorized-user ADC with exactly the `drive.file` scope and no
+identity scopes. It does not fall back to Project Authorization, and Project
+Authorization does not fall back to ADC.
+
+For short-lived automation, pass an access token through the environment rather
+than a command-line argument:
+
+```console
+PUMD_ACCESS_TOKEN="$(your-token-provider)" pumd publish --auth=token-env document.md
+```
+
+`pumd` reads this variable only after local preflight, never stores it, and never
+tries another provider if it is missing or rejected. Avoid shell history and log
+capture that could expose environment values. Managed Authorization remains a
+future onboarding mode and is not selected by any current command.
 
 ### Publish a Markdown file with Project Authorization
 
-After setup, the explicit Project Authorization publish command is:
+After setup, publish with the default Project Authorization:
 
 ```console
-pumd publish --auth=project document.md
+pumd publish document.md
 ```
 
 For the explicit file store, add `--credential-store=file` as shown above.
@@ -283,8 +298,8 @@ silently renumbered.
   before credential access or remote mutation, so no Google Doc was created.
 - For a Project Authorization authentication failure, run `pumd auth status`;
   then repeat setup with the same credential-store choice if reauthorization is
-  required. For a Keychain denial, unlock the login Keychain and allow access;
-  `pumd` does not fall back to a file. For a permission failure, confirm the
+  required. For a native-vault denial, unlock the platform vault and allow
+  access; `pumd` does not fall back to a file. For a permission failure, confirm the
   exact `drive.file` scope and that `docs.googleapis.com` is enabled in the
   selected project. For the explicit ADC route, recreate its ADC separately;
   neither route falls back to the other.
@@ -316,10 +331,10 @@ moon build --target native cmd/pumd
 moon test --target native -p rainbowdashy/pumd/publish --include-skipped --filter "live smoke publishes and reads a real Google Doc"
 ```
 
-The packaged macOS Project Authorization smoke is also opt-in. It performs
-setup with the supplied Desktop client, replaces the active authorization in
-the default Keychain, and creates a real Google Doc. Run it only from Apple
-Silicon macOS with a dedicated account and project:
+Packaged Project Authorization smoke tests are opt-in for macOS arm64, Linux
+x64, and Windows x64. Each uses that platform's native vault, replaces the
+active Project Authorization, and creates a real Google Doc. Run one only with a
+dedicated account and project:
 
 ```console
 PUMD_MACOS_PROJECT_AUTH_SMOKE=1 \
@@ -329,6 +344,32 @@ moon test --target native -p rainbowdashy/pumd/publish \
   --include-skipped \
   --filter "macOS Apple Silicon packaged artifact smoke publishes with Project Authorization"
 ```
+
+On Linux x64:
+
+```console
+PUMD_LINUX_PROJECT_AUTH_SMOKE=1 \
+PUMD_LINUX_SMOKE_BINARY=/absolute/path/to/packaged/pumd \
+PUMD_LINUX_SMOKE_CLIENT_FILE=/absolute/path/to/desktop-client.json \
+moon test --target native -p rainbowdashy/pumd/publish \
+  --include-skipped \
+  --filter "Linux x64 packaged artifact smoke publishes with Project Authorization"
+```
+
+On Windows x64 PowerShell:
+
+```powershell
+$env:PUMD_WINDOWS_PROJECT_AUTH_SMOKE = "1"
+$env:PUMD_WINDOWS_SMOKE_BINARY = "C:\path\to\pumd.exe"
+$env:PUMD_WINDOWS_SMOKE_CLIENT_FILE = "C:\path\to\desktop-client.json"
+moon test --target native -p rainbowdashy/pumd/publish `
+  --include-skipped `
+  --filter "Windows x64 packaged artifact smoke publishes with Project Authorization"
+```
+
+These live tests are never part of deterministic CI; ordinary CI requires no
+browser, vault contents, Google credentials, network access, or live Cloud
+project.
 
 On success, its output includes lines with this form:
 

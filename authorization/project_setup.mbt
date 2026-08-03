@@ -106,6 +106,9 @@ pub(all) enum GuidedSetupError {
   DesktopClientHandoffFailed
   DesktopClientFileUnavailable
   DesktopClientFileInvalid
+  CredentialVaultDenied
+  CredentialVaultUnavailable
+  CredentialVaultUnsupported
   OAuthSetupFailed
 }
 
@@ -152,8 +155,28 @@ pub fn GuidedSetupError::user_message(self : GuidedSetupError) -> String {
       "Project Authorization needs the downloaded Desktop OAuth client JSON to continue."
     DesktopClientFileInvalid =>
       "The downloaded file is not a valid Google Desktop OAuth client JSON."
+    CredentialVaultDenied =>
+      "The native credential vault is locked or denied access. Unlock it and allow pumd, then retry."
+    CredentialVaultUnavailable =>
+      "The selected credential store is unavailable. No existing authorization was replaced."
+    CredentialVaultUnsupported =>
+      "This platform has no supported native credential vault. No file fallback was used."
     OAuthSetupFailed =>
       "Project Authorization could not complete direct OAuth. No existing credential was replaced."
+  }
+}
+
+///|
+pub fn GuidedSetupError::project_authorization_error(
+  self : GuidedSetupError,
+) -> ProjectAuthorizationError {
+  match self {
+    GcloudUnavailable => ProjectAuthorizationError::GcloudUnavailable
+    GcloudUnauthenticated => ProjectAuthorizationError::GcloudUnauthenticated
+    CredentialVaultDenied => ProjectAuthorizationError::StorageDenied
+    CredentialVaultUnavailable => ProjectAuthorizationError::StorageUnavailable
+    CredentialVaultUnsupported => ProjectAuthorizationError::UnsupportedPlatform
+    _ => ProjectAuthorizationError::SetupFailed(self.user_message())
   }
 }
 
@@ -486,6 +509,11 @@ pub async fn guide_project_authorization(
     Ok(status) if status.configured && status.scope == drive_file_scope =>
       Ok(status)
     Ok(_) => Err(OAuthSetupFailed)
+    Err(ProjectAuthorizationError::StorageDenied) => Err(CredentialVaultDenied)
+    Err(ProjectAuthorizationError::StorageUnavailable) =>
+      Err(CredentialVaultUnavailable)
+    Err(ProjectAuthorizationError::UnsupportedPlatform) =>
+      Err(CredentialVaultUnsupported)
     Err(_) => Err(OAuthSetupFailed)
   }
 }

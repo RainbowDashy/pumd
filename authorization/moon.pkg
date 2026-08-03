@@ -1,4 +1,5 @@
 import {
+  "moonbitlang/core/debug",
   "moonbitlang/core/json",
   "moonbitlang/core/string",
   "moonbitlang/core/encoding/utf8",
@@ -13,10 +14,25 @@ import {
   "ryota0624/googleapis/http" @google_http,
 }
 
+import {
+  "rainbowdashy/pumd/publish",
+} for "test"
+
 options(
-  "native-stub": [ "macos_keychain_native.c" ],
+  "native-stub": [
+    "macos_keychain_native.c",
+    "linux_secret_service_native.c",
+    "windows_credential_manager_native.c",
+    "native_platform_native.c",
+  ],
   targets: {
     "macos_keychain_native.mbt": [ "native" ],
     "macos_keychain_stub.mbt": [ "not", "native" ],
+    "linux_secret_service_native.mbt": [ "native" ],
+    "linux_secret_service_stub.mbt": [ "not", "native" ],
+    "windows_credential_manager_native.mbt": [ "native" ],
+    "windows_credential_manager_stub.mbt": [ "not", "native" ],
+    "native_platform_native.mbt": [ "native" ],
+    "native_platform_stub.mbt": [ "not", "native" ],
   },
 )

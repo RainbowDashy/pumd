@@ -222,11 +222,7 @@ async test "authorization provider failures never fall back and give mode-specif
   assert_eq(fake.requests.length(), 0)
   let project_message = project_error.user_message()
   assert_true(project_message.contains("Project Authorization"))
-  assert_true(
-    project_message.contains(
-      "pumd auth setup --client-file ... --credential-store=file",
-    ),
-  )
+  assert_true(project_message.contains("pumd auth setup"))
 
   let project_rejection = publish_markdown_with_authorization(
     "Hello",
@@ -244,11 +240,7 @@ async test "authorization provider failures never fall back and give mode-specif
   }
   assert_eq(adc_calls.length(), 0)
   assert_true(rejection_error.user_message().contains("Project Authorization"))
-  assert_true(
-    rejection_error
-    .user_message()
-    .contains("pumd auth setup --client-file ... --credential-store=file"),
-  )
+  assert_true(rejection_error.user_message().contains("pumd auth setup"))
 
   let adc_failure = publish_markdown_with_authorization(
     "Hello",
@@ -349,6 +341,174 @@ async test "preflight failures do not invoke either authorization provider" {
   }
   assert_eq(project_calls.length(), 0)
   assert_eq(adc_calls.length(), 0)
+  assert_eq(fake.requests.length(), 0)
+}
+
+///|
+async test "prepared first publish offers setup only after local preflight and resumes once accepted" {
+  let effects : Array[String] = []
+  let prepared = prepare_publication_path("proposal.md", fn(_) {
+    effects.push("read")
+    Ok("Hello")
+  })
+  guard prepared is Ok(publication) else { fail("preflight must succeed") }
+  assert_eq(effects.length(), 1)
+  assert_eq(effects[0], "read")
+  let token_attempts = [0]
+  let fake = FakeHttpClient::{
+    requests: [],
+    responses: [
+      @google_http.HttpResponse::new(200, {}, "{\"documentId\":\"onboard-1\"}"),
+      @google_http.HttpResponse::new(200, {}, "{}"),
+    ],
+  }
+  let result = publish_prepared_with_project_onboarding(
+    publication,
+    true,
+    fn() {
+      token_attempts[0] = token_attempts[0] + 1
+      effects.push("token")
+      if token_attempts[0] == 1 {
+        Err(CredentialsNotConfigured)
+      } else {
+        Ok("project-token")
+      }
+    },
+    fn() {
+      effects.push("offer")
+      true
+    },
+    fn() {
+      effects.push("setup")
+      Ok(())
+    },
+    fake,
+  )
+  guard result is Ok(success) else {
+    fail("accepted setup must resume publish")
+  }
+  inspect(success.document_id, content="onboard-1")
+  assert_eq(effects.length(), 5)
+  assert_eq(effects[0], "read")
+  assert_eq(effects[1], "token")
+  assert_eq(effects[2], "offer")
+  assert_eq(effects[3], "setup")
+  assert_eq(effects[4], "token")
+  assert_eq(fake.requests.length(), 2)
+}
+
+///|
+async test "first publish decline and noninteractive mode never start setup" {
+  let prepared = prepare_publication_markdown("Hello", "proposal")
+  guard prepared is Ok(publication) else { fail("preflight must succeed") }
+  let offers = [0]
+  let setups = [0]
+  let fake = FakeHttpClient::{ requests: [], responses: [] }
+  let declined = publish_prepared_with_project_onboarding(
+    publication,
+    true,
+    fn() { Err(CredentialsNotConfigured) },
+    fn() {
+      offers[0] = offers[0] + 1
+      false
+    },
+    fn() {
+      setups[0] = setups[0] + 1
+      Ok(())
+    },
+    fake,
+  )
+  guard declined is Err(Authentication(problem=CredentialsNotConfigured, ..)) else {
+    fail("decline must preserve the missing-setup failure")
+  }
+  assert_eq(offers[0], 1)
+  assert_eq(setups[0], 0)
+  let noninteractive = publish_prepared_with_project_onboarding(
+    publication,
+    false,
+    fn() { Err(CredentialsNotConfigured) },
+    fn() {
+      offers[0] = offers[0] + 1
+      true
+    },
+    fn() {
+      setups[0] = setups[0] + 1
+      Ok(())
+    },
+    fake,
+  )
+  guard noninteractive
+    is Err(Authentication(problem=CredentialsNotConfigured, ..)) else {
+    fail("noninteractive publish must return stable setup guidance")
+  }
+  assert_eq(offers[0], 1)
+  assert_eq(setups[0], 0)
+  assert_eq(fake.requests.length(), 0)
+}
+
+///|
+async test "first publish never offers setup for revoked or transient refresh failures" {
+  let prepared = prepare_publication_markdown("Hello", "proposal")
+  guard prepared is Ok(publication) else { fail("preflight must succeed") }
+  let offers = [0]
+  let fake = FakeHttpClient::{ requests: [], responses: [] }
+  for
+    problem in [
+      AuthenticationProblem::CredentialsRejected,
+      AuthenticationProblem::CredentialsRefreshFailed,
+    ] {
+    let result = publish_prepared_with_project_onboarding(
+      publication,
+      true,
+      fn() { Err(problem) },
+      fn() {
+        offers[0] = offers[0] + 1
+        true
+      },
+      fn() { Ok(()) },
+      fake,
+    )
+    guard result is Err(Authentication(problem=actual, ..)) else {
+      fail("token failure must remain structured")
+    }
+    assert_eq(actual, problem)
+  }
+  assert_eq(offers[0], 0)
+  assert_eq(fake.requests.length(), 0)
+}
+
+///|
+test "Project Authorization preserves distinct gcloud prerequisite guidance" {
+  let missing = PublishError::Authentication(
+    authorization_mode=Project,
+    problem=GcloudUnavailable,
+    created_document=None,
+  ).user_message()
+  let signed_out = PublishError::Authentication(
+    authorization_mode=Project,
+    problem=GcloudUnauthenticated,
+    created_document=None,
+  ).user_message()
+  assert_true(missing.contains("Install"))
+  assert_true(signed_out.contains("gcloud auth login"))
+  assert_false(missing == signed_out)
+}
+
+///|
+async test "ephemeral token publishing has distinct secret-free guidance" {
+  let prepared = prepare_publication_markdown("Hello", "proposal")
+  guard prepared is Ok(publication) else { fail("preflight must succeed") }
+  let fake = FakeHttpClient::{ requests: [], responses: [] }
+  let result = publish_prepared(
+    publication,
+    Ephemeral,
+    fn() { Err(CredentialsNotConfigured) },
+    fake,
+  )
+  guard result is Err(error) else { fail("missing token must fail") }
+  let message = error.user_message()
+  assert_true(message.contains("PUMD_ACCESS_TOKEN"))
+  assert_false(message.contains("token-secret"))
   assert_eq(fake.requests.length(), 0)
 }
 

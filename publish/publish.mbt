@@ -12,6 +12,11 @@ pub(all) enum PublicationRemoteStage {
 
 ///|
 pub(all) enum AuthenticationProblem {
+  CredentialsNotConfigured
+  GcloudUnavailable
+  GcloudUnauthenticated
+  CredentialVaultDenied
+  UnsupportedPlatform
   CredentialsUnavailable
   CredentialsInvalid
   CredentialsRefreshFailed
@@ -22,7 +27,17 @@ pub(all) enum AuthenticationProblem {
 pub(all) enum AuthorizationMode {
   Project
   Adc
+  Ephemeral
 } derive(Eq, @debug.Debug)
+
+///|
+/// A locally validated and fully planned first publication. Constructing this
+/// value performs every source/render/planning step and no authorization or
+/// remote work, so interactive onboarding can only begin after preflight.
+pub struct PreparedPublication {
+  title : String
+  plan : DocsUpdatePlan
+}
 
 ///|
 pub(all) enum PublishError {
@@ -63,7 +78,10 @@ pub fn canonical_document_url(document_id : String) -> String {
 let adc_setup_hint = "Run `gcloud auth application-default login --client-id-file=oauth-client.json --scopes=https://www.googleapis.com/auth/drive.file`."
 
 ///|
-let project_setup_hint = "Run `pumd auth setup --client-file ... --credential-store=file`."
+let project_setup_hint = "Run `pumd auth setup` interactively, or `pumd auth setup --client-file oauth-client.json` with a Desktop OAuth client configuration."
+
+///|
+let ephemeral_setup_hint = "Set PUMD_ACCESS_TOKEN for this invocation and use `--auth=token-env`; pumd never stores this token."
 
 ///|
 fn remote_stage_name(stage : PublicationRemoteStage) -> String {
@@ -142,6 +160,16 @@ pub fn PublishError::user_message(self : PublishError) -> String {
     Planning(message) => "Desired Document planning failed: " + message
     Authentication(authorization_mode~, problem~, created_document~) => {
       let guidance = match (authorization_mode, problem) {
+        (Project, CredentialsNotConfigured) =>
+          "Project Authorization is not configured. " + project_setup_hint
+        (Project, GcloudUnavailable) =>
+          "Project Authorization setup requires the Google Cloud CLI (`gcloud`). Install it, then retry."
+        (Project, GcloudUnauthenticated) =>
+          "Project Authorization setup requires a signed-in gcloud account. Run `gcloud auth login`, then retry."
+        (Project, CredentialVaultDenied) =>
+          "The native credential vault is locked or denied access. Unlock it and allow pumd, then retry; no file fallback was used."
+        (Project, UnsupportedPlatform) =>
+          "Project Authorization has no supported native credential vault on this platform. Select `--credential-store=file` explicitly only if its reduced protection is acceptable."
         (Project, CredentialsUnavailable) =>
           "Project Authorization credentials are unavailable. " +
           project_setup_hint
@@ -165,6 +193,26 @@ pub fn PublishError::user_message(self : PublishError) -> String {
         (Adc, CredentialsRejected) =>
           "Google rejected the Application Default Credentials; refresh ADC before retrying. " +
           adc_setup_hint
+        (Adc, CredentialsNotConfigured) =>
+          "Application Default Credentials are unavailable. " + adc_setup_hint
+        (Adc, CredentialVaultDenied)
+        | (Adc, UnsupportedPlatform)
+        | (Adc, GcloudUnavailable)
+        | (Adc, GcloudUnauthenticated) =>
+          "Application Default Credentials are unavailable. " + adc_setup_hint
+        (Ephemeral, CredentialsNotConfigured)
+        | (Ephemeral, CredentialsUnavailable) =>
+          "An ephemeral access token was not supplied. " + ephemeral_setup_hint
+        (Ephemeral, CredentialsInvalid)
+        | (Ephemeral, CredentialsRefreshFailed)
+        | (Ephemeral, CredentialsRejected) =>
+          "The ephemeral access token is invalid or was rejected. " +
+          ephemeral_setup_hint
+        (Ephemeral, CredentialVaultDenied)
+        | (Ephemeral, UnsupportedPlatform)
+        | (Ephemeral, GcloudUnavailable)
+        | (Ephemeral, GcloudUnauthenticated) =>
+          "An ephemeral access token was not supplied. " + ephemeral_setup_hint
       }
       "authentication failed" +
       format_document_identity(created_document) +
@@ -191,6 +239,8 @@ pub fn PublishError::user_message(self : PublishError) -> String {
           "Check that Project Authorization is configured with https://www.googleapis.com/auth/drive.file."
         Adc =>
           "Check that ADC includes https://www.googleapis.com/auth/drive.file."
+        Ephemeral =>
+          "Check that PUMD_ACCESS_TOKEN grants https://www.googleapis.com/auth/drive.file."
       }
       remote_stage_name(stage) +
       " permission failed" +
@@ -226,6 +276,53 @@ async fn prepare_source_path(
 }
 
 ///|
+/// Read, render, validate, and plan a path without touching authorization or
+/// remote services.
+pub async fn prepare_publication_path(
+  path : String,
+  read_source : async (String) -> Result[String, String],
+) -> Result[PreparedPublication, PublishError] {
+  let (source, title) = match prepare_source_path(path, read_source) {
+    Ok(prepared) => prepared
+    Err(error) => return Err(error)
+  }
+  prepare_publication_markdown(source, title)
+}
+
+///|
+/// Render, validate, and plan Markdown without authorization or remote work.
+pub fn prepare_publication_markdown(
+  source : String,
+  title : String,
+) -> Result[PreparedPublication, PublishError] {
+  let document = match @pumd.render_markdown(source) {
+    Ok(document) => document
+    Err(diagnostics) => return Err(Rendering(diagnostics))
+  }
+  let plan = match prepare_docs_update_plan(document) {
+    Ok(plan) => plan
+    Err(error) => return Err(Planning(error.message()))
+  }
+  Ok({ title, plan })
+}
+
+///|
+async fn publish_prepared_with_authorization_providers(
+  prepared : PreparedPublication,
+  authorization_mode : AuthorizationMode,
+  get_project_token : async () -> Result[String, AuthenticationProblem],
+  get_adc_token : async () -> Result[String, AuthenticationProblem],
+  http : &@google_http.HttpClient,
+) -> Result[PublishSuccess, PublishError] {
+  let get_token = match authorization_mode {
+    Project => get_project_token
+    Adc => get_adc_token
+    Ephemeral => get_project_token
+  }
+  publish_prepared(prepared, authorization_mode, get_token, http)
+}
+
+///|
 pub async fn publish_path(
   path : String,
   read_source : async (String) -> Result[String, String],
@@ -254,12 +351,12 @@ pub async fn publish_path_with_authorization(
   get_adc_token : async () -> Result[String, AuthenticationProblem],
   http : &@google_http.HttpClient,
 ) -> Result[PublishSuccess, PublishError] {
-  let (source, title) = match prepare_source_path(path, read_source) {
+  let prepared = match prepare_publication_path(path, read_source) {
     Ok(prepared) => prepared
     Err(error) => return Err(error)
   }
-  publish_markdown_with_authorization(
-    source, title, authorization_mode, get_project_token, get_adc_token, http,
+  publish_prepared_with_authorization_providers(
+    prepared, authorization_mode, get_project_token, get_adc_token, http,
   )
 }
 
@@ -290,12 +387,12 @@ pub async fn publish_markdown_with_authorization(
   get_adc_token : async () -> Result[String, AuthenticationProblem],
   http : &@google_http.HttpClient,
 ) -> Result[PublishSuccess, PublishError] {
-  let document = match @pumd.render_markdown(source) {
-    Ok(document) => document
-    Err(diagnostics) => return Err(Rendering(diagnostics))
+  let prepared = match prepare_publication_markdown(source, title) {
+    Ok(prepared) => prepared
+    Err(error) => return Err(error)
   }
-  publish_desired_document_with_authorization(
-    document, title, authorization_mode, get_project_token, get_adc_token, http,
+  publish_prepared_with_authorization_providers(
+    prepared, authorization_mode, get_project_token, get_adc_token, http,
   )
 }
 
@@ -331,19 +428,86 @@ pub async fn publish_desired_document_with_authorization(
     Ok(plan) => plan
     Err(error) => return Err(Planning(error.message()))
   }
-  let token_result = match authorization_mode {
-    Project => get_project_token()
-    Adc => get_adc_token()
-  }
-  let token = match token_result {
+  let prepared : PreparedPublication = { title, plan }
+  publish_prepared_with_authorization_providers(
+    prepared, authorization_mode, get_project_token, get_adc_token, http,
+  )
+}
+
+///|
+/// Publish an already validated plan with exactly the selected token provider.
+pub async fn publish_prepared(
+  prepared : PreparedPublication,
+  authorization_mode : AuthorizationMode,
+  get_token : async () -> Result[String, AuthenticationProblem],
+  http : &@google_http.HttpClient,
+) -> Result[PublishSuccess, PublishError] {
+  let token = match get_token() {
     Ok(token) => token
     Err(problem) =>
       return Err(
         Authentication(authorization_mode~, problem~, created_document=None),
       )
   }
+  publish_prepared_with_token(prepared, authorization_mode, token, http)
+}
+
+///|
+/// Offer first-publish setup only for a genuinely absent Project
+/// Authorization, only in an interactive session, and only after callers have
+/// successfully constructed `prepared`.
+pub async fn publish_prepared_with_project_onboarding(
+  prepared : PreparedPublication,
+  interactive : Bool,
+  get_project_token : async () -> Result[String, AuthenticationProblem],
+  offer_setup : () -> Bool,
+  setup : async () -> Result[Unit, AuthenticationProblem],
+  http : &@google_http.HttpClient,
+) -> Result[PublishSuccess, PublishError] {
+  match get_project_token() {
+    Ok(token) => publish_prepared_with_token(prepared, Project, token, http)
+    Err(CredentialsNotConfigured) if interactive =>
+      if !offer_setup() {
+        Err(
+          Authentication(
+            authorization_mode=Project,
+            problem=CredentialsNotConfigured,
+            created_document=None,
+          ),
+        )
+      } else {
+        match setup() {
+          Ok(_) => publish_prepared(prepared, Project, get_project_token, http)
+          Err(problem) =>
+            Err(
+              Authentication(
+                authorization_mode=Project,
+                problem~,
+                created_document=None,
+              ),
+            )
+        }
+      }
+    Err(problem) =>
+      Err(
+        Authentication(
+          authorization_mode=Project,
+          problem~,
+          created_document=None,
+        ),
+      )
+  }
+}
+
+///|
+async fn publish_prepared_with_token(
+  prepared : PreparedPublication,
+  authorization_mode : AuthorizationMode,
+  token : String,
+  http : &@google_http.HttpClient,
+) -> Result[PublishSuccess, PublishError] {
   let client = @google_core.GoogleClient::new(fn() { token }, http=Some(http))
-  let document_id = match create_document(client, title) {
+  let document_id = match create_document(client, prepared.title) {
     Ok(document_id) => document_id
     Err(AdapterTransport(_)) => return Err(AmbiguousCreation)
     Err(AdapterHttpStatus(status~, kind~)) => {
@@ -369,7 +533,7 @@ pub async fn publish_desired_document_with_authorization(
     document_id,
     url: canonical_document_url(document_id),
   }
-  match batch_update_document(client, document_id, plan) {
+  match batch_update_document(client, document_id, prepared.plan) {
     Ok(_) => Ok(created_document)
     Err(AdapterTransport(_)) => Err(AmbiguousPopulation(created_document))
     Err(AdapterHttpStatus(status~, kind~)) =>

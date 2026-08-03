@@ -2,6 +2,7 @@
 /// A validated Google Desktop OAuth client used for Project Authorization.
 pub(all) struct InstalledClient {
   client_id : String
+  project_id : String?
   client_secret : String
   auth_uri : String
   token_uri : String
@@ -12,8 +13,14 @@ pub(all) struct InstalledClient {
 pub(all) enum ProjectAuthorizationError {
   InvalidClientFile(String)
   SetupFailed(String)
+  GcloudUnavailable
+  GcloudUnauthenticated
+  NotConfigured
   ReauthorizationRequired
+  RefreshTransient
+  StorageDenied
   StorageUnavailable
+  UnsupportedPlatform
 }
 
 ///|
@@ -34,10 +41,22 @@ pub fn ProjectAuthorizationError::user_message(
     InvalidClientFile(message) =>
       "Project Authorization client file is invalid: " + message
     SetupFailed(message) => "Project Authorization setup failed: " + message
+    GcloudUnavailable =>
+      "Project Authorization setup requires the Google Cloud CLI (`gcloud`). Install it from https://cloud.google.com/sdk/docs/install, then run setup again."
+    GcloudUnauthenticated =>
+      "Project Authorization setup requires a signed-in gcloud account. Run `gcloud auth login`, then run setup again."
+    NotConfigured =>
+      "Project Authorization is not configured. Run `pumd auth setup`."
     ReauthorizationRequired =>
       "Project Authorization needs reauthorization. Run `pumd auth setup`, or repeat setup with the explicitly selected credential-store option."
+    RefreshTransient =>
+      "Project Authorization could not refresh because of a transient failure. Retry later without replacing the stored authorization."
+    StorageDenied =>
+      "Project Authorization credential-vault access was denied or the vault is locked."
     StorageUnavailable =>
       "Project Authorization credential store is unavailable."
+    UnsupportedPlatform =>
+      "Project Authorization has no supported native credential vault on this platform."
   }
 }
 
@@ -57,6 +76,7 @@ pub(all) struct StoredAuthorization {
   refresh_token : String
   token_uri : String
   scope : String
+  project_id : String?
 }
 
 ///|
@@ -66,6 +86,7 @@ pub(all) struct ProjectAuthorizationStatus {
   client_id : String?
   token_uri : String?
   scope : String
+  project_id : String?
 }
 
 ///|
@@ -74,6 +95,14 @@ pub(all) struct OAuthToken {
   access_token : String
   refresh_token : String?
 }
+
+///|
+/// Secret-free refresh failure classes. Rejected grants require setup;
+/// transient failures preserve the existing grant for a later retry.
+pub(all) enum OAuthRefreshFailure {
+  Rejected
+  Transient
+} derive(Eq, @debug.Debug)
 
 ///|
 /// The authorization-code exchange supplied to the OAuth HTTP seam.
@@ -361,6 +390,7 @@ pub async fn setup_project_authorization(
     refresh_token,
     token_uri: client.token_uri,
     scope: drive_file_scope,
+    project_id: client.project_id,
   }
   match (dependencies.store.replace)(authorization) {
     Ok(_) =>
@@ -369,8 +399,13 @@ pub async fn setup_project_authorization(
         client_id: Some(client.client_id),
         token_uri: Some(client.token_uri),
         scope: drive_file_scope,
+        project_id: client.project_id,
       })
-    Err(_) => Err(StorageUnavailable)
+    Err(CredentialStoreError::Denied) => Err(StorageDenied)
+    Err(CredentialStoreError::Unsupported) => Err(UnsupportedPlatform)
+    Err(CredentialStoreError::Unavailable)
+    | Err(CredentialStoreError::Malformed)
+    | Err(CredentialStoreError::NotConfigured) => Err(StorageUnavailable)
   }
 }
 
@@ -389,6 +424,7 @@ pub async fn project_authorization_status(
           client_id: Some(authorization.client_id),
           token_uri: Some(authorization.token_uri),
           scope: drive_file_scope,
+          project_id: authorization.project_id,
         })
       }
     Err(CredentialStoreError::NotConfigured) =>
@@ -397,9 +433,12 @@ pub async fn project_authorization_status(
         client_id: None,
         token_uri: None,
         scope: drive_file_scope,
+        project_id: None,
       })
     Err(CredentialStoreError::Malformed) => Err(ReauthorizationRequired)
-    Err(_) => Err(StorageUnavailable)
+    Err(CredentialStoreError::Denied) => Err(StorageDenied)
+    Err(CredentialStoreError::Unsupported) => Err(UnsupportedPlatform)
+    Err(CredentialStoreError::Unavailable) => Err(StorageUnavailable)
   }
 }
 
@@ -423,17 +462,89 @@ pub async fn project_authorization_usable_status(
 }
 
 ///|
+/// Report usability without collapsing revoked grants into transient refresh
+/// failures.
+pub async fn project_authorization_usable_status_classified(
+  store : CredentialStore,
+  refresh : async (TokenRefreshRequest) -> Result[
+    OAuthToken,
+    OAuthRefreshFailure,
+  ],
+) -> Result[ProjectAuthorizationStatus, ProjectAuthorizationError] {
+  let status = match project_authorization_status(store) {
+    Ok(status) => status
+    Err(error) => return Err(error)
+  }
+  if !status.configured {
+    return Ok(status)
+  }
+  match project_access_token_classified(store, refresh) {
+    Ok(_) => Ok(status)
+    Err(error) => Err(error)
+  }
+}
+
+///|
+/// A status snapshot plus any refresh-time usability problem. Keeping these
+/// together lets status reporters retain non-secret store and project context
+/// when a grant was revoked or refresh is temporarily unavailable.
+pub(all) struct ProjectAuthorizationInspection {
+  status : ProjectAuthorizationStatus
+  usability_error : ProjectAuthorizationError?
+}
+
+///|
+pub async fn inspect_project_authorization_status(
+  store : CredentialStore,
+  refresh : async (TokenRefreshRequest) -> Result[
+    OAuthToken,
+    OAuthRefreshFailure,
+  ],
+) -> Result[ProjectAuthorizationInspection, ProjectAuthorizationError] {
+  let status = match project_authorization_status(store) {
+    Ok(status) => status
+    Err(error) => return Err(error)
+  }
+  if !status.configured {
+    return Ok({ status, usability_error: None })
+  }
+  let usability_error = match project_access_token_classified(store, refresh) {
+    Ok(_) => None
+    Err(error) => Some(error)
+  }
+  Ok({ status, usability_error })
+}
+
+///|
 /// Refresh silently from Project Authorization; this never opens a browser or consults ADC.
 pub async fn project_access_token(
   store : CredentialStore,
   refresh : async (TokenRefreshRequest) -> Result[OAuthToken, String],
 ) -> Result[String, ProjectAuthorizationError] {
+  project_access_token_classified(store, async fn(request) {
+    match refresh(request) {
+      Ok(token) => Ok(token)
+      Err(_) => Err(OAuthRefreshFailure::Rejected)
+    }
+  })
+}
+
+///|
+/// Refresh silently while preserving rejected and transient outcomes.
+pub async fn project_access_token_classified(
+  store : CredentialStore,
+  refresh : async (TokenRefreshRequest) -> Result[
+    OAuthToken,
+    OAuthRefreshFailure,
+  ],
+) -> Result[String, ProjectAuthorizationError] {
   let authorization = match (store.load)() {
     Ok(authorization) => authorization
-    Err(CredentialStoreError::NotConfigured)
-    | Err(CredentialStoreError::Malformed) =>
-      return Err(ReauthorizationRequired)
-    Err(_) => return Err(StorageUnavailable)
+    Err(CredentialStoreError::NotConfigured) => return Err(NotConfigured)
+    Err(CredentialStoreError::Malformed) => return Err(ReauthorizationRequired)
+    Err(CredentialStoreError::Denied) => return Err(StorageDenied)
+    Err(CredentialStoreError::Unsupported) => return Err(UnsupportedPlatform)
+    Err(CredentialStoreError::Unavailable) => return Err(StorageUnavailable)
   }
   if !valid_stored_authorization(authorization) {
     return Err(ReauthorizationRequired)
@@ -447,7 +558,9 @@ pub async fn project_access_token(
       scope: drive_file_scope,
     }) {
     Ok(token) if !token.access_token.is_empty() => Ok(token.access_token)
-    _ => Err(ReauthorizationRequired)
+    Ok(_) => Err(ReauthorizationRequired)
+    Err(OAuthRefreshFailure::Rejected) => Err(ReauthorizationRequired)
+    Err(OAuthRefreshFailure::Transient) => Err(RefreshTransient)
   }
 }
 
@@ -529,18 +642,93 @@ pub async fn exchange_code_with_http(
 }
 
 ///|
-/// Real OAuth refresh over the injected Google HTTP client.
-pub async fn refresh_with_http(
-  http : &@google_http.HttpClient,
-  request : TokenRefreshRequest,
-) -> Result[OAuthToken, String] {
-  let body = form_encode([
+fn refresh_request_body(request : TokenRefreshRequest) -> String {
+  form_encode([
     ("grant_type", "refresh_token"),
     ("refresh_token", request.refresh_token),
     ("client_id", request.client_id),
     ("client_secret", request.client_secret),
   ])
+}
+
+///|
+/// Real OAuth refresh over the injected Google HTTP client.
+pub async fn refresh_with_http(
+  http : &@google_http.HttpClient,
+  request : TokenRefreshRequest,
+) -> Result[OAuthToken, String] {
+  let body = refresh_request_body(request)
   post_token_request(http, request.token_uri, body)
+}
+
+///|
+fn classified_refresh_http_failure(
+  status : Int,
+  body : String,
+) -> OAuthRefreshFailure {
+  let json = @json.parse(body) catch {
+    _ =>
+      return if status == 401 {
+        OAuthRefreshFailure::Rejected
+      } else {
+        OAuthRefreshFailure::Transient
+      }
+  }
+  let oauth_error = match json {
+    Object(fields) =>
+      match fields.get("error") {
+        Some(String(value)) => Some(value)
+        _ => None
+      }
+    _ => None
+  }
+  match oauth_error {
+    Some("invalid_grant")
+    | Some("invalid_client")
+    | Some("unauthorized_client") => OAuthRefreshFailure::Rejected
+    Some("temporarily_unavailable") | Some("server_error") =>
+      OAuthRefreshFailure::Transient
+    _ =>
+      if status == 401 {
+        OAuthRefreshFailure::Rejected
+      } else {
+        OAuthRefreshFailure::Transient
+      }
+  }
+}
+
+///|
+/// Refresh over HTTP while keeping revocation separate from retryable failures.
+pub async fn refresh_with_http_classified(
+  http : &@google_http.HttpClient,
+  request : TokenRefreshRequest,
+) -> Result[OAuthToken, OAuthRefreshFailure] {
+  let body = refresh_request_body(request)
+  let response = http.request(
+    @google_http.HttpRequest::new(
+      request.token_uri,
+      @google_http.HttpMethod::POST,
+      {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Accept": "application/json",
+      },
+      body=Some(body),
+    ),
+  ) catch {
+    _ => return Err(OAuthRefreshFailure::Transient)
+  }
+  if response.status_code == 400 || response.status_code == 401 {
+    return Err(
+      classified_refresh_http_failure(response.status_code, response.body),
+    )
+  }
+  if response.status_code < 200 || response.status_code >= 300 {
+    return Err(OAuthRefreshFailure::Transient)
+  }
+  match token_response(response.body) {
+    Ok(token) => Ok(token)
+    Err(_) => Err(OAuthRefreshFailure::Transient)
+  }
 }
 
 ///|
@@ -583,6 +771,10 @@ fn authorization_json(authorization : StoredAuthorization) -> String {
     "refresh_token": Json::string(authorization.refresh_token),
     "token_uri": Json::string(authorization.token_uri),
     "scope": Json::string(drive_file_scope),
+  }
+  match authorization.project_id {
+    Some(project_id) => values.set("project_id", Json::string(project_id))
+    None => ()
   }
   Json::object(values).stringify()
 }
@@ -641,7 +833,20 @@ fn stored_authorization_json(
   if scope != drive_file_scope {
     return Err(CredentialStoreError::Malformed)
   }
-  Ok({ version, client_id, client_secret, refresh_token, token_uri, scope })
+  let project_id = match fields.get("project_id") {
+    Some(String(value)) if !value.is_empty() => Some(value)
+    None => None
+    _ => return Err(CredentialStoreError::Malformed)
+  }
+  Ok({
+    version,
+    client_id,
+    client_secret,
+    refresh_token,
+    token_uri,
+    scope,
+    project_id,
+  })
 }
 
 ///|
@@ -845,12 +1050,12 @@ pub fn production_setup_dependencies(
 }
 
 ///|
-/// Production high-level setup using the default secure Keychain credential store.
+/// Production high-level setup using the platform-native credential vault.
 pub async fn setup_project_authorization_production(
   client_document : String,
   http : &@google_http.HttpClient,
 ) -> Result[ProjectAuthorizationStatus, ProjectAuthorizationError] {
-  let store = match production_credential_store(CredentialStoreKind::Keychain) {
+  let store = match production_credential_store(CredentialStoreKind::Native) {
     Ok(store) => store
     Err(error) => return Err(error)
   }
@@ -865,7 +1070,7 @@ pub async fn setup_project_authorization_production(
 pub async fn project_authorization_status_production(
   http : &@google_http.HttpClient,
 ) -> Result[ProjectAuthorizationStatus, ProjectAuthorizationError] {
-  let store = match production_credential_store(CredentialStoreKind::Keychain) {
+  let store = match production_credential_store(CredentialStoreKind::Native) {
     Ok(store) => store
     Err(error) => return Err(error)
   }
@@ -879,7 +1084,7 @@ pub async fn project_authorization_status_production(
 pub async fn project_access_token_production(
   http : &@google_http.HttpClient,
 ) -> Result[String, ProjectAuthorizationError] {
-  let store = match production_credential_store(CredentialStoreKind::Keychain) {
+  let store = match production_credential_store(CredentialStoreKind::Native) {
     Ok(store) => store
     Err(error) => return Err(error)
   }
@@ -1000,5 +1205,10 @@ pub fn parse_installed_client(
       ),
     )
   }
-  Ok({ client_id, client_secret, auth_uri, token_uri })
+  let project_id = match fields.get("project_id") {
+    Some(String(value)) if !value.is_empty() => Some(value)
+    None => None
+    _ => return Err(InvalidClientFile("`installed.project_id` must be text"))
+  }
+  Ok({ client_id, project_id, client_secret, auth_uri, token_uri })
 }

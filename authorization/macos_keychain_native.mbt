@@ -28,7 +28,7 @@ fn native_macos_keychain_available() -> Bool {
 }
 
 ///|
-fn native_macos_keychain_backend() -> MacOSKeychainBackend {
+fn native_macos_keychain_backend() -> CredentialDocumentBackend {
   {
     load: fn() {
       // Generic-password data is capped at 1 MiB. This is far above an OAuth
