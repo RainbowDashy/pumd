@@ -601,13 +601,11 @@ fn render_block_literal(
       buf.write_string("<blockquote")
       write_pos_attrs(buf, span, opts.positions)
       buf.write_char('>')
-      // Children are parsed inside the blockquote and their spans are
-      // relative to the blockquote's content, not the document, so don't
-      // emit `data-src` on them. The outer <blockquote> annotation is
-      // enough — clicks inside it walk up to here.
+      // Blockquote child spans are remapped to document offsets by the parser,
+      // so preserve position annotations throughout the nested block tree.
       for child in children {
         let child_buf = StringBuilder::new()
-        render_block_literal(child, child_buf, opts.nested())
+        render_block_literal(child, child_buf, opts)
         write_blockquote_prefixed(buf, child_buf.to_string())
       }
       buf.write_string("</blockquote>")
@@ -772,9 +770,8 @@ fn render_bullet_items_literal(
   opts : LiteralOpts,
 ) -> Unit {
   for item in items {
-    // Top-level item spans are absolute, but blocks parsed inside the
-    // item (nested lists, paragraphs) carry relative spans, so only
-    // annotate the <li> and stop recursion's annotation there.
+    // Lists are parsed against the document scanner, so item and child block
+    // spans are document-absolute and position annotations can recurse.
     buf.write_string("<li")
     write_pos_attrs(buf, item.span, opts.positions)
     buf.write_char('>')
@@ -789,7 +786,7 @@ fn render_bullet_items_literal(
       Some(false) => write_marker(buf, "[ ] ")
       None => ()
     }
-    render_list_item_content_literal(item, buf, indent + 2, opts.nested())
+    render_list_item_content_literal(item, buf, indent + 2, opts)
     buf.write_string("</li>")
   }
 }
@@ -820,7 +817,7 @@ fn render_ordered_items_literal(
       Some(false) => write_marker(buf, "[ ] ")
       None => ()
     }
-    render_list_item_content_literal(item, buf, indent + 3, opts.nested())
+    render_list_item_content_literal(item, buf, indent + 3, opts)
     buf.write_string("</li>")
     num += 1
   }

@@ -277,11 +277,11 @@ Version one is successful when it can:
 
 ## Current implementation milestone
 
-The first milestone is a pure MoonBit library that parses Markdown with
-`mizchi/markdown` and renders its CST into a deterministic, Google-Docs-native
-`DesiredDocument`. It includes explicit, source-located errors for parsed
-constructs without a rendering rule and golden tests for the desired native
-structure.
+The first milestone is a pure MoonBit library that parses Markdown with a
+`pumd`-owned fork of `mizchi/markdown` and renders its CST into a deterministic,
+Google-Docs-native `DesiredDocument`. It includes explicit, source-located
+errors for parsed constructs without a rendering rule and golden tests for the
+desired native structure.
 
 The supported rendering set is headings, paragraphs, emphasis, links, lists,
 tables, inline code, fenced code blocks, and blockquotes. Blockquote rendering
