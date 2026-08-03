@@ -12,6 +12,8 @@ pub(all) struct StyleProfile {
   table_cell : ParagraphStyle
   table_header_text : TextStyle
   table_header_fill : String
+  quote_indent_per_level_points : Int
+  quote_border : ParagraphBorder
 } derive(Eq, @debug.Debug)
 
 ///|
@@ -42,11 +44,14 @@ fn make_paragraph_style(
     space_above_points,
     space_below_points,
     background_color: None,
+    indent_start_points: None,
+    indent_first_line_points: None,
+    border_left: None,
   }
 }
 
 ///|
-/// The sole version-one Style Profile.
+/// The sole version-two Style Profile.
 pub fn builtin_style_profile() -> StyleProfile {
   let heading_sizes = [24, 18, 14, 12, 11, 10]
   let heading_before = [20, 18, 16, 14, 12, 10]
@@ -74,7 +79,7 @@ pub fn builtin_style_profile() -> StyleProfile {
   }
   {
     id: "pumd.default",
-    version: 1,
+    version: 2,
     body: make_paragraph_style(NamedStyle::NormalText, 11, 0, 6),
     body_text: make_text_style("Arial", 11),
     headings,
@@ -97,9 +102,14 @@ pub fn builtin_style_profile() -> StyleProfile {
       space_above_points: 0,
       space_below_points: 0,
       background_color: Some("#F1F3F4"),
+      indent_start_points: None,
+      indent_first_line_points: None,
+      border_left: None,
     },
     table_cell: make_paragraph_style(NamedStyle::NormalText, 11, 0, 0),
     table_header_text: { ..make_text_style("Arial", 11), bold: true },
     table_header_fill: "#F1F3F4",
+    quote_indent_per_level_points: 18,
+    quote_border: { color: "#B7B7B7", width_points: 1, padding_points: 6 },
   }
 }

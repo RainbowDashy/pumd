@@ -43,6 +43,13 @@ pub(all) struct TextStyle {
 } derive(Eq, @debug.Debug)
 
 ///|
+pub(all) struct ParagraphBorder {
+  color : String
+  width_points : Int
+  padding_points : Int
+} derive(Eq, @debug.Debug)
+
+///|
 pub(all) struct ParagraphStyle {
   named_style : NamedStyle
   font_family : String
@@ -51,6 +58,9 @@ pub(all) struct ParagraphStyle {
   space_above_points : Int
   space_below_points : Int
   background_color : String?
+  indent_start_points : Int?
+  indent_first_line_points : Int?
+  border_left : ParagraphBorder?
 } derive(Eq, @debug.Debug)
 
 ///|

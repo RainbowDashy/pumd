@@ -38,6 +38,25 @@ test "compiles a native list after its paragraph structure" {
 }
 
 ///|
+test "reapplies quoted-list geometry after native bullet creation" {
+  match @pumd.render_markdown("> - quoted") {
+    Ok(document) =>
+      inspect(
+        compile_docs_update_plan(document).to_snapshot(),
+        content=(
+          #|insert-text 1 "quoted\n"
+          #|paragraph-style 1..8 normal font=Arial size=11 line=115 before=0 after=6 indent-start=54 indent-first-line=36 border-left=#B7B7B7 width=1 padding=6
+          #|text-style 1..7 font=Arial size=11
+          #|paragraph-bullets 1..8 bullet level=0
+          #|paragraph-decoration 1..8 normal font=Arial size=11 line=115 before=0 after=6 indent-start=54 indent-first-line=36 border-left=#B7B7B7 width=1 padding=6
+          #|
+        ),
+      )
+    Err(_) => assert_true(false)
+  }
+}
+
+///|
 test "retains ordered-list starts and nested bullet levels" {
   match @pumd.render_markdown("3. third\n\n- outer\n  - nested\n\nafter") {
     Ok(document) =>
@@ -244,7 +263,7 @@ test "planning rejects a table whose rows have no cells" {
     metadata: { title: None, locale: None },
     render_metadata: {
       style_profile_id: "pumd.default",
-      style_profile_version: 1,
+      style_profile_version: 2,
     },
     content: [
       @pumd.StructuralElement::Table({

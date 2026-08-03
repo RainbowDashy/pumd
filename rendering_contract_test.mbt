@@ -35,7 +35,7 @@ test "mixed supported Markdown has a canonical native golden document" {
   inspect(
     document.to_snapshot(),
     content=(
-      #|profile pumd.default@1
+      #|profile pumd.default@2
       #|paragraph heading-1 font=Arial size=24 line=1.15 before=20 after=8
       #|  text "Contract title" font=Arial size=24
       #|paragraph normal font=Arial size=11 line=1.15 before=0 after=6
@@ -113,12 +113,12 @@ test "moving unchanged source changes provenance without changing native content
 test "empty and blank-line whitespace variants have documented deterministic output" {
   let empty = render_or_fail("")
   let blank = render_or_fail("\n\n\n")
-  assert_eq(empty.to_snapshot(), "profile pumd.default@1\n")
+  assert_eq(empty.to_snapshot(), "profile pumd.default@2\n")
   assert_eq(blank.to_snapshot(), empty.to_snapshot())
   assert_true(empty.semantic_eq(blank))
 
   let expected =
-    #|profile pumd.default@1
+    #|profile pumd.default@2
     #|paragraph normal font=Arial size=11 line=1.15 before=0 after=6
     #|  text "Text" font=Arial size=11
     #|

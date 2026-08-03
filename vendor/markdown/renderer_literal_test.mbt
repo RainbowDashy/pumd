@@ -540,8 +540,39 @@ test "positions: list item positions" {
 }
 
 ///|
+test "positions: nested list positions" {
+  assert_block_positions("- parent\n  - child\n")
+}
+
+///|
 test "positions: blockquote with nested heading" {
   assert_block_positions("> # H1 inside\n> body\n")
+}
+
+///|
+test "positions: blockquote children use document-absolute spans" {
+  let html = md_to_html_literal("> # Heading\n> body\n", positions=true)
+  @debug.debug_inspect(
+    html.contains("<h1 data-src-start=\"2\" data-src-end=\"12\">"),
+    content="true",
+  )
+  @debug.debug_inspect(
+    html.contains("<p data-src-start=\"14\" data-src-end=\"18\">"),
+    content="true",
+  )
+}
+
+///|
+test "positions: blockquote inside list uses document-absolute spans" {
+  let html = md_to_html_literal("- > quote", positions=true)
+  @debug.debug_inspect(
+    html.contains("<blockquote data-src-start=\"2\" data-src-end=\"9\">"),
+    content="true",
+  )
+  @debug.debug_inspect(
+    html.contains("<p data-src-start=\"4\" data-src-end=\"9\">"),
+    content="true",
+  )
 }
 
 // =============================================================================

@@ -65,6 +65,12 @@ pub(all) struct Paragraph {
   provenance : SourceRange?
 } derive(@debug.Debug)
 
+pub(all) struct ParagraphBorder {
+  color : String
+  width_points : Int
+  padding_points : Int
+} derive(Eq, @debug.Debug)
+
 pub(all) struct ParagraphStyle {
   named_style : NamedStyle
   font_family : String
@@ -73,6 +79,9 @@ pub(all) struct ParagraphStyle {
   space_above_points : Int
   space_below_points : Int
   background_color : String?
+  indent_start_points : Int?
+  indent_first_line_points : Int?
+  border_left : ParagraphBorder?
 } derive(Eq, @debug.Debug)
 
 pub(all) struct RenderMetadata {
@@ -110,6 +119,8 @@ pub(all) struct StyleProfile {
   table_cell : ParagraphStyle
   table_header_text : TextStyle
   table_header_fill : String
+  quote_indent_per_level_points : Int
+  quote_border : ParagraphBorder
 } derive(Eq, @debug.Debug)
 
 pub(all) struct Table {

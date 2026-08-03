@@ -26,6 +26,13 @@ priv struct RenderContext {
 }
 
 ///|
+priv struct RenderState {
+  bullet : BulletProperties?
+  list_nesting_level : Int?
+  quote_depth : Int
+}
+
+///|
 fn with_italic(style : TextStyle) -> TextStyle {
   { ..style, italic: true }
 }
@@ -356,12 +363,65 @@ fn render_table(
 }
 
 ///|
+fn paragraph_style_for(
+  style : ParagraphStyle,
+  state : RenderState,
+  context : RenderContext,
+) -> ParagraphStyle {
+  if state.quote_depth == 0 {
+    return style
+  }
+  let quote_indent = context.profile.quote_indent_per_level_points *
+    state.quote_depth
+  let (indent_start_points, indent_first_line_points) = match
+    state.list_nesting_level {
+    Some(level) => {
+      let list_text_indent = 36 * (level + 1)
+      let list_first_line_indent = if state.bullet is Some(_) {
+        18 + 36 * level
+      } else {
+        list_text_indent
+      }
+      (list_text_indent + quote_indent, list_first_line_indent + quote_indent)
+    }
+    None => (quote_indent, quote_indent)
+  }
+  {
+    ..style,
+    indent_start_points: Some(indent_start_points),
+    indent_first_line_points: Some(indent_first_line_points),
+    border_left: Some(context.profile.quote_border),
+  }
+}
+
+///|
+fn render_children(
+  children : Array[@markdown.Block],
+  state : RenderState,
+  context : RenderContext,
+) -> Bool {
+  let mut child_state = state
+  let mut rendered_paragraph = false
+  for child in children {
+    if render_block(child, child_state, context) {
+      rendered_paragraph = true
+      child_state = { ..child_state, bullet: None }
+    }
+  }
+  rendered_paragraph
+}
+
+///|
 fn render_list(
   items : Array[@markdown.ListItem],
   kind : ListKind,
-  nesting_level : Int,
+  state : RenderState,
   context : RenderContext,
 ) -> Unit {
+  let nesting_level = match state.list_nesting_level {
+    Some(level) => level + 1
+    None => 0
+  }
   for item in items {
     match item.checked {
       Some(_) =>
@@ -374,19 +434,21 @@ fn render_list(
         )
       None => ()
     }
-    let properties = Some({ kind, nesting_level })
-    for child in item.children {
-      render_block(child, properties, context)
+    let item_state = {
+      bullet: Some({ kind, nesting_level }),
+      list_nesting_level: Some(nesting_level),
+      quote_depth: state.quote_depth,
     }
+    ignore(render_children(item.children, item_state, context))
   }
 }
 
 ///|
 fn render_block(
   block : @markdown.Block,
-  bullet : BulletProperties?,
+  state : RenderState,
   context : RenderContext,
-) -> Unit {
+) -> Bool {
   match block {
     @markdown.Block::Heading(level~, children~, span~, ..) => {
       let index = heading_index(level)
@@ -396,44 +458,44 @@ fn render_block(
           context.profile.heading_text[index],
           context,
         ),
-        style: context.profile.headings[index],
-        bullet,
+        style: paragraph_style_for(
+          context.profile.headings[index],
+          state,
+          context,
+        ),
+        bullet: state.bullet,
         provenance: Some(source_range(span)),
       }
       context.content.push(StructuralElement::Paragraph(paragraph))
+      true
     }
     @markdown.Block::Paragraph(children~, span~, ..) => {
       let paragraph = {
         runs: render_inlines(children, context.profile.body_text, context),
-        style: context.profile.body,
-        bullet,
+        style: paragraph_style_for(context.profile.body, state, context),
+        bullet: state.bullet,
         provenance: Some(source_range(span)),
       }
       context.content.push(StructuralElement::Paragraph(paragraph))
+      true
     }
-    @markdown.Block::BulletList(items~, ..) =>
-      render_list(
-        items,
-        ListKind::Bullet,
-        match bullet {
-          Some(properties) => properties.nesting_level + 1
-          None => 0
-        },
-        context,
-      )
-    @markdown.Block::OrderedList(start~, delimiter~, items~, ..) =>
+    @markdown.Block::BulletList(items~, ..) => {
+      render_list(items, ListKind::Bullet, state, context)
+      true
+    }
+    @markdown.Block::OrderedList(start~, delimiter~, items~, ..) => {
       render_list(
         items,
         ListKind::Numbered(start~, delimiter=ordered_delimiter(delimiter)),
-        match bullet {
-          Some(properties) => properties.nesting_level + 1
-          None => 0
-        },
+        state,
         context,
       )
-    @markdown.Block::BlankLines(..) => ()
+      true
+    }
+    @markdown.Block::BlankLines(..) => false
     @markdown.Block::FencedCode(code~, span~, ..) => {
       let lines = code.split("\n").collect()
+      let mut code_state = state
       for line in lines {
         let runs : Array[TextRun] = []
         if !line.is_empty() {
@@ -444,56 +506,70 @@ fn render_block(
         context.content.push(
           StructuralElement::Paragraph({
             runs,
-            style: context.profile.code_block,
-            bullet,
+            style: paragraph_style_for(
+              context.profile.code_block,
+              code_state,
+              context,
+            ),
+            bullet: code_state.bullet,
             provenance: Some(source_range(span)),
           }),
         )
+        code_state = { ..code_state, bullet: None }
       }
+      true
     }
-    @markdown.Block::Table(header~, alignments~, rows~, span~, ..) =>
-      context.content.push(
-        StructuralElement::Table(
-          render_table(header, alignments, rows, span, context),
-        ),
-      )
-    @markdown.Block::ThematicBreak(span~, ..) =>
+    @markdown.Block::Table(header~, alignments~, rows~, span~, ..) => {
+      if state.quote_depth > 0 {
+        context.diagnostics.push(
+          unsupported(
+            "table-in-blockquote", span, "Move the table outside the blockquote or replace it with paragraphs.",
+          ),
+        )
+      } else {
+        context.content.push(
+          StructuralElement::Table(
+            render_table(header, alignments, rows, span, context),
+          ),
+        )
+      }
+      false
+    }
+    @markdown.Block::ThematicBreak(span~, ..) => {
       context.diagnostics.push(
         unsupported(
           "thematic-break", span, "Replace the thematic break with a paragraph or remove it.",
         ),
       )
-    @markdown.Block::IndentedCode(span~, ..) =>
+      false
+    }
+    @markdown.Block::IndentedCode(span~, ..) => {
       context.diagnostics.push(
         unsupported(
           "indented-code", span, "Replace the indented code block with a fenced code block.",
         ),
       )
-    @markdown.Block::Blockquote(children~, span~, ..) => {
-      context.diagnostics.push(
-        unsupported(
-          "blockquote", span, "Remove the blockquote marker and use regular paragraphs instead.",
-        ),
-      )
-      for child in children {
-        render_block(child, bullet, context)
-      }
+      false
     }
-    @markdown.Block::HtmlBlock(span~, ..) =>
+    @markdown.Block::Blockquote(children~, ..) => {
+      let quote_state = { ..state, quote_depth: state.quote_depth + 1 }
+      render_children(children, quote_state, context)
+    }
+    @markdown.Block::HtmlBlock(span~, ..) => {
       context.diagnostics.push(
         unsupported(
           "html-block", span, "Remove the HTML block and use supported Markdown instead.",
         ),
       )
+      false
+    }
     @markdown.Block::FootnoteDefinition(children~, span~, ..) => {
       context.diagnostics.push(
         unsupported(
           "footnote-definition", span, "Remove the footnote definition and include its content inline.",
         ),
       )
-      for child in children {
-        render_block(child, bullet, context)
-      }
+      render_children(children, state, context)
     }
   }
 }
@@ -526,7 +602,13 @@ pub fn render_markdown(
     None => ()
   }
   for block in parsed.document.children {
-    render_block(block, None, context)
+    ignore(
+      render_block(
+        block,
+        { bullet: None, list_nesting_level: None, quote_depth: 0 },
+        context,
+      ),
+    )
   }
   if context.diagnostics.is_empty() {
     Ok({

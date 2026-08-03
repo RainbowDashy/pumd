@@ -85,9 +85,10 @@ reviewer's work. Explicit overrides may exist, but must never be the default.
 ### Apply stable, readable defaults
 
 Documents should look coherent without a stylesheet or per-document setup.
-Headings, paragraphs, lists, links, tables, images, inline code, and fenced code
-blocks should have consistent native Google Docs formatting. Fenced code must
-remain editable and commentable, with a legible monospaced presentation.
+Headings, paragraphs, blockquotes, lists, links, tables, images, inline code,
+and fenced code blocks should have consistent native Google Docs formatting.
+Fenced code must remain editable and commentable, with a legible monospaced
+presentation.
 
 ### Keep the everyday interface small
 
@@ -266,8 +267,8 @@ Version one is successful when it can:
 - Preserve comment anchors and reviewer formatting on unchanged paragraphs.
 - Refuse conflicting local and remote edits by default.
 - Refuse changes that would carelessly detach unresolved review feedback.
-- Render headings, paragraphs, emphasis, links, lists, tables, inline code, and
-  fenced code blocks with consistent native formatting.
+- Render headings, paragraphs, blockquotes, emphasis, links, lists, tables,
+  inline code, and fenced code blocks with consistent native formatting.
 - Support local and HTTPS images through a safe publishing workflow.
 - Preview an incremental update without writing to Google.
 - Recover cleanly from concurrency failures without corrupting local state.
@@ -292,18 +293,22 @@ Version one is successful when it can:
 
 ## Current implementation milestone
 
-The first milestone is a pure MoonBit library that parses Markdown with
-`mizchi/markdown` and renders its CST into a deterministic, Google-Docs-native
-`DesiredDocument`. It includes explicit, source-located errors for parsed
-constructs without a rendering rule and golden tests for the desired native
-structure.
+The first milestone is a pure MoonBit library that parses Markdown with a
+`pumd`-owned fork of `mizchi/markdown` and renders its CST into a deterministic,
+Google-Docs-native `DesiredDocument`. It includes explicit, source-located
+errors for parsed constructs without a rendering rule and golden tests for the
+desired native structure.
 
 The supported rendering set is headings, paragraphs, emphasis, links, lists,
-tables, inline code, and fenced code blocks. Parser-supported constructs outside
-that set do not gain implicit behavior; they produce an unsupported-construct
-error until an explicit native rendering rule is added. Image rendering is
-deferred: direct images and reference images currently yield source-located
-unsupported diagnostics.
+tables, inline code, fenced code blocks, and blockquotes. Blockquote rendering
+supports `>` syntax, nesting, lazy continuation, and paragraphs, headings,
+lists, and fenced code blocks inside a blockquote, including quote/list
+composition. Tables remain supported generally, but a table inside a blockquote
+is unsupported. Parser-supported constructs outside that set do not gain
+implicit behavior; they produce an unsupported-construct error until an
+explicit native rendering rule is added. Image rendering is deferred: direct
+images and reference images currently yield source-located unsupported
+diagnostics.
 
 Rendering applies one versioned, built-in style profile with opinionated defaults
 for body text and every supported document element. Configurable themes and

@@ -217,7 +217,7 @@ async test "Desired Document planning failure stops before authentication and HT
     metadata: { title: None, locale: None },
     render_metadata: {
       style_profile_id: "pumd.default",
-      style_profile_version: 1,
+      style_profile_version: 2,
     },
     content: [@pumd.StructuralElement::Table({ rows: [], provenance: None })],
     provenance: None,

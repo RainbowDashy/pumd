@@ -261,16 +261,115 @@ fn write_paragraph_style(
     }
     None => ()
   }
+  match style.indent_start_points {
+    Some(points) => {
+      output.write_string(",\"indentStart\":")
+      write_dimension(points, output)
+    }
+    None => ()
+  }
+  match style.indent_first_line_points {
+    Some(points) => {
+      output.write_string(",\"indentFirstLine\":")
+      write_dimension(points, output)
+    }
+    None => ()
+  }
+  match style.border_left {
+    Some(border) => {
+      let color_json = StringBuilder::new()
+      if write_rgb_color(border.color, color_json) {
+        output.write_string(",\"borderLeft\":{\"color\":")
+        output.write_string(color_json.to_string())
+        output.write_string(",\"width\":")
+        write_dimension(border.width_points, output)
+        output.write_string(",\"padding\":")
+        write_dimension(border.padding_points, output)
+        output.write_string(",\"dashStyle\":\"SOLID\"}")
+      }
+    }
+    None => ()
+  }
   output.write_char('}')
 }
 
 ///|
 fn paragraph_style_fields(style : @pumd.ParagraphStyle) -> String {
+  let fields = StringBuilder::new()
+  fields.write_string("namedStyleType,lineSpacing,spaceAbove,spaceBelow")
   match style.background_color {
     Some(color) if color.length() == 7 =>
-      "namedStyleType,lineSpacing,spaceAbove,spaceBelow,shading.backgroundColor"
-    _ => "namedStyleType,lineSpacing,spaceAbove,spaceBelow"
+      fields.write_string(",shading.backgroundColor")
+    _ => ()
   }
+  match style.indent_start_points {
+    Some(_) => fields.write_string(",indentStart")
+    None => ()
+  }
+  match style.indent_first_line_points {
+    Some(_) => fields.write_string(",indentFirstLine")
+    None => ()
+  }
+  match style.border_left {
+    Some(border) if border.color.length() == 7 =>
+      fields.write_string(",borderLeft")
+    _ => ()
+  }
+  fields.to_string()
+}
+
+///|
+fn write_paragraph_decoration(
+  style : @pumd.ParagraphStyle,
+  output : StringBuilder,
+) -> String {
+  let fields = StringBuilder::new()
+  output.write_char('{')
+  let mut first = true
+  match style.indent_start_points {
+    Some(points) => {
+      output.write_string("\"indentStart\":")
+      write_dimension(points, output)
+      fields.write_string("indentStart")
+      first = false
+    }
+    None => ()
+  }
+  match style.indent_first_line_points {
+    Some(points) => {
+      if !first {
+        output.write_char(',')
+        fields.write_char(',')
+      }
+      output.write_string("\"indentFirstLine\":")
+      write_dimension(points, output)
+      fields.write_string("indentFirstLine")
+      first = false
+    }
+    None => ()
+  }
+  match style.border_left {
+    Some(border) => {
+      let color_json = StringBuilder::new()
+      if write_rgb_color(border.color, color_json) {
+        if !first {
+          output.write_char(',')
+          fields.write_char(',')
+        }
+        output.write_string("\"borderLeft\":{\"color\":")
+        output.write_string(color_json.to_string())
+        output.write_string(",\"width\":")
+        write_dimension(border.width_points, output)
+        output.write_string(",\"padding\":")
+        write_dimension(border.padding_points, output)
+        output.write_string(",\"dashStyle\":\"SOLID\"}")
+        fields.write_string("borderLeft")
+      }
+    }
+    None => ()
+  }
+  output.write_char('}')
+  fields.to_string()
 }
 
 ///|
@@ -464,6 +563,27 @@ fn write_update_paragraph_text_style_request(
 }
 
 ///|
+fn write_update_paragraph_decoration_request(
+  start_index : Int,
+  end_index : Int,
+  style : @pumd.ParagraphStyle,
+  output : StringBuilder,
+  first : Bool,
+) -> Bool {
+  let next_first = begin_request(output, first)
+  let decoration = StringBuilder::new()
+  let fields = write_paragraph_decoration(style, decoration)
+  output.write_string("{\"updateParagraphStyle\":{\"range\":")
+  write_range(start_index, end_index, output)
+  output.write_string(",\"paragraphStyle\":")
+  output.write_string(decoration.to_string())
+  output.write_string(",\"fields\":")
+  write_json_string(fields, output)
+  output.write_string("}}")
+  next_first
+}
+
+///|
 fn write_update_text_request(
   start_index : Int,
   end_index : Int,
@@ -534,6 +654,10 @@ fn lower_plan(plan : DocsUpdatePlan) -> String {
       }
       UpdateParagraphStyle(start_index~, end_index~, style~) =>
         first = write_update_paragraph_request(
+          start_index, end_index, style, output, first,
+        )
+      UpdateParagraphDecoration(start_index~, end_index~, style~) =>
+        first = write_update_paragraph_decoration_request(
           start_index, end_index, style, output, first,
         )
       CreateParagraphBullets(start_index~, end_index~, bullet~) => {

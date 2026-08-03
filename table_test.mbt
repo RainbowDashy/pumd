@@ -9,7 +9,7 @@ test "renders aligned native tables with rich header and cell content" {
       inspect(
         document.to_snapshot(),
         content=(
-          #|profile pumd.default@1
+          #|profile pumd.default@2
           #|table
           #|  header-row
           #|    cell alignment=left background=#F1F3F4
