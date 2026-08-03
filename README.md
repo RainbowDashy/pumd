@@ -21,11 +21,27 @@ builds for Windows x86-64, Linux x86-64, and Apple Silicon macOS replace the
 assets in the rolling
 [`nightly` prerelease](https://github.com/RainbowDashy/pumd/releases/tag/nightly).
 
+The same builds are published to npm when npm publishing is enabled for the
+repository. Install the latest successful npm nightly globally with:
+
+```console
+npm install --global pumd@nightly
+```
+
+This installs the `pumd` command. The npm package requires Node.js 18 or newer
+for its small platform launcher, then executes the bundled native binary. Each
+npm version identifies its source commit as
+`0.1.0-nightly.<short-commit>`; the `nightly` dist-tag points to the most
+recently published commit.
+
 Nightly artifacts are intended for testing. The `nightly` tag and its release
 assets move in place, builds may be unstable, and older nightlies are not kept
 as releases. Use the attached `SHA256SUMS` file to verify a download. The
 workflow runs the complete local native release suite and a CLI smoke test, but
 does not run the opt-in test that creates a real Google Doc.
+
+Maintainer setup for the first npm publication and trusted publishing is
+documented in [`docs/npm-nightly.md`](docs/npm-nightly.md).
 
 ## Problem
 

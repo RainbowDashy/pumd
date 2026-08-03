@@ -1,0 +1,27 @@
+{
+  "name": "pumd",
+  "version": "0.1.0",
+  "description": "Publish local Markdown as a native Google Doc",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/RainbowDashy/pumd.git"
+  },
+  "homepage": "https://github.com/RainbowDashy/pumd#readme",
+  "bugs": "https://github.com/RainbowDashy/pumd/issues",
+  "bin": {
+    "pumd": "bin/pumd.cjs"
+  },
+  "files": [
+    "bin/pumd.cjs",
+    "npm-binaries"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test test/npm-launcher.test.cjs test/npm-nightly-version.test.cjs"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

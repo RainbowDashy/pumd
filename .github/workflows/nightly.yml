@@ -202,3 +202,105 @@ jobs:
           else
             gh release create nightly dist/* --repo "$GITHUB_REPOSITORY" --verify-tag --title 'pumd nightly' --notes "$notes" --prerelease
           fi
+
+  publish-npm:
+    name: Publish npm nightly
+    needs: build
+    if: github.ref == 'refs/heads/main' && vars.NPM_PUBLISH_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Check out the nightly commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download packaged binaries
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: pumd-nightly-*
+          path: dist
+          merge-multiple: true
+
+      - name: Assemble npm package binaries
+        shell: bash
+        run: |
+          mkdir -p npm-binaries/darwin-arm64 npm-binaries/linux-x64 npm-binaries/win32-x64
+          tar -C npm-binaries/darwin-arm64 --strip-components=1 -xzf dist/pumd-nightly-darwin-aarch64.tar.gz
+          tar -C npm-binaries/linux-x64 --strip-components=1 -xzf dist/pumd-nightly-linux-x86_64.tar.gz
+          unzip -j dist/pumd-nightly-windows-x86_64.zip '*/pumd.exe' -d npm-binaries/win32-x64
+          rm npm-binaries/darwin-arm64/README.md npm-binaries/linux-x64/README.md
+          chmod 0755 bin/pumd.cjs npm-binaries/darwin-arm64/pumd npm-binaries/linux-x64/pumd npm-binaries/win32-x64/pumd.exe
+          test -x npm-binaries/darwin-arm64/pumd
+          test -x npm-binaries/linux-x64/pumd
+          test -x npm-binaries/win32-x64/pumd.exe
+
+      - name: Set up Node.js for trusted publishing
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Use an npm CLI with trusted publishing support
+        run: npm install --global npm@11.19.0
+
+      - name: Test the npm launcher
+        run: npm test
+
+      - name: Require a public distribution license
+        shell: bash
+        run: |
+          license="$(node -p "require('./package.json').license || ''")"
+          if [[ -z "$license" || "$license" == 'UNLICENSED' ]]; then
+            printf 'package.json must declare the chosen public SPDX license before npm publishing is enabled\n' >&2
+            exit 1
+          fi
+          if ! compgen -G 'LICENSE*' > /dev/null && ! compgen -G 'COPYING*' > /dev/null; then
+            printf 'a root LICENSE or COPYING file is required before npm publishing is enabled\n' >&2
+            exit 1
+          fi
+
+      - name: Pack the commit version
+        shell: bash
+        run: |
+          base_version="$(node -p "require('./package.json').version")"
+          version="$(node scripts/npm-nightly-version.cjs "$base_version" "$GITHUB_SHA")"
+          npm pkg set version="$version"
+          npm pack --pack-destination dist
+          package_file="dist/pumd-${version}.tgz"
+          test -f "$package_file"
+          echo "PUMD_NPM_VERSION=$version" >> "$GITHUB_ENV"
+          echo "PUMD_NPM_PACKAGE=$package_file" >> "$GITHUB_ENV"
+
+      - name: Smoke test the packed npm command
+        shell: bash
+        run: |
+          install_root="$(mktemp -d)"
+          trap 'rm -r "$install_root"' EXIT
+          npm install --global --prefix "$install_root" "$PUMD_NPM_PACKAGE"
+          set +e
+          output="$("$install_root/bin/pumd" 2>&1)"
+          status=$?
+          set -e
+          if [[ "$status" -ne 1 ]]; then
+            printf 'expected packed pumd without arguments to exit 1, got %s\n%s\n' "$status" "$output" >&2
+            exit 1
+          fi
+          if [[ "$output" != *"usage: pumd publish <markdown-path>"* ]]; then
+            printf 'packed pumd did not print its usage message:\n%s\n' "$output" >&2
+            exit 1
+          fi
+
+      - name: Publish the npm nightly
+        shell: bash
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if npm view "pumd@$PUMD_NPM_VERSION" version > /dev/null 2>&1; then
+            printf 'pumd@%s is already published; skipping immutable version\n' "$PUMD_NPM_VERSION"
+          else
+            npm publish "$PUMD_NPM_PACKAGE" --tag nightly --access public
+          fi
