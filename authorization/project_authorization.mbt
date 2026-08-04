@@ -13,8 +13,6 @@ pub(all) struct InstalledClient {
 pub(all) enum ProjectAuthorizationError {
   InvalidClientFile(String)
   SetupFailed(String)
-  GcloudUnavailable
-  GcloudUnauthenticated
   NotConfigured
   ReauthorizationRequired
   RefreshTransient
@@ -49,10 +47,6 @@ pub fn ProjectAuthorizationError::user_message(
     InvalidClientFile(message) =>
       "Project Authorization client file is invalid: " + message
     SetupFailed(message) => "Project Authorization setup failed: " + message
-    GcloudUnavailable =>
-      "Project Authorization setup requires the Google Cloud CLI (`gcloud`). Install it from https://cloud.google.com/sdk/docs/install, then run setup again."
-    GcloudUnauthenticated =>
-      "Project Authorization setup requires a signed-in gcloud account. Run `gcloud auth login`, then run setup again."
     NotConfigured =>
       "Project Authorization is not configured. Run `pumd auth setup`."
     ReauthorizationRequired =>

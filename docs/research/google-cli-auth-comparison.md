@@ -14,6 +14,15 @@ For `pumd`, the reusable pattern is a dedicated installed-app authorization
 module with a loopback callback, refresh-token caching, secure storage, and ADC
 as an explicit fallback. `pumd` should continue requesting only `drive.file`.
 
+## Current state (2026-08-04)
+
+Guided Project Authorization setup no longer uses `gcloud`. `pumd` opens the
+Enable Docs API flow and the Auth Clients page, waits for the downloaded
+Desktop client JSON, validates it, and performs the direct `drive.file`
+installed-app flow. `gcloud` remains only as an ADC provisioning path; the
+command below is that route, not Project Authorization setup. The tool
+comparisons above still describe the two researched CLIs as of 2026-08-03.
+
 ## `googleworkspace/cli`
 
 - `gws auth setup` uses `gcloud` for account/project selection and API

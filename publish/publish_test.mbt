@@ -478,23 +478,6 @@ async test "first publish never offers setup for revoked or transient refresh fa
 }
 
 ///|
-test "Project Authorization preserves distinct gcloud prerequisite guidance" {
-  let missing = PublishError::Authentication(
-    authorization_mode=Project,
-    problem=GcloudUnavailable,
-    created_document=None,
-  ).user_message()
-  let signed_out = PublishError::Authentication(
-    authorization_mode=Project,
-    problem=GcloudUnauthenticated,
-    created_document=None,
-  ).user_message()
-  assert_true(missing.contains("Install"))
-  assert_true(signed_out.contains("gcloud auth login"))
-  assert_false(missing == signed_out)
-}
-
-///|
 async test "ephemeral token publishing has distinct secret-free guidance" {
   let prepared = prepare_publication_markdown("Hello", "proposal")
   guard prepared is Ok(publication) else { fail("preflight must succeed") }

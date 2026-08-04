@@ -358,10 +358,6 @@ fn project_authentication_problem(
   match error {
     @authorization.ProjectAuthorizationError::NotConfigured =>
       @publish.AuthenticationProblem::CredentialsNotConfigured
-    @authorization.ProjectAuthorizationError::GcloudUnavailable =>
-      @publish.AuthenticationProblem::GcloudUnavailable
-    @authorization.ProjectAuthorizationError::GcloudUnauthenticated =>
-      @publish.AuthenticationProblem::GcloudUnauthenticated
     @authorization.ProjectAuthorizationError::ReauthorizationRequired =>
       @publish.AuthenticationProblem::CredentialsRejected
     @authorization.ProjectAuthorizationError::RefreshTransient =>
@@ -493,20 +489,6 @@ async fn publish_file(
 }
 
 ///|
-fn choice_index(value : String, default_index : Int, count : Int) -> Int? {
-  if value.is_empty() {
-    return if default_index >= 0 { Some(default_index) } else { None }
-  }
-  let one_based = @string.parse_int(value, base=10) catch { _ => return None }
-  let index = one_based - 1
-  if index >= 0 && index < count {
-    Some(index)
-  } else {
-    None
-  }
-}
-
-///|
 fn confirm_yes(message : String) -> Bool {
   println(message + " [y/N]")
   match terminal_read_line() {
@@ -516,215 +498,64 @@ fn confirm_yes(message : String) -> Bool {
 }
 
 ///|
-fn choose_account(
-  accounts : Array[@authorization.CloudAccount],
-  preselected : String?,
-) -> Result[String, Unit] {
-  if accounts.is_empty() {
-    return Err(())
-  }
-  println("Google accounts available to gcloud:")
-  let mut default_index = 0
-  for index in 0..<accounts.length() {
-    let marker = if preselected == Some(accounts[index].email) {
-      default_index = index
-      " (active)"
-    } else {
-      ""
-    }
-    println(
-      "  " + (index + 1).to_string() + ") " + accounts[index].email + marker,
-    )
-  }
-  println("Select an account [" + (default_index + 1).to_string() + "]:")
-  let value = match terminal_read_line() {
-    Some(value) => value
-    None => return Err(())
-  }
-  match choice_index(value, default_index, accounts.length()) {
-    Some(index) => Ok(accounts[index].email)
-    None => Err(())
-  }
-}
-
-///|
-fn project_availability_label(
-  availability : @authorization.ProjectAvailability,
-) -> String {
-  match availability {
-    @authorization.ProjectAvailability::Available => "available"
-    @authorization.ProjectAvailability::Inaccessible => "inaccessible"
-    @authorization.ProjectAvailability::Suspended => "suspended"
-    @authorization.ProjectAvailability::QuotaBlocked => "quota blocked"
-    @authorization.ProjectAvailability::PolicyBlocked => "policy blocked"
-  }
-}
-
-///|
-fn choose_project(
-  projects : Array[@authorization.CloudProject],
-  preselected : String?,
-) -> Result[@authorization.ProjectChoice, Unit] {
-  println("Google Cloud projects (existing project is the default path):")
-  let mut default_index = -1
-  for index in 0..<projects.length() {
-    if default_index < 0 &&
-      projects[index].availability
-      is @authorization.ProjectAvailability::Available {
-      default_index = index
-    }
-    let marker = if preselected == Some(projects[index].project_id) {
-      default_index = index
-      " (active)"
-    } else {
-      ""
-    }
-    println(
-      "  " +
-      (index + 1).to_string() +
-      ") " +
-      projects[index].display_name +
-      " [" +
-      projects[index].project_id +
-      "; " +
-      project_availability_label(projects[index].availability) +
-      "]" +
-      marker,
-    )
-  }
-  println("  c) Create a new project (optional)")
-  let default_text = if default_index >= 0 {
-    " [" + (default_index + 1).to_string() + "]"
-  } else {
-    ""
-  }
-  println("Select a project or `c`" + default_text + ":")
-  let value = match terminal_read_line() {
-    Some(value) => value
-    None => return Err(())
-  }
-  if value.to_lower() == "c" {
-    println("New globally unique project ID:")
-    let project_id = match terminal_read_line() {
-      Some(value) if !value.is_empty() => value
-      _ => return Err(())
-    }
-    println("New project display name:")
-    let display_name = match terminal_read_line() {
-      Some(value) if !value.is_empty() => value
-      _ => return Err(())
-    }
-    return Ok(
-      @authorization.ProjectChoice::Create({ project_id, display_name }),
-    )
-  }
-  match choice_index(value, default_index, projects.length()) {
-    Some(index) =>
-      Ok(@authorization.ProjectChoice::Existing(projects[index].project_id))
-    None => Err(())
-  }
-}
-
-///|
-fn preview_mutation(mutation : @authorization.GuidedSetupMutation) -> Unit {
-  match mutation {
-    @authorization.GuidedSetupMutation::CreateProject(request) => {
-      println("External mutation preview:")
-      println("  create Google Cloud project: " + request.project_id)
-      println("  display name: " + request.display_name)
-      println("  automatically enabled APIs: none")
-    }
-    @authorization.GuidedSetupMutation::EnableDocsApi(project_id) => {
-      println("External mutation preview:")
-      println("  project: " + project_id)
-      println("  enable API: docs.googleapis.com (Google Docs API only)")
-    }
-  }
-}
-
-///|
-fn confirm_mutation(mutation : @authorization.GuidedSetupMutation) -> Bool {
-  match mutation {
-    @authorization.GuidedSetupMutation::CreateProject(_) =>
-      confirm_yes("Create this Google Cloud project?")
-    @authorization.GuidedSetupMutation::EnableDocsApi(_) =>
-      confirm_yes("Enable the Google Docs API?")
-  }
-}
-
-///|
-fn choose_consent_configuration() -> @authorization.ConsentConfiguration {
-  println(
-    "Google does not expose normal Google Auth Platform consent settings through a supported API.",
-  )
-  println(
-    "Choose the current state; pumd will never overwrite existing settings:",
-  )
-  println("  1) Compatible External/testing configuration already exists")
-  println("  2) No consent configuration exists yet")
-  println(
-    "  3) Existing configuration is different, conflicting, or unknown [default]",
-  )
-  match terminal_read_line() {
-    Some("1") => @authorization.ConsentConfiguration::CompatibleExternal
-    Some("2") => @authorization.ConsentConfiguration::Absent
-    _ => @authorization.ConsentConfiguration::Conflicting
-  }
-}
-
-///|
-fn preview_handoff(handoff : @authorization.GuidedSetupHandoff) -> Unit {
-  match handoff {
-    @authorization.GuidedSetupHandoff::ConfigureMinimalExternalConsent(links) => {
-      println(
-        "Manual Google Auth Platform change preview (pumd will not apply it):",
-      )
-      println("  audience: External/testing")
-      println("  data access: " + @authorization.drive_file_scope + " only")
-      println(
-        "  preserve all existing branding, audience, publishing, and test-user settings",
-      )
-      println("  Branding: " + links.branding_url)
-      println("  Audience: " + links.audience_url)
-      println("  Data Access: " + links.scopes_url)
-    }
-  }
-}
-
-///|
-async fn complete_consent_handoff(
-  project_id : String,
-) -> Result[@authorization.ConsentConfiguration, Unit] {
-  let links = @authorization.consent_console_links(project_id)
-  match @authorization.launch_default_browser(links.branding_url) {
-    Ok(_) => ()
-    Err(_) => println("Open this page in a browser: " + links.branding_url)
-  }
-  println(
-    "Create the minimum External/testing configuration, add the publishing account as a test user when needed, and configure only drive.file.",
-  )
-  if confirm_yes("Have you completed and reviewed the consent configuration?") {
-    Ok(@authorization.ConsentConfiguration::CompatibleExternal)
-  } else {
-    Err(())
-  }
-}
-
-///|
-async fn begin_desktop_client_handoff(
-  project_id : String,
-  url : String,
-) -> Result[Unit, Unit] {
-  println(
-    "Project Authorization requires a Desktop OAuth client owned by project `" +
-    project_id +
-    "`. Google requires this client to be created manually in Cloud Console.",
-  )
-  println("Create a Desktop app client and download its JSON: " + url)
+async fn open_project_console_url(url : String) -> Unit {
   match @authorization.launch_default_browser(url) {
-    Ok(_) => Ok(())
-    Err(_) => Ok(())
+    Ok(_) => ()
+    Err(_) => {
+      println(
+        "Could not open a browser automatically. Open this page yourself:",
+      )
+      println(url)
+    }
   }
+}
+
+///|
+async fn complete_project_console_handoff(
+  handoff : @authorization.ProjectConsoleHandoff,
+) -> Result[Unit, @authorization.ProjectConsoleHandoffError] {
+  println(
+    "Guided Project Authorization hands off two browser-owned steps to Google Cloud Console:",
+  )
+  println("  1) Enable the Google Docs API: " + handoff.enable_docs_api_url)
+  println(
+    "  2) Create a Desktop OAuth client and download its JSON: " +
+    handoff.oauth_clients_url,
+  )
+  println(
+    "Google handles account selection and project selection or creation in your browser.",
+  )
+  println("Authorization guidance:")
+  println(
+    "  - Workspace organization users should prefer an Internal audience where available.",
+  )
+  println(
+    "  - External Testing authorization expires after seven days; External users wanting durable authorization should choose In production.",
+  )
+  println(
+    "  - Request only " +
+    @authorization.drive_file_scope +
+    "; no identity scopes.",
+  )
+  println(
+    "  - Create a Desktop app client and download its JSON when prompted.",
+  )
+  if !confirm_yes("Open the first step (enable the Google Docs API) now?") {
+    return Err(@authorization.ProjectConsoleHandoffError::Cancelled)
+  }
+  open_project_console_url(handoff.enable_docs_api_url)
+  if !confirm_yes(
+      "Have you enabled the Google Docs API for the project you will use?",
+    ) {
+    return Err(@authorization.ProjectConsoleHandoffError::Cancelled)
+  }
+  open_project_console_url(handoff.oauth_clients_url)
+  if !confirm_yes(
+      "Have you created a Desktop app OAuth client and downloaded its JSON?",
+    ) {
+    return Err(@authorization.ProjectConsoleHandoffError::Cancelled)
+  }
+  Ok(())
 }
 
 ///|
@@ -909,56 +740,9 @@ async fn run_guided_setup(
     Ok(commit) => commit
     Err(error) => return Err(error)
   }
-  let adapter = @authorization.production_gcloud_adapter()
   let http = @google_http.DefaultHttpClient::new()
   let result = @authorization.guide_project_authorization({
-    inspect_gcloud: async fn() {
-      match adapter.inspect() {
-        Ok(status) => Ok(status)
-        Err(_) => Err(())
-      }
-    },
-    list_accounts: async fn() {
-      match adapter.list_accounts() {
-        Ok(accounts) => Ok(accounts)
-        Err(_) => Err(())
-      }
-    },
-    select_account: choose_account,
-    list_projects: async fn(account) {
-      match adapter.list_projects(account) {
-        Ok(projects) => Ok(projects)
-        Err(_) => Err(())
-      }
-    },
-    select_project: choose_project,
-    inspect_docs_api: async fn(account, project_id) {
-      match adapter.inspect_docs_api(account, project_id) {
-        Ok(enabled) => Ok(enabled)
-        Err(_) => Err(())
-      }
-    },
-    inspect_consent: fn(_) { Ok(choose_consent_configuration()) },
-    preview_mutation,
-    confirm_mutation,
-    preview_handoff,
-    confirm_handoff: fn(_) {
-      confirm_yes("Open Google Cloud Console and make these manual changes?")
-    },
-    create_project: async fn(account, request) {
-      match adapter.create_project(account, request) {
-        Ok(project) => Ok(project)
-        Err(_) => Err(())
-      }
-    },
-    enable_docs_api: async fn(account, project_id) {
-      match adapter.enable_docs_api(account, project_id) {
-        Ok(_) => Ok(())
-        Err(_) => Err(())
-      }
-    },
-    ensure_minimal_external_consent: complete_consent_handoff,
-    begin_desktop_client_handoff,
+    complete_project_console_handoff,
     receive_desktop_client_json: fn() { receive_desktop_client_json() },
     complete_oauth: async fn(document) {
       finish_setup_and_commit_store(document, commit, http)

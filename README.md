@@ -164,41 +164,42 @@ reduced-protection warning and is never selected by pressing Enter or as a
 fallback. Enter `r` to recheck native-vault availability after unlocking or
 repairing it without restarting setup.
 
-The guide requires the Google Cloud CLI. Install `gcloud` if prompted, then
-sign in before retrying:
+Project provisioning happens in the browser, in Google-owned Cloud Console
+flows. This avoids asking for a second, broad Cloud-management authorization
+that would still leave consent settings and OAuth-client creation as manual
+steps. `pumd` opens two flows and waits for the downloaded Desktop client JSON;
+it never creates a project, enables an API, or mutates cloud state itself:
 
-```console
-gcloud auth login
-```
+- **Enable the Docs API:**
+  `https://console.cloud.google.com/flows/enableapi?apiid=docs.googleapis.com`
+  handles Google sign-in, lets you select an existing project or create one,
+  and enables `docs.googleapis.com`.
+- **Create the Desktop client:** `https://console.cloud.google.com/auth/clients`
+  handles OAuth app registration when needed. Create a **Desktop app** client
+  and download its JSON.
 
-It lists the Google accounts known to `gcloud`, preselects an active account
-when it is available, and then lists its Cloud projects. Selecting an existing,
-available project is the default path; creating a new project is an explicit
-optional choice. Before it creates a project or enables an API, `pumd` previews
-the precise mutation and asks for confirmation. Answering anything other than
-yes cancels before that requested cloud change. Guided setup enables only
-`docs.googleapis.com` (the Google Docs API); it does not enable a bundle of
-Google APIs.
+Google owns sign-in and account selection in these flows, so `pumd` no longer
+lists accounts or projects in the terminal and no longer needs the Google
+Cloud CLI.
 
-Google does not allow `pumd` to manage OAuth consent settings or OAuth clients
-programmatically. The guide therefore previews and hands off the following
-steps to Google Cloud Console; it never overwrites an existing, conflicting, or
-unknown configuration:
+For consent configuration, choose an audience that matches the account:
 
-- **Branding:** `https://console.cloud.google.com/auth/branding?project=PROJECT_ID`
-- **Audience:** `https://console.cloud.google.com/auth/audience?project=PROJECT_ID`
-- **Data Access / scopes:** `https://console.cloud.google.com/auth/scopes?project=PROJECT_ID`
-- **OAuth clients:** `https://console.cloud.google.com/auth/clients?project=PROJECT_ID`
+- **Workspace organization accounts:** publish the app as **Internal** when
+  eligible. Internal apps do not need test users or verification.
+- **Personal accounts:** **External** is the only option. In **Testing**, the
+  `drive.file` refresh grant expires after seven days and the publishing
+  account must be added as a test user; for durable personal use, move the app
+  to **In production** when ready.
+- `drive.file` is a non-sensitive scope, so full sensitive-scope verification
+  is not required for it. Branding and app verification can have separate
+  requirements, so follow any prompts the Console shows before selecting a
+  production audience.
 
-In the Console, create the minimum External/testing consent configuration, add
-the publishing account as a test user when required, configure only
-`https://www.googleapis.com/auth/drive.file`, and create a **Desktop app**
-client. Download that installed-client JSON when prompted. The direct OAuth
-flow accepts installed Desktop OAuth clients only and requests exactly
-`drive.file`; it requests no identity scopes.
+The direct OAuth flow accepts installed Desktop OAuth clients only and requests
+exactly `drive.file`; it requests no identity scopes.
 
-If you have already downloaded the Desktop client JSON, skip the project guide
-and use the direct shortcut instead:
+If you have already downloaded the Desktop client JSON, skip the browser
+provisioning steps and use the direct shortcut instead:
 
 ```console
 pumd auth setup --client-file oauth-client.json
@@ -271,9 +272,22 @@ ADC remains available only when explicitly selected:
 pumd publish --auth=adc document.md
 ```
 
-This route uses authorized-user ADC with exactly the `drive.file` scope and no
+This route uses authorized-user ADC; `pumd` requests `drive.file` and no
 identity scopes. It does not fall back to Project Authorization, and Project
-Authorization does not fall back to ADC.
+Authorization does not fall back to ADC. ADC is provisioned outside `pumd` and
+may still use `gcloud`; `pumd` never invokes `gcloud`. Google's ADC flow
+requires `cloud-platform` even when a client ID file is supplied, so provision
+ADC with both scopes:
+
+```console
+gcloud auth application-default login \
+  --client-id-file=oauth-client.json \
+  --scopes=https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/drive.file
+```
+
+This is an ADC/`gcloud` constraint, not a `pumd` requirement. See Google's
+[ADC documentation](https://docs.cloud.google.com/docs/authentication/application-default-credentials#credentials_set_up_adc)
+and [Drive/ADC example](https://docs.cloud.google.com/bigquery/docs/external-data-drive#authenticate_and_enable_drive_access).
 
 For short-lived automation, pass an access token through the environment rather
 than a command-line argument:

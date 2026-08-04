@@ -13,8 +13,6 @@ pub(all) enum PublicationRemoteStage {
 ///|
 pub(all) enum AuthenticationProblem {
   CredentialsNotConfigured
-  GcloudUnavailable
-  GcloudUnauthenticated
   CredentialVaultDenied
   UnsupportedPlatform
   CredentialsUnavailable
@@ -75,7 +73,7 @@ pub fn canonical_document_url(document_id : String) -> String {
 }
 
 ///|
-let adc_setup_hint = "Run `gcloud auth application-default login --client-id-file=oauth-client.json --scopes=https://www.googleapis.com/auth/drive.file`."
+let adc_setup_hint = "Run `gcloud auth application-default login --client-id-file=oauth-client.json --scopes=https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/drive.file`."
 
 ///|
 let project_setup_hint = "Run `pumd auth setup` interactively, or `pumd auth setup --client-file oauth-client.json` with a Desktop OAuth client configuration."
@@ -162,10 +160,6 @@ pub fn PublishError::user_message(self : PublishError) -> String {
       let guidance = match (authorization_mode, problem) {
         (Project, CredentialsNotConfigured) =>
           "Project Authorization is not configured. " + project_setup_hint
-        (Project, GcloudUnavailable) =>
-          "Project Authorization setup requires the Google Cloud CLI (`gcloud`). Install it, then retry."
-        (Project, GcloudUnauthenticated) =>
-          "Project Authorization setup requires a signed-in gcloud account. Run `gcloud auth login`, then retry."
         (Project, CredentialVaultDenied) =>
           "The native credential vault is locked or denied access. Unlock it and allow pumd, then retry; no file fallback was used."
         (Project, UnsupportedPlatform) =>
@@ -195,10 +189,7 @@ pub fn PublishError::user_message(self : PublishError) -> String {
           adc_setup_hint
         (Adc, CredentialsNotConfigured) =>
           "Application Default Credentials are unavailable. " + adc_setup_hint
-        (Adc, CredentialVaultDenied)
-        | (Adc, UnsupportedPlatform)
-        | (Adc, GcloudUnavailable)
-        | (Adc, GcloudUnauthenticated) =>
+        (Adc, CredentialVaultDenied) | (Adc, UnsupportedPlatform) =>
           "Application Default Credentials are unavailable. " + adc_setup_hint
         (Ephemeral, CredentialsNotConfigured)
         | (Ephemeral, CredentialsUnavailable) =>
@@ -208,10 +199,7 @@ pub fn PublishError::user_message(self : PublishError) -> String {
         | (Ephemeral, CredentialsRejected) =>
           "The ephemeral access token is invalid or was rejected. " +
           ephemeral_setup_hint
-        (Ephemeral, CredentialVaultDenied)
-        | (Ephemeral, UnsupportedPlatform)
-        | (Ephemeral, GcloudUnavailable)
-        | (Ephemeral, GcloudUnauthenticated) =>
+        (Ephemeral, CredentialVaultDenied) | (Ephemeral, UnsupportedPlatform) =>
           "An ephemeral access token was not supplied. " + ephemeral_setup_hint
       }
       "authentication failed" +
