@@ -193,6 +193,7 @@ jobs:
             Remove-Item -LiteralPath $paritySource -Force
             Remove-Item -LiteralPath $configRoot -Recurse -Force
           }
+          exit 0
 
       - name: Package the Unix binary
         if: runner.os != 'Windows'
