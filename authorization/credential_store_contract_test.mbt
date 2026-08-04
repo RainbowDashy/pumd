@@ -20,6 +20,9 @@ async fn verify_credential_store_lifecycle(
   store : CredentialStore,
   verify_failed_replacement : async (StoredAuthorization) -> Unit,
 ) -> Unit {
+  guard (store.probe)() is Ok(_) else {
+    fail(name + " must pass its non-destructive capability probe")
+  }
   guard (store.load)() is Err(CredentialStoreError::NotConfigured) else {
     fail(name + " must report an absent authorization")
   }
@@ -59,6 +62,13 @@ async fn verify_credential_store_lifecycle(
     fail(name + " must load a created authorization")
   }
   assert_eq(created.project_id, Some("contract-project"))
+  guard (store.probe)() is Ok(_) else {
+    fail(name + " capability probe must work with an active authorization")
+  }
+  guard (store.load)() is Ok(after_probe) else {
+    fail(name + " capability probe must preserve the active authorization")
+  }
+  assert_eq(after_probe.refresh_token, "first-refresh")
   let http = VaultContractHttp::{
     requests: [],
     responses: [
@@ -156,14 +166,24 @@ async test "native vault adapters satisfy the shared CredentialStore contract" {
     replace,
     delete,
   ) {
-    macos_keychain_credential_store_with_backend({ load, replace, delete })
+    macos_keychain_credential_store_with_backend({
+      probe: fn() { Ok(()) },
+      load,
+      replace,
+      delete,
+    })
   })
   verify_injected_native_vault_contract("Linux Secret Service", fn(
     load,
     replace,
     delete,
   ) {
-    linux_secret_service_credential_store_with_backend({ load, replace, delete })
+    linux_secret_service_credential_store_with_backend({
+      probe: fn() { Ok(()) },
+      load,
+      replace,
+      delete,
+    })
   })
   verify_injected_native_vault_contract("Windows Credential Manager", fn(
     load,
@@ -171,6 +191,7 @@ async test "native vault adapters satisfy the shared CredentialStore contract" {
     delete,
   ) {
     windows_credential_manager_credential_store_with_backend({
+      probe: fn() { Ok(()) },
       load,
       replace,
       delete,

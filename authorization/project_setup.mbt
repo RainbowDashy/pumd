@@ -107,8 +107,13 @@ pub(all) enum GuidedSetupError {
   DesktopClientFileUnavailable
   DesktopClientFileInvalid
   CredentialVaultDenied
+  CredentialVaultLocked
+  CredentialVaultMissingEntitlement
   CredentialVaultUnavailable
   CredentialVaultUnsupported
+  CredentialPreferenceCommitFailed
+  CredentialRollbackIncomplete
+  PreviousCredentialCleanupFailed
   OAuthSetupFailed
 }
 
@@ -156,11 +161,21 @@ pub fn GuidedSetupError::user_message(self : GuidedSetupError) -> String {
     DesktopClientFileInvalid =>
       "The downloaded file is not a valid Google Desktop OAuth client JSON."
     CredentialVaultDenied =>
-      "The native credential vault is locked or denied access. Unlock it and allow pumd, then retry."
+      "Permission to use the native credential vault was denied. Allow pumd or correct the platform policy, then recheck availability."
+    CredentialVaultLocked =>
+      "The native credential vault is locked. Unlock it, then recheck availability."
+    CredentialVaultMissingEntitlement =>
+      "This pumd executable lacks the entitlement required by the macOS Keychain implementation. Install a correctly signed build or explicitly choose file storage only if reduced protection is acceptable."
     CredentialVaultUnavailable =>
       "The selected credential store is unavailable. No existing authorization was replaced."
     CredentialVaultUnsupported =>
       "This platform has no supported native credential vault. No file fallback was used."
+    CredentialPreferenceCommitFailed =>
+      "The new credential-store preference could not be saved safely. The prior authorization and preference were preserved."
+    CredentialRollbackIncomplete =>
+      "Project Authorization setup could not restore the prior local credential after a commit failure. Inspect both credential stores before retrying."
+    PreviousCredentialCleanupFailed =>
+      "The new Project Authorization is active, but the previous local credential could not be removed. Resolve the stale credential before treating migration as complete."
     OAuthSetupFailed =>
       "Project Authorization could not complete direct OAuth. No existing credential was replaced."
   }
@@ -174,8 +189,17 @@ pub fn GuidedSetupError::project_authorization_error(
     GcloudUnavailable => ProjectAuthorizationError::GcloudUnavailable
     GcloudUnauthenticated => ProjectAuthorizationError::GcloudUnauthenticated
     CredentialVaultDenied => ProjectAuthorizationError::StorageDenied
+    CredentialVaultLocked => ProjectAuthorizationError::StorageLocked
+    CredentialVaultMissingEntitlement =>
+      ProjectAuthorizationError::StorageMissingEntitlement
     CredentialVaultUnavailable => ProjectAuthorizationError::StorageUnavailable
     CredentialVaultUnsupported => ProjectAuthorizationError::UnsupportedPlatform
+    CredentialPreferenceCommitFailed =>
+      ProjectAuthorizationError::PreferenceUnavailable
+    CredentialRollbackIncomplete =>
+      ProjectAuthorizationError::CredentialRollbackFailed
+    PreviousCredentialCleanupFailed =>
+      ProjectAuthorizationError::StaleCredentialCleanupFailed
     _ => ProjectAuthorizationError::SetupFailed(self.user_message())
   }
 }
@@ -510,10 +534,19 @@ pub async fn guide_project_authorization(
       Ok(status)
     Ok(_) => Err(OAuthSetupFailed)
     Err(ProjectAuthorizationError::StorageDenied) => Err(CredentialVaultDenied)
+    Err(ProjectAuthorizationError::StorageLocked) => Err(CredentialVaultLocked)
+    Err(ProjectAuthorizationError::StorageMissingEntitlement) =>
+      Err(CredentialVaultMissingEntitlement)
     Err(ProjectAuthorizationError::StorageUnavailable) =>
       Err(CredentialVaultUnavailable)
     Err(ProjectAuthorizationError::UnsupportedPlatform) =>
       Err(CredentialVaultUnsupported)
+    Err(ProjectAuthorizationError::PreferenceUnavailable) =>
+      Err(CredentialPreferenceCommitFailed)
+    Err(ProjectAuthorizationError::CredentialRollbackFailed) =>
+      Err(CredentialRollbackIncomplete)
+    Err(ProjectAuthorizationError::StaleCredentialCleanupFailed) =>
+      Err(PreviousCredentialCleanupFailed)
     Err(_) => Err(OAuthSetupFailed)
   }
 }

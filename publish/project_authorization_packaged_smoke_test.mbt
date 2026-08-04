@@ -135,8 +135,21 @@ async fn run_packaged_project_authorization_smoke(
   match
     smoke_command_stdout(
       pumd,
-      ["auth", "setup", "--client-file", client_file],
+      [
+        "auth", "setup", "--client-file", client_file, "--credential-store=native",
+      ],
       "auth setup",
+    ) {
+    Ok(_) => ()
+    Err(message) => abort(message)
+  }
+  match
+    smoke_command_stdout(
+      pumd,
+      [
+        "auth", "setup", "--client-file", client_file, "--credential-store=native",
+      ],
+      "auth replacement",
     ) {
     Ok(_) => ()
     Err(message) => abort(message)
@@ -175,6 +188,23 @@ async fn run_packaged_project_authorization_smoke(
   guard published is Ok(output) else { abort("packaged publish failed") }
   guard parse_packaged_smoke_publish_success(output) is Some(success) else {
     abort("publish did not print a canonical document identity")
+  }
+  match smoke_command_stdout(pumd, ["auth", "logout"], "auth logout") {
+    Ok(_) => ()
+    Err(message) => abort(message)
+  }
+  let logged_out = match
+    smoke_command_stdout(pumd, ["auth", "status"], "logged-out auth status") {
+    Ok(output) => output
+    Err(message) => abort(message)
+  }
+  if !logged_out.contains("Project Authorization: not configured") ||
+    !logged_out.contains("credential store: " + expected_store_label) ||
+    !status_output_is_secret_free(logged_out) {
+    abort(
+      platform_name +
+      " packaged logout did not delete the remembered native-vault credential",
+    )
   }
   success
 }

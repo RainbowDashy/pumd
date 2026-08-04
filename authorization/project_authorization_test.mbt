@@ -49,6 +49,7 @@ async test "Project Authorization setup constructs a PKCE desktop request with e
       Ok({ access_token: "transient", refresh_token: Some("refresh-token") })
     },
     store: {
+      probe: fn() { Ok(()) },
       load: fn() { Err(CredentialStoreError::NotConfigured) },
       replace: fn(authorization) {
         saved = Some(authorization)
@@ -99,6 +100,7 @@ async fn setup_with_store_replacement_error(
       Ok({ access_token: "access", refresh_token: Some("refresh") })
     },
     store: {
+      probe: fn() { Ok(()) },
       load: fn() { Err(CredentialStoreError::NotConfigured) },
       replace: fn(_) { Err(store_error) },
       delete: fn() { Ok(()) },
@@ -108,6 +110,12 @@ async fn setup_with_store_replacement_error(
 
 ///|
 async test "setup preserves vault replacement failure classifications" {
+  guard setup_with_store_replacement_error(
+      CredentialStoreError::MissingEntitlement,
+    )
+    is Err(StorageMissingEntitlement) else {
+    fail("missing Keychain entitlement must remain distinct")
+  }
   guard setup_with_store_replacement_error(CredentialStoreError::Denied)
     is Err(StorageDenied) else {
     fail("denied replacement must remain distinct")
@@ -176,6 +184,7 @@ async test "Project Authorization status redacts secrets and refresh failures re
     project_id: None,
   }
   let store : CredentialStore = {
+    probe: fn() { Ok(()) },
     load: fn() { Ok(stored) },
     replace: fn(_) { Ok(()) },
     delete: fn() { Ok(()) },
@@ -206,6 +215,7 @@ async test "Project Authorization status redacts secrets and refresh failures re
 async test "Project Authorization keeps missing, denied, unavailable, and unsupported stores distinct" {
   fn store_with(error : CredentialStoreError) -> CredentialStore {
     {
+      probe: fn() { Err(error) },
       load: fn() { Err(error) },
       replace: fn(_) { Err(error) },
       delete: fn() { Err(error) },
@@ -257,6 +267,7 @@ async test "Project Authorization listener and token failures never replace the 
       Ok({ access_token: "", refresh_token: None })
     },
     store: {
+      probe: fn() { Ok(()) },
       load: fn() { Err(CredentialStoreError::NotConfigured) },
       replace: fn(_) {
         replacement_calls = replacement_calls + 1
@@ -285,6 +296,7 @@ async test "Project Authorization listener and token failures never replace the 
     report_authorization_url: fn(_) { () },
     exchange_code: fn(_) { Ok({ access_token: "access", refresh_token: None }) },
     store: {
+      probe: fn() { Ok(()) },
       load: fn() { Err(CredentialStoreError::NotConfigured) },
       replace: fn(_) {
         replacement_calls = replacement_calls + 1
@@ -423,6 +435,7 @@ async test "classified Project Authorization refresh preserves revoked and trans
     project_id: None,
   }
   let store : CredentialStore = {
+    probe: fn() { Ok(()) },
     load: fn() { Ok(stored) },
     replace: fn(_) { Ok(()) },
     delete: fn() { Ok(()) },
@@ -449,6 +462,7 @@ async test "status inspection preserves project context when reauthorization is 
     project_id: Some("status-project"),
   }
   let store : CredentialStore = {
+    probe: fn() { Ok(()) },
     load: fn() { Ok(stored) },
     replace: fn(_) { Ok(()) },
     delete: fn() { Ok(()) },
@@ -479,6 +493,7 @@ async test "stored Project Authorization refreshes silently without replacement"
   let mut replace_calls = 0
   let mut refresh_request : TokenRefreshRequest? = None
   let store : CredentialStore = {
+    probe: fn() { Ok(()) },
     load: fn() {
       load_calls = load_calls + 1
       Ok(stored)
@@ -521,6 +536,7 @@ async test "stored Project Authorization never sends refresh material to a non-G
   let mut refresh_calls = 0
   let result = project_access_token(
     {
+      probe: fn() { Ok(()) },
       load: fn() { Ok(stored) },
       replace: fn(_) { Ok(()) },
       delete: fn() { Ok(()) },
@@ -611,6 +627,7 @@ async test "macOS Keychain adapter preserves prior values and redacts backend fa
   let mut saved : String? = Some(first_document)
   let mut fail_replace = false
   let store = macos_keychain_credential_store_with_backend({
+    probe: fn() { Ok(()) },
     load: fn() {
       match saved {
         Some(value) => Ok(value)
@@ -658,6 +675,7 @@ async test "macOS Keychain adapter preserves prior values and redacts backend fa
 async test "macOS Keychain adapter maps denied and unavailable without secret errors" {
   let secret = "never-display-keychain-secret"
   let denied = macos_keychain_credential_store_with_backend({
+    probe: fn() { Err(CredentialStoreError::Denied) },
     load: fn() { Err(CredentialStoreError::Denied) },
     replace: fn(_) { Err(CredentialStoreError::Denied) },
     delete: fn() { Err(CredentialStoreError::Denied) },
@@ -681,6 +699,7 @@ async test "macOS Keychain adapter maps denied and unavailable without secret er
     fail("denied error must contain no secret diagnostic")
   }
   let unavailable = macos_keychain_credential_store_with_backend({
+    probe: fn() { Err(CredentialStoreError::Unavailable) },
     load: fn() { Err(CredentialStoreError::Unavailable) },
     replace: fn(_) { Err(CredentialStoreError::Unavailable) },
     delete: fn() { Err(CredentialStoreError::Unavailable) },
@@ -693,6 +712,7 @@ async test "macOS Keychain adapter maps denied and unavailable without secret er
 ///|
 async test "production keychain selection has no file fallback on unsupported platforms" {
   let keychain = macos_keychain_credential_store_with_backend({
+    probe: fn() { Ok(()) },
     load: fn() { Err(CredentialStoreError::NotConfigured) },
     replace: fn(_) { Ok(()) },
     delete: fn() { Ok(()) },
@@ -722,6 +742,7 @@ async test "browser fallback continues setup and store failure preserves the pri
   }
   let mut reported_urls = 0
   let store : CredentialStore = {
+    probe: fn() { Ok(()) },
     load: fn() { Ok(previous) },
     replace: fn(_) { Err(CredentialStoreError::Unavailable) },
     delete: fn() { Ok(()) },

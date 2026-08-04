@@ -18,8 +18,13 @@ pub(all) enum ProjectAuthorizationError {
   NotConfigured
   ReauthorizationRequired
   RefreshTransient
+  StorageMissingEntitlement
+  StorageLocked
   StorageDenied
   StorageUnavailable
+  PreferenceUnavailable
+  CredentialRollbackFailed
+  StaleCredentialCleanupFailed
   UnsupportedPlatform
 }
 
@@ -30,6 +35,9 @@ pub(all) enum CredentialStoreError {
   Denied
   Unavailable
   Malformed
+  MissingEntitlement
+  Locked
+  CleanupFailed
   Unsupported
 }
 
@@ -51,12 +59,36 @@ pub fn ProjectAuthorizationError::user_message(
       "Project Authorization needs reauthorization. Run `pumd auth setup`, or repeat setup with the explicitly selected credential-store option."
     RefreshTransient =>
       "Project Authorization could not refresh because of a transient failure. Retry later without replacing the stored authorization."
+    StorageMissingEntitlement =>
+      "This pumd executable lacks the entitlement required by the macOS Keychain implementation. Install a correctly signed build or explicitly choose file storage only if reduced protection is acceptable."
+    StorageLocked =>
+      "Project Authorization credential vault is locked. Unlock it, then recheck availability."
     StorageDenied =>
-      "Project Authorization credential-vault access was denied or the vault is locked."
+      "Permission to use the Project Authorization credential vault was denied."
     StorageUnavailable =>
       "Project Authorization credential store is unavailable."
+    PreferenceUnavailable =>
+      "Project Authorization was not changed because its credential-store preference could not be saved safely."
+    CredentialRollbackFailed =>
+      "Project Authorization setup could not restore the prior local credential after a commit failure. Inspect both credential stores before retrying."
+    StaleCredentialCleanupFailed =>
+      "The new Project Authorization is active, but the previous credential could not be removed. Resolve the stale local credential before treating migration as complete."
     UnsupportedPlatform =>
       "Project Authorization has no supported native credential vault on this platform."
+  }
+}
+
+///|
+fn credential_store_failure(
+  error : CredentialStoreError,
+) -> ProjectAuthorizationError {
+  match error {
+    MissingEntitlement => StorageMissingEntitlement
+    Locked => StorageLocked
+    Denied => StorageDenied
+    Unsupported => UnsupportedPlatform
+    NotConfigured | Unavailable | Malformed | CleanupFailed =>
+      StorageUnavailable
   }
 }
 
@@ -129,9 +161,38 @@ pub(all) struct TokenRefreshRequest {
 ///|
 /// An injectable store. `replace` must atomically preserve the old grant on failure.
 pub(all) struct CredentialStore {
+  // Proves that a separate, non-secret probe record can be written, read, and
+  // deleted without inspecting or replacing the active authorization.
+  probe : async () -> Result[Unit, CredentialStoreError]
   load : async () -> Result[StoredAuthorization, CredentialStoreError]
   replace : async (StoredAuthorization) -> Result[Unit, CredentialStoreError]
   delete : async () -> Result[Unit, CredentialStoreError]
+}
+
+///|
+/// Stable, non-secret identifier persisted after an informed setup choice.
+pub(all) enum CredentialStoreIdentifier {
+  Native
+  File
+} derive(Eq, @debug.Debug)
+
+///|
+pub(all) enum CredentialStorePreferenceError {
+  Unavailable
+  Malformed
+}
+
+///|
+/// Non-secret active-store configuration. `replace` must be atomic.
+pub(all) struct CredentialStorePreference {
+  load : async () -> Result[
+    CredentialStoreIdentifier?,
+    CredentialStorePreferenceError,
+  ]
+  replace : async (CredentialStoreIdentifier) -> Result[
+    Unit,
+    CredentialStorePreferenceError,
+  ]
 }
 
 ///|
@@ -401,11 +462,7 @@ pub async fn setup_project_authorization(
         scope: drive_file_scope,
         project_id: client.project_id,
       })
-    Err(CredentialStoreError::Denied) => Err(StorageDenied)
-    Err(CredentialStoreError::Unsupported) => Err(UnsupportedPlatform)
-    Err(CredentialStoreError::Unavailable)
-    | Err(CredentialStoreError::Malformed)
-    | Err(CredentialStoreError::NotConfigured) => Err(StorageUnavailable)
+    Err(error) => Err(credential_store_failure(error))
   }
 }
 
@@ -436,9 +493,7 @@ pub async fn project_authorization_status(
         project_id: None,
       })
     Err(CredentialStoreError::Malformed) => Err(ReauthorizationRequired)
-    Err(CredentialStoreError::Denied) => Err(StorageDenied)
-    Err(CredentialStoreError::Unsupported) => Err(UnsupportedPlatform)
-    Err(CredentialStoreError::Unavailable) => Err(StorageUnavailable)
+    Err(error) => Err(credential_store_failure(error))
   }
 }
 
@@ -542,9 +597,7 @@ pub async fn project_access_token_classified(
     Ok(authorization) => authorization
     Err(CredentialStoreError::NotConfigured) => return Err(NotConfigured)
     Err(CredentialStoreError::Malformed) => return Err(ReauthorizationRequired)
-    Err(CredentialStoreError::Denied) => return Err(StorageDenied)
-    Err(CredentialStoreError::Unsupported) => return Err(UnsupportedPlatform)
-    Err(CredentialStoreError::Unavailable) => return Err(StorageUnavailable)
+    Err(error) => return Err(credential_store_failure(error))
   }
   if !valid_stored_authorization(authorization) {
     return Err(ReauthorizationRequired)
@@ -850,10 +903,8 @@ fn stored_authorization_json(
 }
 
 ///|
-async fn replace_authorization_file(
+async fn prepare_private_directory(
   parent : String,
-  path : String,
-  authorization : StoredAuthorization,
 ) -> Result[Unit, CredentialStoreError] {
   if !@fs.exists(parent) {
     @fs.mkdir(parent, permission=0o700, recursive=true) catch {
@@ -869,6 +920,19 @@ async fn replace_authorization_file(
       _ => return Err(CredentialStoreError::Unavailable)
     }
   }
+  Ok(())
+}
+
+///|
+async fn replace_private_file(
+  parent : String,
+  path : String,
+  document : String,
+) -> Result[Unit, CredentialStoreError] {
+  match prepare_private_directory(parent) {
+    Ok(_) => ()
+    Err(error) => return Err(error)
+  }
   let suffix = match secure_random_bytes(16) {
     Ok(bytes) => base64url(bytes[:])
     Err(_) => return Err(CredentialStoreError::Unavailable)
@@ -883,7 +947,7 @@ async fn replace_authorization_file(
     _ => return Err(CredentialStoreError::Unavailable)
   }
   let write_outcome : Result[Unit, CredentialStoreError] = try {
-    file.write(authorization_json(authorization))
+    file.write(document)
     file.sync()
     Ok(())
   } catch {
@@ -916,6 +980,72 @@ async fn replace_authorization_file(
 }
 
 ///|
+async fn replace_authorization_file(
+  parent : String,
+  path : String,
+  authorization : StoredAuthorization,
+) -> Result[Unit, CredentialStoreError] {
+  replace_private_file(parent, path, authorization_json(authorization))
+}
+
+///|
+async fn probe_authorization_file(
+  parent : String,
+) -> Result[Unit, CredentialStoreError] {
+  match prepare_private_directory(parent) {
+    Ok(_) => ()
+    Err(error) => return Err(error)
+  }
+  let suffix = match secure_random_bytes(16) {
+    Ok(bytes) => base64url(bytes[:])
+    Err(_) => return Err(CredentialStoreError::Unavailable)
+  }
+  let path = parent + "/.credential-store-probe-" + suffix
+  let file = @fs.open(
+    path,
+    mode=@fs.Mode::WriteOnly,
+    create_mode=@fs.CreateMode::CreateNew,
+    permission=0o600,
+  ) catch {
+    _ => return Err(CredentialStoreError::Unavailable)
+  }
+  let write_outcome : Result[Unit, CredentialStoreError] = try {
+    file.write("p")
+    file.sync()
+    Ok(())
+  } catch {
+    _ => Err(CredentialStoreError::Unavailable)
+  }
+  file.close()
+  guard write_outcome is Ok(_) else {
+    @fs.remove(path) catch {
+      _ => ()
+    }
+    return Err(CredentialStoreError::Unavailable)
+  }
+  let contents = @fs.read_file(path) catch {
+    _ => {
+      @fs.remove(path) catch {
+        _ => ()
+      }
+      return Err(CredentialStoreError::Unavailable)
+    }
+  }
+  let valid = match contents.text() {
+    "p" => true
+    _ => false
+  }
+  @fs.remove(path) catch {
+    _ => return Err(CredentialStoreError::CleanupFailed)
+  }
+  if valid {
+    Ok(())
+  } else {
+    Err(CredentialStoreError::Unavailable)
+  }
+}
+
+///|
 async fn delete_authorization_file(
   path : String,
 ) -> Result[Unit, CredentialStoreError] {
@@ -938,12 +1068,193 @@ async fn delete_authorization_file(
 pub fn file_credential_store(config_directory : String) -> CredentialStore {
   let path = config_directory + "/project-authorization.json"
   {
+    probe: async fn() { probe_authorization_file(config_directory) },
     load: async fn() { load_authorization_file(path) },
     replace: async fn(authorization) {
       replace_authorization_file(config_directory, path, authorization)
     },
     delete: async fn() { delete_authorization_file(path) },
   }
+}
+
+///|
+fn credential_store_identifier_text(
+  identifier : CredentialStoreIdentifier,
+) -> String {
+  match identifier {
+    Native => "native"
+    File => "file"
+  }
+}
+
+///|
+fn credential_store_preference_json(
+  identifier : CredentialStoreIdentifier,
+) -> String {
+  Json::object({
+    "version": Json::number(1.0),
+    "credential_store": Json::string(
+      credential_store_identifier_text(identifier),
+    ),
+  }).stringify()
+}
+
+///|
+async fn load_credential_store_preference(
+  path : String,
+) -> Result[CredentialStoreIdentifier?, CredentialStorePreferenceError] {
+  if !@fs.exists(path) {
+    return Ok(None)
+  }
+  let data = @fs.read_file(path) catch {
+    _ => return Err(CredentialStorePreferenceError::Unavailable)
+  }
+  let text = data.text() catch {
+    _ => return Err(CredentialStorePreferenceError::Malformed)
+  }
+  let json = @json.parse(text) catch {
+    _ => return Err(CredentialStorePreferenceError::Malformed)
+  }
+  let fields = match json {
+    Object(fields) => fields
+    _ => return Err(CredentialStorePreferenceError::Malformed)
+  }
+  match fields.get("version") {
+    Some(Number(number, ..)) if number == 1.0 => ()
+    _ => return Err(CredentialStorePreferenceError::Malformed)
+  }
+  match fields.get("credential_store") {
+    Some(String("native")) => Ok(Some(Native))
+    Some(String("file")) => Ok(Some(File))
+    _ => Err(CredentialStorePreferenceError::Malformed)
+  }
+}
+
+///|
+pub fn file_credential_store_preference(
+  config_directory : String,
+) -> CredentialStorePreference {
+  let path = config_directory + "/credential-store.json"
+  {
+    load: async fn() { load_credential_store_preference(path) },
+    replace: async fn(identifier) {
+      match
+        replace_private_file(
+          config_directory,
+          path,
+          credential_store_preference_json(identifier),
+        ) {
+        Ok(_) => Ok(())
+        Err(_) => Err(CredentialStorePreferenceError::Unavailable)
+      }
+    },
+  }
+}
+
+///|
+/// Resolve one lifecycle command without changing the remembered preference.
+pub async fn resolve_credential_store_identifier(
+  explicit : CredentialStoreIdentifier?,
+  preference : CredentialStorePreference,
+) -> Result[CredentialStoreIdentifier, CredentialStorePreferenceError] {
+  match explicit {
+    Some(identifier) => Ok(identifier)
+    None =>
+      match (preference.load)() {
+        Ok(Some(identifier)) => Ok(identifier)
+        Ok(None) => Ok(CredentialStoreIdentifier::Native)
+        Err(error) => Err(error)
+      }
+  }
+}
+
+///|
+async fn restore_credential_store_after_failed_commit(
+  store : CredentialStore,
+  previous : StoredAuthorization?,
+) -> Result[Unit, ProjectAuthorizationError] {
+  match previous {
+    Some(authorization) =>
+      match (store.replace)(authorization) {
+        Ok(_) => Ok(())
+        Err(_) => Err(CredentialRollbackFailed)
+      }
+    None =>
+      match (store.delete)() {
+        Ok(_) | Err(CredentialStoreError::NotConfigured) => Ok(())
+        Err(_) => Err(CredentialRollbackFailed)
+      }
+  }
+}
+
+///|
+/// Commit a setup result and its non-secret active-store preference in order.
+/// The previous active store is removed only after the new credential validates
+/// and the preference is durable.
+pub async fn commit_credential_store_selection(
+  selected_identifier : CredentialStoreIdentifier,
+  selected_store : CredentialStore,
+  previous_identifier : CredentialStoreIdentifier,
+  previous_store : CredentialStore,
+  preference : CredentialStorePreference,
+  setup : async (CredentialStore) -> Result[
+    ProjectAuthorizationStatus,
+    ProjectAuthorizationError,
+  ],
+) -> Result[ProjectAuthorizationStatus, ProjectAuthorizationError] {
+  let selected_before = match (selected_store.load)() {
+    Ok(authorization) => Some(authorization)
+    Err(CredentialStoreError::NotConfigured)
+    | Err(CredentialStoreError::Malformed) => None
+    Err(error) => return Err(credential_store_failure(error))
+  }
+  let status = match setup(selected_store) {
+    Ok(status) => status
+    Err(error) => return Err(error)
+  }
+  match project_authorization_status(selected_store) {
+    Ok(validated) if validated.configured => ()
+    Ok(_) => {
+      match
+        restore_credential_store_after_failed_commit(
+          selected_store, selected_before,
+        ) {
+        Ok(_) => ()
+        Err(error) => return Err(error)
+      }
+      return Err(StorageUnavailable)
+    }
+    Err(error) => {
+      match
+        restore_credential_store_after_failed_commit(
+          selected_store, selected_before,
+        ) {
+        Ok(_) => ()
+        Err(rollback_error) => return Err(rollback_error)
+      }
+      return Err(error)
+    }
+  }
+  match (preference.replace)(selected_identifier) {
+    Ok(_) => ()
+    Err(_) => {
+      match
+        restore_credential_store_after_failed_commit(
+          selected_store, selected_before,
+        ) {
+        Ok(_) => ()
+        Err(error) => return Err(error)
+      }
+      return Err(PreferenceUnavailable)
+    }
+  }
+  if selected_identifier != previous_identifier {
+    match (previous_store.delete)() {
+      Ok(_) | Err(CredentialStoreError::NotConfigured) => ()
+      Err(_) => return Err(StaleCredentialCleanupFailed)
+    }
+  }
+  Ok(status)
 }
 
 ///|

@@ -13,14 +13,7 @@ extern "C" fn macos_keychain_delete_ffi() -> Int = "pumd_macos_keychain_delete"
 extern "C" fn macos_keychain_available_ffi() -> Int = "pumd_macos_keychain_available"
 
 ///|
-fn macos_keychain_error(status : Int) -> CredentialStoreError {
-  match status {
-    -1 => CredentialStoreError::NotConfigured
-    -2 => CredentialStoreError::Denied
-    -4 => CredentialStoreError::Malformed
-    _ => CredentialStoreError::Unavailable
-  }
-}
+extern "C" fn macos_keychain_probe_ffi() -> Int = "pumd_macos_keychain_probe"
 
 ///|
 fn native_macos_keychain_available() -> Bool {
@@ -30,13 +23,21 @@ fn native_macos_keychain_available() -> Bool {
 ///|
 fn native_macos_keychain_backend() -> CredentialDocumentBackend {
   {
+    probe: fn() {
+      let result = macos_keychain_probe_ffi()
+      if result == 0 {
+        Ok(())
+      } else {
+        Err(native_credential_store_error(result))
+      }
+    },
     load: fn() {
       // Generic-password data is capped at 1 MiB. This is far above an OAuth
       // authorization document while preventing an unbounded allocation.
       let buffer = Bytes::make(1048576, b'\x00')
       let result = macos_keychain_load_ffi(buffer, buffer.length())
       if result <= 0 {
-        return Err(macos_keychain_error(result))
+        return Err(native_credential_store_error(result))
       }
       let length = result - 1
       if length <= 0 || length > buffer.length() {
@@ -53,7 +54,7 @@ fn native_macos_keychain_backend() -> CredentialDocumentBackend {
       if result == 0 {
         Ok(())
       } else {
-        Err(macos_keychain_error(result))
+        Err(native_credential_store_error(result))
       }
     },
     delete: fn() {
@@ -61,7 +62,7 @@ fn native_macos_keychain_backend() -> CredentialDocumentBackend {
       if result == 0 {
         Ok(())
       } else {
-        Err(macos_keychain_error(result))
+        Err(native_credential_store_error(result))
       }
     },
   }

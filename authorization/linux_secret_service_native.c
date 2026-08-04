@@ -6,6 +6,8 @@ enum {
   PUMD_SECRET_SERVICE_UNAVAILABLE = -3,
   PUMD_SECRET_SERVICE_MALFORMED = -4,
   PUMD_SECRET_SERVICE_UNSUPPORTED = -5,
+  PUMD_SECRET_SERVICE_LOCKED = -7,
+  PUMD_SECRET_SERVICE_CLEANUP_FAILED = -8,
 };
 
 #if defined(__linux__) && defined(__x86_64__)
@@ -84,8 +86,9 @@ static int pumd_error_result(GError *error) {
   if (error != NULL) {
     if (pumd_api.error_matches(
             error, pumd_api.secret_error_get_quark(),
-            PUMD_SECRET_ERROR_IS_LOCKED) ||
-        pumd_api.error_matches(
+            PUMD_SECRET_ERROR_IS_LOCKED)) {
+      result = PUMD_SECRET_SERVICE_LOCKED;
+    } else if (pumd_api.error_matches(
             error, pumd_api.io_error_quark(),
             PUMD_G_IO_ERROR_PERMISSION_DENIED) ||
         pumd_api.error_matches(
@@ -110,6 +113,44 @@ static void pumd_wipe(char *value, size_t length) {
 
 MOONBIT_FFI_EXPORT int pumd_linux_secret_service_available(void) {
   return pumd_initialize() ? 1 : 0;
+}
+
+MOONBIT_FFI_EXPORT int pumd_linux_secret_service_probe(void) {
+  static const char account[] = "capability-probe-v1";
+  static const char marker[] = "p";
+  if (!pumd_initialize()) return PUMD_SECRET_SERVICE_UNAVAILABLE;
+
+  GError *error = NULL;
+  (void)pumd_api.password_clear_sync(
+      pumd_api.schema, NULL, &error, "account", account, NULL);
+  if (error != NULL) return pumd_error_result(error);
+
+  int stored = pumd_api.password_store_sync(
+      pumd_api.schema, NULL, "pumd credential-store capability probe", marker,
+      NULL, &error, "account", account, NULL);
+  if (!stored) return pumd_error_result(error);
+  if (error != NULL) pumd_api.error_free(error);
+
+  error = NULL;
+  char *password = pumd_api.password_lookup_sync(
+      pumd_api.schema, NULL, &error, "account", account, NULL);
+  int result = 0;
+  if (password == NULL) {
+    result = error == NULL ? PUMD_SECRET_SERVICE_MALFORMED
+                           : pumd_error_result(error);
+  } else {
+    if (strcmp(password, marker) != 0) result = PUMD_SECRET_SERVICE_MALFORMED;
+    pumd_api.password_free(password);
+  }
+
+  error = NULL;
+  (void)pumd_api.password_clear_sync(
+      pumd_api.schema, NULL, &error, "account", account, NULL);
+  if (error != NULL) {
+    pumd_api.error_free(error);
+    return PUMD_SECRET_SERVICE_CLEANUP_FAILED;
+  }
+  return result;
 }
 
 MOONBIT_FFI_EXPORT int pumd_linux_secret_service_load(
@@ -167,6 +208,9 @@ MOONBIT_FFI_EXPORT int pumd_linux_secret_service_delete(void) {
 #else
 
 MOONBIT_FFI_EXPORT int pumd_linux_secret_service_available(void) { return 0; }
+MOONBIT_FFI_EXPORT int pumd_linux_secret_service_probe(void) {
+  return PUMD_SECRET_SERVICE_UNSUPPORTED;
+}
 MOONBIT_FFI_EXPORT int pumd_linux_secret_service_load(
     moonbit_bytes_t buffer, int capacity) {
   (void)buffer;

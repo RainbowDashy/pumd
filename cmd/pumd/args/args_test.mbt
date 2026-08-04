@@ -1,16 +1,18 @@
 ///|
-test "publish defaults to native-vault Project Authorization" {
+test "publish resolves Project Authorization through remembered-or-native storage" {
   match parse_command(["pumd", "publish", "proposal.md"]) {
-    Ok(Publish(path, Project(Native))) => inspect(path, content="proposal.md")
+    Ok(Publish(path, Project(RememberedOrNative))) =>
+      inspect(path, content="proposal.md")
     Ok(_) => fail("expected native-vault Project Authorization publish command")
     Err(message) => fail(message)
   }
 }
 
 ///|
-test "publish defaults Project Authorization to the native vault" {
+test "explicit project authorization still resolves remembered-or-native storage" {
   match parse_command(["pumd", "publish", "--auth=project", "proposal.md"]) {
-    Ok(Publish(path, Project(Native))) => inspect(path, content="proposal.md")
+    Ok(Publish(path, Project(RememberedOrNative))) =>
+      inspect(path, content="proposal.md")
     Ok(_) => fail("expected Project Authorization publish command")
     Err(message) => fail(message)
   }
@@ -22,7 +24,8 @@ test "publish accepts the platform-neutral native store and legacy keychain alia
     parse_command([
       "pumd", "publish", "--auth=project", "--credential-store=native", "proposal.md",
     ]) {
-    Ok(Publish(path, Project(Native))) => inspect(path, content="proposal.md")
+    Ok(Publish(path, Project(Explicit(Native)))) =>
+      inspect(path, content="proposal.md")
     Ok(_) => fail("expected native-vault Project Authorization publish command")
     Err(message) => fail(message)
   }
@@ -30,7 +33,8 @@ test "publish accepts the platform-neutral native store and legacy keychain alia
     parse_command([
       "pumd", "publish", "--auth=project", "--credential-store=keychain", "proposal.md",
     ]) {
-    Ok(Publish(path, Project(Native))) => inspect(path, content="proposal.md")
+    Ok(Publish(path, Project(Explicit(Native)))) =>
+      inspect(path, content="proposal.md")
     Ok(_) => fail("expected compatibility alias to select the native vault")
     Err(message) => fail(message)
   }
@@ -42,7 +46,8 @@ test "publish accepts an explicit file store in either option order" {
     parse_command([
       "pumd", "publish", "--credential-store=file", "--auth=project", "proposal.md",
     ]) {
-    Ok(Publish(path, Project(File))) => inspect(path, content="proposal.md")
+    Ok(Publish(path, Project(Explicit(File)))) =>
+      inspect(path, content="proposal.md")
     Ok(_) => fail("expected file-backed Project Authorization publish command")
     Err(message) => fail(message)
   }
@@ -50,7 +55,8 @@ test "publish accepts an explicit file store in either option order" {
     parse_command([
       "pumd", "publish", "--auth=project", "--credential-store=file", "proposal.md",
     ]) {
-    Ok(Publish(path, Project(File))) => inspect(path, content="proposal.md")
+    Ok(Publish(path, Project(Explicit(File)))) =>
+      inspect(path, content="proposal.md")
     Ok(_) => fail("expected file-backed Project Authorization publish command")
     Err(message) => fail(message)
   }
@@ -76,10 +82,10 @@ test "publish accepts an explicit ephemeral access token environment" {
 }
 
 ///|
-test "auth setup guides a native-vault setup without a client file" {
+test "auth setup without a store preserves the need for an interactive choice" {
   match parse_command(["pumd", "auth", "setup"]) {
-    Ok(AuthSetup(Guided, Native)) => ()
-    Ok(_) => fail("expected guided native-vault setup command")
+    Ok(AuthSetup(Guided, Prompt)) => ()
+    Ok(_) => fail("expected guided setup to prompt for credential storage")
     Err(message) => fail(message)
   }
 }
@@ -90,7 +96,7 @@ test "auth setup accepts an optional client file and file store in either order"
     parse_command([
       "pumd", "auth", "setup", "--credential-store=file", "--client-file", "client.json",
     ]) {
-    Ok(AuthSetup(Provided(client_file), File)) =>
+    Ok(AuthSetup(Provided(client_file), Selected(File))) =>
       inspect(client_file, content="client.json")
     Ok(_) => fail("expected Project Authorization setup command")
     Err(message) => fail(message)
@@ -98,39 +104,68 @@ test "auth setup accepts an optional client file and file store in either order"
 }
 
 ///|
-test "auth setup accepts a direct client file with the default native store" {
+test "auth setup with a client file still prompts when the store is omitted" {
   match
     parse_command(["pumd", "auth", "setup", "--client-file", "client.json"]) {
-    Ok(AuthSetup(Provided(client_file), Native)) =>
+    Ok(AuthSetup(Provided(client_file), Prompt)) =>
       inspect(client_file, content="client.json")
-    Ok(_) => fail("expected direct Keychain setup command")
+    Ok(_) => fail("expected direct setup to prompt for credential storage")
     Err(message) => fail(message)
   }
 }
 
 ///|
-test "auth status defaults to native vault and accepts an explicit store" {
+test "noninteractive setup honors explicit and remembered stores without prompting" {
+  guard noninteractive_setup_credential_store(Prompt, Some(File)) is File else {
+    fail("remembered file storage must be reused")
+  }
+  guard noninteractive_setup_credential_store(Prompt, None) is Native else {
+    fail("native storage must remain the no-preference default")
+  }
+  guard noninteractive_setup_credential_store(Selected(Native), Some(File))
+    is Native else {
+    fail("an explicit store must override the remembered store")
+  }
+}
+
+///|
+test "first-publish onboarding preserves explicit and remembered store intent" {
+  guard project_onboarding_setup_store(Explicit(File), None)
+    is Selected(File) else {
+    fail("explicit publish storage must remain explicit during onboarding")
+  }
+  guard project_onboarding_setup_store(RememberedOrNative, Some(File))
+    is Selected(File) else {
+    fail("remembered publish storage must be reused during onboarding")
+  }
+  guard project_onboarding_setup_store(RememberedOrNative, None) is Prompt else {
+    fail("only a new author without a preference should see the selector")
+  }
+}
+
+///|
+test "auth status resolves remembered storage and accepts an explicit override" {
   match parse_command(["pumd", "auth", "status"]) {
-    Ok(AuthStatus(Native)) => ()
+    Ok(AuthStatus(RememberedOrNative)) => ()
     Ok(_) => fail("expected native-vault authorization status command")
     Err(message) => fail(message)
   }
   match parse_command(["pumd", "auth", "status", "--credential-store=file"]) {
-    Ok(AuthStatus(File)) => ()
+    Ok(AuthStatus(Explicit(File))) => ()
     Ok(_) => fail("expected authorization status command")
     Err(message) => fail(message)
   }
 }
 
 ///|
-test "auth logout defaults to native vault and accepts an explicit store" {
+test "auth logout resolves remembered storage and accepts an explicit override" {
   match parse_command(["pumd", "auth", "logout"]) {
-    Ok(AuthLogout(Native)) => ()
+    Ok(AuthLogout(RememberedOrNative)) => ()
     Ok(_) => fail("expected native-vault authorization logout command")
     Err(message) => fail(message)
   }
   match parse_command(["pumd", "auth", "logout", "--credential-store=file"]) {
-    Ok(AuthLogout(File)) => ()
+    Ok(AuthLogout(Explicit(File))) => ()
     Ok(_) => fail("expected file authorization logout command")
     Err(message) => fail(message)
   }
@@ -155,7 +190,7 @@ test "setup rejects a missing client file argument with Project Authorization us
     Err(message) =>
       inspect(
         message,
-        content="Project Authorization usage: pumd auth setup [--client-file <path>] [--credential-store=native|file]",
+        content="Project Authorization usage: pumd auth setup [--client-file <path>] [--credential-store=native|file]\nInteractive setup prompts when the store is omitted; noninteractive setup uses the remembered store or the native default without prompting.",
       )
   }
 }

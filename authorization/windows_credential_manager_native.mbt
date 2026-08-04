@@ -19,6 +19,9 @@ extern "C" fn windows_credential_manager_delete_ffi() -> Int = "pumd_windows_cre
 extern "C" fn windows_credential_manager_available_ffi() -> Int = "pumd_windows_credential_manager_available"
 
 ///|
+extern "C" fn windows_credential_manager_probe_ffi() -> Int = "pumd_windows_credential_manager_probe"
+
+///|
 fn native_windows_credential_manager_available() -> Bool {
   windows_credential_manager_available_ffi() == 1
 }
@@ -26,6 +29,14 @@ fn native_windows_credential_manager_available() -> Bool {
 ///|
 fn native_windows_credential_manager_backend() -> CredentialDocumentBackend {
   {
+    probe: fn() {
+      let result = windows_credential_manager_probe_ffi()
+      if result == 0 {
+        Ok(())
+      } else {
+        Err(native_credential_store_error(result))
+      }
+    },
     load: fn() {
       // Windows generic credentials are capped by
       // CRED_MAX_CREDENTIAL_BLOB_SIZE (5 * 512 bytes).

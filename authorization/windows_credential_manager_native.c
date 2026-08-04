@@ -12,6 +12,7 @@ enum {
   PUMD_WINDOWS_DENIED = -2,
   PUMD_WINDOWS_UNAVAILABLE = -3,
   PUMD_WINDOWS_MALFORMED = -4,
+  PUMD_WINDOWS_CLEANUP_FAILED = -8,
 };
 
 typedef BOOL (WINAPI *pumd_cred_read_w)(LPCWSTR, DWORD, DWORD, PCREDENTIALW *);
@@ -32,6 +33,9 @@ static int pumd_api_state = 0;
 static const WCHAR pumd_target[] =
     L"io.github.rainbowdashy.pumd.project-authorization:active-v1";
 static const WCHAR pumd_user_name[] = L"active-v1";
+static const WCHAR pumd_probe_target[] =
+    L"io.github.rainbowdashy.pumd.credential-store-probe:capability-v1";
+static const WCHAR pumd_probe_user_name[] = L"capability-v1";
 
 static int pumd_initialize(void) {
   if (pumd_api_state != 0) return pumd_api_state == 1;
@@ -66,6 +70,56 @@ static int pumd_result(DWORD error) {
 
 MOONBIT_FFI_EXPORT int pumd_windows_credential_manager_available(void) {
   return pumd_initialize() ? 1 : 0;
+}
+
+MOONBIT_FFI_EXPORT int pumd_windows_credential_manager_probe(void) {
+  static BYTE marker[] = {0x70};
+  if (!pumd_initialize()) return PUMD_WINDOWS_UNAVAILABLE;
+
+  if (!pumd_api.delete(pumd_probe_target, CRED_TYPE_GENERIC, 0)) {
+    DWORD error = GetLastError();
+    if (error != ERROR_NOT_FOUND) return pumd_result(error);
+  }
+
+  CREDENTIALW candidate;
+  memset(&candidate, 0, sizeof(candidate));
+  candidate.Type = CRED_TYPE_GENERIC;
+  candidate.TargetName = (LPWSTR)pumd_probe_target;
+  candidate.CredentialBlobSize = sizeof(marker);
+  candidate.CredentialBlob = marker;
+  candidate.Persist = CRED_PERSIST_LOCAL_MACHINE;
+  candidate.UserName = (LPWSTR)pumd_probe_user_name;
+  if (!pumd_api.write(&candidate, 0)) {
+    DWORD error = GetLastError();
+    SecureZeroMemory(&candidate, sizeof(candidate));
+    return pumd_result(error);
+  }
+  SecureZeroMemory(&candidate, sizeof(candidate));
+
+  PCREDENTIALW credential = NULL;
+  int result = 0;
+  if (!pumd_api.read(
+          pumd_probe_target, CRED_TYPE_GENERIC, 0, &credential)) {
+    result = pumd_result(GetLastError());
+  } else {
+    if (credential->CredentialBlobSize != sizeof(marker) ||
+        credential->CredentialBlob == NULL ||
+        credential->CredentialBlob[0] != marker[0]) {
+      result = PUMD_WINDOWS_MALFORMED;
+    }
+    if (credential->CredentialBlob != NULL &&
+        credential->CredentialBlobSize > 0) {
+      SecureZeroMemory(
+          credential->CredentialBlob, credential->CredentialBlobSize);
+    }
+    pumd_api.free(credential);
+  }
+
+  if (!pumd_api.delete(pumd_probe_target, CRED_TYPE_GENERIC, 0)) {
+    DWORD error = GetLastError();
+    if (error != ERROR_NOT_FOUND) result = PUMD_WINDOWS_CLEANUP_FAILED;
+  }
+  return result;
 }
 
 MOONBIT_FFI_EXPORT int pumd_windows_credential_manager_load(
@@ -127,6 +181,9 @@ MOONBIT_FFI_EXPORT int pumd_windows_credential_manager_delete(void) {
 
 MOONBIT_FFI_EXPORT int pumd_windows_credential_manager_available(void) {
   return 0;
+}
+MOONBIT_FFI_EXPORT int pumd_windows_credential_manager_probe(void) {
+  return -5;
 }
 MOONBIT_FFI_EXPORT int pumd_windows_credential_manager_load(
     moonbit_bytes_t buffer, int capacity) {

@@ -396,6 +396,10 @@ async test "guided Project Authorization maps unavailable gcloud and blocked pro
 
 ///|
 test "guided setup preserves credential-vault failure classes" {
+  guard GuidedSetupError::CredentialVaultLocked.project_authorization_error()
+    is ProjectAuthorizationError::StorageLocked else {
+    fail("a locked vault must remain distinct from permission denial")
+  }
   guard GuidedSetupError::CredentialVaultDenied.project_authorization_error()
     is ProjectAuthorizationError::StorageDenied else {
     fail("vault denial must remain structured")
@@ -407,6 +411,18 @@ test "guided setup preserves credential-vault failure classes" {
   guard GuidedSetupError::CredentialVaultUnsupported.project_authorization_error()
     is ProjectAuthorizationError::UnsupportedPlatform else {
     fail("unsupported vault must remain structured")
+  }
+  guard GuidedSetupError::CredentialPreferenceCommitFailed.project_authorization_error()
+    is ProjectAuthorizationError::PreferenceUnavailable else {
+    fail("preference commit failure must remain structured")
+  }
+  guard GuidedSetupError::CredentialRollbackIncomplete.project_authorization_error()
+    is ProjectAuthorizationError::CredentialRollbackFailed else {
+    fail("credential rollback failure must remain structured")
+  }
+  guard GuidedSetupError::PreviousCredentialCleanupFailed.project_authorization_error()
+    is ProjectAuthorizationError::StaleCredentialCleanupFailed else {
+    fail("stale credential cleanup failure must remain structured")
   }
 }
 

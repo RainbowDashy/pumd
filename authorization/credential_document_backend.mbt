@@ -2,6 +2,7 @@
 /// A narrow, injectable native-vault boundary. Values are serialized
 /// authorization documents and failures are restricted to secret-free classes.
 pub(all) struct CredentialDocumentBackend {
+  probe : async () -> Result[Unit, CredentialStoreError]
   load : async () -> Result[String, CredentialStoreError]
   replace : async (String) -> Result[Unit, CredentialStoreError]
   delete : async () -> Result[Unit, CredentialStoreError]
@@ -12,6 +13,7 @@ fn credential_store_with_document_backend(
   backend : CredentialDocumentBackend,
 ) -> CredentialStore {
   {
+    probe: async fn() { (backend.probe)() },
     load: async fn() {
       match (backend.load)() {
         Ok(document) => stored_authorization_json(document)
@@ -34,6 +36,9 @@ fn native_credential_store_error(status : Int) -> CredentialStoreError {
     -2 => CredentialStoreError::Denied
     -4 => CredentialStoreError::Malformed
     -5 => CredentialStoreError::Unsupported
+    -6 => CredentialStoreError::MissingEntitlement
+    -7 => CredentialStoreError::Locked
+    -8 => CredentialStoreError::CleanupFailed
     _ => CredentialStoreError::Unavailable
   }
 }

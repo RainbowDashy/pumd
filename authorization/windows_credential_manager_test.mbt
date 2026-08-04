@@ -18,6 +18,7 @@ async test "Windows Credential Manager adapter safely replaces and deletes idemp
   let mut saved : String? = Some(first_document)
   let mut replacement_denied = false
   let store = windows_credential_manager_credential_store_with_backend({
+    probe: fn() { Ok(()) },
     load: fn() {
       match saved {
         Some(document) => Ok(document)
@@ -72,6 +73,7 @@ async test "Windows Credential Manager adapter safely replaces and deletes idemp
 ///|
 async test "Windows Credential Manager adapter classifies malformed and vault failures without diagnostics" {
   let malformed = windows_credential_manager_credential_store_with_backend({
+    probe: fn() { Ok(()) },
     load: fn() { Ok("credential=never-display-windows-secret") },
     replace: fn(_) { Err(CredentialStoreError::Unsupported) },
     delete: fn() { Err(CredentialStoreError::Unavailable) },
@@ -91,6 +93,7 @@ async test "Windows Credential Manager adapter classifies malformed and vault fa
     )
   }
   let absent_or_denied = windows_credential_manager_credential_store_with_backend({
+      probe: fn() { Err(CredentialStoreError::Denied) },
       load: fn() { Err(CredentialStoreError::NotConfigured) },
       replace: fn(_) { Err(CredentialStoreError::Denied) },
       delete: fn() { Err(CredentialStoreError::Denied) },
@@ -108,6 +111,7 @@ async test "Windows Credential Manager adapter classifies malformed and vault fa
 ///|
 test "Windows Credential Manager selection never falls back when unavailable" {
   let backend : CredentialDocumentBackend = {
+    probe: fn() { Ok(()) },
     load: fn() { Err(CredentialStoreError::NotConfigured) },
     replace: fn(_) { Ok(()) },
     delete: fn() { Ok(()) },

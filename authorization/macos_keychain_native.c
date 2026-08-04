@@ -23,11 +23,15 @@ enum {
   PUMD_KEYCHAIN_DENIED = -2,
   PUMD_KEYCHAIN_UNAVAILABLE = -3,
   PUMD_KEYCHAIN_MALFORMED = -4,
+  PUMD_KEYCHAIN_MISSING_ENTITLEMENT = -6,
+  PUMD_KEYCHAIN_LOCKED = -7,
+  PUMD_KEYCHAIN_CLEANUP_FAILED = -8,
   PUMD_ERR_SEC_ITEM_NOT_FOUND = -25300,
   PUMD_ERR_SEC_DUPLICATE_ITEM = -25299,
   PUMD_ERR_SEC_AUTH_FAILED = -25293,
   PUMD_ERR_SEC_INTERACTION_NOT_ALLOWED = -25308,
   PUMD_ERR_SEC_USER_CANCELED = -128,
+  PUMD_ERR_SEC_MISSING_ENTITLEMENT = -34018,
   PUMD_CF_STRING_ENCODING_UTF8 = 0x08000100,
 };
 
@@ -52,13 +56,10 @@ struct pumd_security_api {
   CFTypeRef sec_class_generic_password;
   CFTypeRef sec_attr_service;
   CFTypeRef sec_attr_account;
-  CFTypeRef sec_use_data_protection_keychain;
   CFTypeRef sec_return_data;
   CFTypeRef sec_match_limit;
   CFTypeRef sec_match_limit_one;
   CFTypeRef sec_value_data;
-  CFTypeRef sec_attr_accessible;
-  CFTypeRef sec_attr_accessible_when_unlocked_this_device_only;
 };
 
 static struct pumd_security_api pumd_api;
@@ -102,14 +103,10 @@ static int pumd_initialize(void) {
   PUMD_VALUE(sec_class_generic_password, pumd_api.security, "kSecClassGenericPassword");
   PUMD_VALUE(sec_attr_service, pumd_api.security, "kSecAttrService");
   PUMD_VALUE(sec_attr_account, pumd_api.security, "kSecAttrAccount");
-  PUMD_VALUE(sec_use_data_protection_keychain, pumd_api.security, "kSecUseDataProtectionKeychain");
   PUMD_VALUE(sec_return_data, pumd_api.security, "kSecReturnData");
   PUMD_VALUE(sec_match_limit, pumd_api.security, "kSecMatchLimit");
   PUMD_VALUE(sec_match_limit_one, pumd_api.security, "kSecMatchLimitOne");
   PUMD_VALUE(sec_value_data, pumd_api.security, "kSecValueData");
-  PUMD_VALUE(sec_attr_accessible, pumd_api.security, "kSecAttrAccessible");
-  PUMD_VALUE(sec_attr_accessible_when_unlocked_this_device_only, pumd_api.security,
-             "kSecAttrAccessibleWhenUnlockedThisDeviceOnly");
 #undef PUMD_VALUE
   pumd_api_state = 1;
   return 1;
@@ -119,8 +116,11 @@ static int pumd_result(OSStatus status) {
   if (status == 0) return 0;
   if (status == PUMD_ERR_SEC_ITEM_NOT_FOUND) return PUMD_KEYCHAIN_NOT_CONFIGURED;
   if (status == PUMD_ERR_SEC_AUTH_FAILED ||
-      status == PUMD_ERR_SEC_INTERACTION_NOT_ALLOWED ||
-      status == PUMD_ERR_SEC_USER_CANCELED) return PUMD_KEYCHAIN_DENIED;
+      status == PUMD_ERR_SEC_INTERACTION_NOT_ALLOWED) return PUMD_KEYCHAIN_LOCKED;
+  if (status == PUMD_ERR_SEC_USER_CANCELED) return PUMD_KEYCHAIN_DENIED;
+  if (status == PUMD_ERR_SEC_MISSING_ENTITLEMENT) {
+    return PUMD_KEYCHAIN_MISSING_ENTITLEMENT;
+  }
   return PUMD_KEYCHAIN_UNAVAILABLE;
 }
 
@@ -130,10 +130,11 @@ static CFStringRef pumd_string(const char *value) {
                                    PUMD_CF_STRING_ENCODING_UTF8, 0);
 }
 
-static CFMutableDictionaryRef pumd_query(int return_data, CFDataRef value,
-                                          int accessible) {
-  CFStringRef service = pumd_string("io.github.rainbowdashy.pumd.project-authorization");
-  CFStringRef account = pumd_string("active-v1");
+static CFMutableDictionaryRef pumd_query_for(
+    const char *service_name, const char *account_name, int return_data,
+    CFDataRef value) {
+  CFStringRef service = pumd_string(service_name);
+  CFStringRef account = pumd_string(account_name);
   if (service == NULL || account == NULL) {
     if (service != NULL) pumd_api.release(service);
     if (account != NULL) pumd_api.release(account);
@@ -146,16 +147,11 @@ static CFMutableDictionaryRef pumd_query(int return_data, CFDataRef value,
   PUMD_PAIR(pumd_api.sec_class, pumd_api.sec_class_generic_password);
   PUMD_PAIR(pumd_api.sec_attr_service, service);
   PUMD_PAIR(pumd_api.sec_attr_account, account);
-  PUMD_PAIR(pumd_api.sec_use_data_protection_keychain, pumd_api.boolean_true);
   if (return_data) {
     PUMD_PAIR(pumd_api.sec_return_data, pumd_api.boolean_true);
     PUMD_PAIR(pumd_api.sec_match_limit, pumd_api.sec_match_limit_one);
   }
   if (value != NULL) PUMD_PAIR(pumd_api.sec_value_data, value);
-  if (accessible) {
-    PUMD_PAIR(pumd_api.sec_attr_accessible,
-              pumd_api.sec_attr_accessible_when_unlocked_this_device_only);
-  }
 #undef PUMD_PAIR
   CFMutableDictionaryRef result = pumd_api.dictionary_create(
       NULL, keys, values, count, pumd_api.dictionary_key_callbacks,
@@ -163,6 +159,19 @@ static CFMutableDictionaryRef pumd_query(int return_data, CFDataRef value,
   pumd_api.release(service);
   pumd_api.release(account);
   return result;
+}
+
+static CFMutableDictionaryRef pumd_query(int return_data, CFDataRef value) {
+  return pumd_query_for(
+      "io.github.rainbowdashy.pumd.project-authorization", "active-v1",
+      return_data, value);
+}
+
+static CFMutableDictionaryRef pumd_probe_query(
+    int return_data, CFDataRef value) {
+  return pumd_query_for(
+      "io.github.rainbowdashy.pumd.credential-store-probe", "capability-v1",
+      return_data, value);
 }
 
 /* SecItemUpdate accepts only attributes to change, never the primary-key query. */
@@ -178,10 +187,59 @@ MOONBIT_FFI_EXPORT int pumd_macos_keychain_available(void) {
   return pumd_initialize() ? 1 : 0;
 }
 
+MOONBIT_FFI_EXPORT int pumd_macos_keychain_probe(void) {
+  static const uint8_t marker[] = {0x70};
+  if (!pumd_initialize()) return PUMD_KEYCHAIN_UNAVAILABLE;
+
+  CFMutableDictionaryRef selector = pumd_probe_query(0, NULL);
+  if (selector == NULL) return PUMD_KEYCHAIN_UNAVAILABLE;
+  OSStatus status = pumd_api.item_delete(selector);
+  pumd_api.release(selector);
+  if (status != 0 && status != PUMD_ERR_SEC_ITEM_NOT_FOUND) {
+    return pumd_result(status);
+  }
+
+  CFDataRef marker_data = pumd_api.data_create(NULL, marker, 1);
+  if (marker_data == NULL) return PUMD_KEYCHAIN_UNAVAILABLE;
+  CFMutableDictionaryRef attributes = pumd_probe_query(0, marker_data);
+  if (attributes == NULL) {
+    pumd_api.release(marker_data);
+    return PUMD_KEYCHAIN_UNAVAILABLE;
+  }
+  status = pumd_api.item_add(attributes, NULL);
+  pumd_api.release(attributes);
+  pumd_api.release(marker_data);
+  if (status != 0) return pumd_result(status);
+
+  CFMutableDictionaryRef query = pumd_probe_query(1, NULL);
+  if (query == NULL) return PUMD_KEYCHAIN_UNAVAILABLE;
+  CFTypeRef data = NULL;
+  status = pumd_api.item_copy(query, &data);
+  pumd_api.release(query);
+  int result = 0;
+  if (status != 0) {
+    result = pumd_result(status);
+  } else if (data == NULL || pumd_api.data_length((CFDataRef)data) != 1 ||
+             pumd_api.data_bytes((CFDataRef)data) == NULL ||
+             pumd_api.data_bytes((CFDataRef)data)[0] != marker[0]) {
+    result = PUMD_KEYCHAIN_MALFORMED;
+  }
+  if (data != NULL) pumd_api.release(data);
+
+  selector = pumd_probe_query(0, NULL);
+  if (selector == NULL) return PUMD_KEYCHAIN_UNAVAILABLE;
+  status = pumd_api.item_delete(selector);
+  pumd_api.release(selector);
+  if (status != 0 && status != PUMD_ERR_SEC_ITEM_NOT_FOUND) {
+    result = PUMD_KEYCHAIN_CLEANUP_FAILED;
+  }
+  return result;
+}
+
 MOONBIT_FFI_EXPORT int pumd_macos_keychain_load(
     moonbit_bytes_t buffer, int capacity) {
   if (!pumd_initialize() || buffer == NULL || capacity <= 0) return PUMD_KEYCHAIN_UNAVAILABLE;
-  CFMutableDictionaryRef query = pumd_query(1, NULL, 0);
+  CFMutableDictionaryRef query = pumd_query(1, NULL);
   if (query == NULL) return PUMD_KEYCHAIN_UNAVAILABLE;
   CFTypeRef data = NULL;
   OSStatus status = pumd_api.item_copy(query, &data);
@@ -203,7 +261,7 @@ MOONBIT_FFI_EXPORT int pumd_macos_keychain_replace(
   if (!pumd_initialize() || value == NULL || length <= 0) return PUMD_KEYCHAIN_UNAVAILABLE;
   CFDataRef data = pumd_api.data_create(NULL, value, length);
   if (data == NULL) return PUMD_KEYCHAIN_UNAVAILABLE;
-  CFMutableDictionaryRef selector = pumd_query(0, NULL, 0);
+  CFMutableDictionaryRef selector = pumd_query(0, NULL);
   CFMutableDictionaryRef updates = pumd_update_attributes(data);
   if (selector == NULL || updates == NULL) {
     if (selector != NULL) pumd_api.release(selector);
@@ -222,7 +280,7 @@ MOONBIT_FFI_EXPORT int pumd_macos_keychain_replace(
     pumd_api.release(data);
     return pumd_result(status);
   }
-  CFMutableDictionaryRef attributes = pumd_query(0, data, 1);
+  CFMutableDictionaryRef attributes = pumd_query(0, data);
   if (attributes == NULL) {
     pumd_api.release(data);
     return PUMD_KEYCHAIN_UNAVAILABLE;
@@ -230,7 +288,7 @@ MOONBIT_FFI_EXPORT int pumd_macos_keychain_replace(
   status = pumd_api.item_add(attributes, NULL);
   pumd_api.release(attributes);
   if (status == PUMD_ERR_SEC_DUPLICATE_ITEM) {
-    selector = pumd_query(0, NULL, 0);
+    selector = pumd_query(0, NULL);
     updates = pumd_update_attributes(data);
     if (selector == NULL || updates == NULL) {
       if (selector != NULL) pumd_api.release(selector);
@@ -248,7 +306,7 @@ MOONBIT_FFI_EXPORT int pumd_macos_keychain_replace(
 
 MOONBIT_FFI_EXPORT int pumd_macos_keychain_delete(void) {
   if (!pumd_initialize()) return PUMD_KEYCHAIN_UNAVAILABLE;
-  CFMutableDictionaryRef selector = pumd_query(0, NULL, 0);
+  CFMutableDictionaryRef selector = pumd_query(0, NULL);
   if (selector == NULL) return PUMD_KEYCHAIN_UNAVAILABLE;
   OSStatus status = pumd_api.item_delete(selector);
   pumd_api.release(selector);
@@ -258,6 +316,7 @@ MOONBIT_FFI_EXPORT int pumd_macos_keychain_delete(void) {
 #else
 
 MOONBIT_FFI_EXPORT int pumd_macos_keychain_available(void) { return 0; }
+MOONBIT_FFI_EXPORT int pumd_macos_keychain_probe(void) { return -5; }
 MOONBIT_FFI_EXPORT int pumd_macos_keychain_load(moonbit_bytes_t buffer, int capacity) {
   (void)buffer; (void)capacity; return -3;
 }

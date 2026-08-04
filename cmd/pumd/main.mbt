@@ -53,19 +53,256 @@ fn selected_credential_store(
 }
 
 ///|
+priv struct ResolvedCredentialStore {
+  selection : @args.CredentialStore
+  store : @authorization.CredentialStore
+}
+
+///|
+fn credential_store_identifier(
+  selection : @args.CredentialStore,
+) -> @authorization.CredentialStoreIdentifier {
+  match selection {
+    @args.CredentialStore::Native =>
+      @authorization.CredentialStoreIdentifier::Native
+    @args.CredentialStore::File =>
+      @authorization.CredentialStoreIdentifier::File
+  }
+}
+
+///|
+fn credential_store_selection(
+  identifier : @authorization.CredentialStoreIdentifier,
+) -> @args.CredentialStore {
+  match identifier {
+    @authorization.CredentialStoreIdentifier::Native =>
+      @args.CredentialStore::Native
+    @authorization.CredentialStoreIdentifier::File =>
+      @args.CredentialStore::File
+  }
+}
+
+///|
+fn project_authorization_preference() -> Result[
+  @authorization.CredentialStorePreference,
+  @authorization.ProjectAuthorizationError,
+] {
+  match @authorization.default_project_authorization_directory() {
+    Ok(directory) =>
+      Ok(@authorization.file_credential_store_preference(directory))
+    Err(_) =>
+      Err(@authorization.ProjectAuthorizationError::PreferenceUnavailable)
+  }
+}
+
+///|
+async fn remembered_credential_store_identifier() -> Result[
+  @authorization.CredentialStoreIdentifier,
+  @authorization.ProjectAuthorizationError,
+] {
+  match remembered_credential_store_option() {
+    Ok(Some(identifier)) => Ok(identifier)
+    Ok(None) => Ok(@authorization.CredentialStoreIdentifier::Native)
+    Err(error) => Err(error)
+  }
+}
+
+///|
+async fn remembered_credential_store_option() -> Result[
+  @authorization.CredentialStoreIdentifier?,
+  @authorization.ProjectAuthorizationError,
+] {
+  let preference = match project_authorization_preference() {
+    Ok(preference) => preference
+    Err(error) => return Err(error)
+  }
+  match (preference.load)() {
+    Ok(identifier) => Ok(identifier)
+    Err(_) =>
+      Err(@authorization.ProjectAuthorizationError::PreferenceUnavailable)
+  }
+}
+
+///|
+async fn publish_setup_store_request(
+  request : @args.CredentialStoreRequest,
+) -> Result[
+  @args.SetupCredentialStore,
+  @authorization.ProjectAuthorizationError,
+] {
+  match request {
+    @args.CredentialStoreRequest::Explicit(_) =>
+      Ok(@args.project_onboarding_setup_store(request, None))
+    @args.CredentialStoreRequest::RememberedOrNative =>
+      match remembered_credential_store_option() {
+        Ok(identifier) =>
+          Ok(
+            @args.project_onboarding_setup_store(
+              request,
+              identifier.map(credential_store_selection),
+            ),
+          )
+        Err(error) => Err(error)
+      }
+  }
+}
+
+///|
+async fn resolve_credential_store(
+  request : @args.CredentialStoreRequest,
+) -> Result[ResolvedCredentialStore, @authorization.ProjectAuthorizationError] {
+  let selection = match request {
+    @args.CredentialStoreRequest::Explicit(selection) => selection
+    @args.CredentialStoreRequest::RememberedOrNative => {
+      let identifier = match remembered_credential_store_identifier() {
+        Ok(identifier) => identifier
+        Err(error) => return Err(error)
+      }
+      credential_store_selection(identifier)
+    }
+  }
+  let store = match selected_credential_store(selection) {
+    Ok(store) => store
+    Err(error) => return Err(error)
+  }
+  Ok({ selection, store })
+}
+
+///|
 async fn credential_store_ready(
   store : @authorization.CredentialStore,
 ) -> Result[Unit, @authorization.ProjectAuthorizationError] {
-  match (store.load)() {
-    Ok(_)
-    | Err(@authorization.CredentialStoreError::NotConfigured)
-    | Err(@authorization.CredentialStoreError::Malformed) => Ok(())
-    Err(@authorization.CredentialStoreError::Denied) =>
-      Err(@authorization.ProjectAuthorizationError::StorageDenied)
-    Err(@authorization.CredentialStoreError::Unsupported) =>
-      Err(@authorization.ProjectAuthorizationError::UnsupportedPlatform)
-    Err(@authorization.CredentialStoreError::Unavailable) =>
-      Err(@authorization.ProjectAuthorizationError::StorageUnavailable)
+  match @authorization.credential_store_capability(store) {
+    @authorization.CredentialStoreCapability::Usable => Ok(())
+    @authorization.CredentialStoreCapability::Unavailable(reason) =>
+      Err(credential_store_capability_error(reason))
+  }
+}
+
+///|
+fn credential_store_capability_error(
+  reason : @authorization.CredentialStoreUnavailableReason,
+) -> @authorization.ProjectAuthorizationError {
+  match reason {
+    @authorization.CredentialStoreUnavailableReason::MissingEntitlement =>
+      @authorization.ProjectAuthorizationError::StorageMissingEntitlement
+    @authorization.CredentialStoreUnavailableReason::Locked =>
+      @authorization.ProjectAuthorizationError::StorageLocked
+    @authorization.CredentialStoreUnavailableReason::PermissionDenied =>
+      @authorization.ProjectAuthorizationError::StorageDenied
+    @authorization.CredentialStoreUnavailableReason::UnsupportedPlatform =>
+      @authorization.ProjectAuthorizationError::UnsupportedPlatform
+    @authorization.CredentialStoreUnavailableReason::ServiceUnavailable
+    | @authorization.CredentialStoreUnavailableReason::CleanupFailed
+    | @authorization.CredentialStoreUnavailableReason::UnknownFailure =>
+      @authorization.ProjectAuthorizationError::StorageUnavailable
+  }
+}
+
+///|
+async fn native_credential_store_capability() -> @authorization.CredentialStoreCapability {
+  match selected_credential_store(@args.CredentialStore::Native) {
+    Ok(store) => @authorization.credential_store_capability(store)
+    Err(@authorization.ProjectAuthorizationError::StorageMissingEntitlement) =>
+      @authorization.CredentialStoreCapability::Unavailable(
+        @authorization.CredentialStoreUnavailableReason::MissingEntitlement,
+      )
+    Err(@authorization.ProjectAuthorizationError::StorageLocked) =>
+      @authorization.CredentialStoreCapability::Unavailable(
+        @authorization.CredentialStoreUnavailableReason::Locked,
+      )
+    Err(@authorization.ProjectAuthorizationError::StorageDenied) =>
+      @authorization.CredentialStoreCapability::Unavailable(
+        @authorization.CredentialStoreUnavailableReason::PermissionDenied,
+      )
+    Err(@authorization.ProjectAuthorizationError::UnsupportedPlatform) =>
+      @authorization.CredentialStoreCapability::Unavailable(
+        @authorization.CredentialStoreUnavailableReason::UnsupportedPlatform,
+      )
+    Err(_) =>
+      @authorization.CredentialStoreCapability::Unavailable(
+        @authorization.CredentialStoreUnavailableReason::ServiceUnavailable,
+      )
+  }
+}
+
+///|
+async fn choose_setup_credential_store(
+  request : @args.SetupCredentialStore,
+) -> Result[@args.CredentialStore, @authorization.ProjectAuthorizationError] {
+  if !terminal_is_interactive() {
+    let remembered = match request {
+      @args.SetupCredentialStore::Selected(_) => None
+      @args.SetupCredentialStore::Prompt => {
+        let identifier = match remembered_credential_store_identifier() {
+          Ok(identifier) => identifier
+          Err(error) => return Err(error)
+        }
+        Some(credential_store_selection(identifier))
+      }
+    }
+    return Ok(@args.noninteractive_setup_credential_store(request, remembered))
+  }
+  match request {
+    @args.SetupCredentialStore::Selected(store) => return Ok(store)
+    @args.SetupCredentialStore::Prompt => ()
+  }
+  let capability = native_credential_store_capability()
+  let catalog = @authorization.credential_store_capability_catalog(
+    @authorization.native_credential_store_label(),
+    capability,
+  )
+  let native_option = catalog[0]
+  let file_option = catalog[1]
+  println("Choose where Project Authorization credentials will be stored:")
+  match native_option.capability {
+    @authorization.CredentialStoreCapability::Usable =>
+      println("  1) " + native_option.label + " (recommended)")
+    @authorization.CredentialStoreCapability::Unavailable(reason) =>
+      println(
+        "  1) " +
+        native_option.label +
+        " (disabled: " +
+        reason.user_message() +
+        ")",
+      )
+  }
+  println("  2) " + file_option.label + " (" + file_option.protection + ")")
+  match native_option.capability {
+    @authorization.CredentialStoreCapability::Usable =>
+      println(
+        "Select a credential store [1], `r` to recheck, or `q` to cancel:",
+      )
+    @authorization.CredentialStoreCapability::Unavailable(_) =>
+      println(
+        "Select an available credential store, `r` to recheck, or `q` to cancel:",
+      )
+  }
+  match
+    @authorization.credential_store_menu_choice(
+      terminal_read_line(),
+      native_option.capability,
+    ) {
+    Ok(@authorization.CredentialStoreMenuChoice::Native) =>
+      Ok(@args.CredentialStore::Native)
+    Ok(@authorization.CredentialStoreMenuChoice::File) =>
+      Ok(@args.CredentialStore::File)
+    Err(@authorization.CredentialStoreMenuError::Disabled(reason)) =>
+      Err(credential_store_capability_error(reason))
+    Err(@authorization.CredentialStoreMenuError::Cancelled) =>
+      Err(
+        @authorization.ProjectAuthorizationError::SetupFailed(
+          "credential-store selection was cancelled",
+        ),
+      )
+    Err(@authorization.CredentialStoreMenuError::Recheck) =>
+      choose_setup_credential_store(@args.SetupCredentialStore::Prompt)
+    Err(@authorization.CredentialStoreMenuError::Invalid) =>
+      Err(
+        @authorization.ProjectAuthorizationError::SetupFailed(
+          "credential-store selection was invalid",
+        ),
+      )
   }
 }
 
@@ -76,25 +313,39 @@ async fn report_project_authorization_failure(
 ) -> Unit {
   match (error, store) {
     (
+      @authorization.ProjectAuthorizationError::StorageMissingEntitlement,
+      @args.CredentialStore::Native,
+    ) =>
+      report_failure(
+        "this pumd executable lacks the entitlement required by its macOS Keychain implementation. Install a compatible build. pumd did not fall back to file storage; run `pumd auth setup --client-file oauth-client.json --credential-store=file` only to opt into reduced protection explicitly.",
+      )
+    (
+      @authorization.ProjectAuthorizationError::StorageLocked,
+      @args.CredentialStore::Native,
+    ) =>
+      report_failure(
+        "the native OS credential vault is locked. Unlock it, then recheck availability. pumd did not fall back to file storage; run `pumd auth setup --client-file oauth-client.json --credential-store=file` only to opt into reduced protection explicitly.",
+      )
+    (
       @authorization.ProjectAuthorizationError::StorageDenied,
       @args.CredentialStore::Native,
     ) =>
       report_failure(
-        "the native OS credential vault is locked or denied access. Unlock it and allow pumd, then retry. pumd did not fall back to file storage.",
+        "permission to use the native OS credential vault was denied. Allow pumd or correct the platform policy, then recheck availability. pumd did not fall back to file storage; run `pumd auth setup --client-file oauth-client.json --credential-store=file` only to opt into reduced protection explicitly.",
       )
     (
       @authorization.ProjectAuthorizationError::StorageUnavailable,
       @args.CredentialStore::Native,
     ) =>
       report_failure(
-        "the native OS credential vault is unavailable or access was denied. Unlock the platform vault and allow access, then retry. pumd did not fall back to file storage.",
+        "the native OS credential-vault service, session, or collection is unavailable. Restore it, then recheck availability. pumd did not fall back to file storage; run `pumd auth setup --client-file oauth-client.json --credential-store=file` only to opt into reduced protection explicitly.",
       )
     (
       @authorization.ProjectAuthorizationError::UnsupportedPlatform,
       @args.CredentialStore::Native,
     ) =>
       report_failure(
-        "this platform has no supported native credential vault. pumd did not fall back to file storage; select `--credential-store=file` explicitly only if reduced protection is acceptable.",
+        "this platform has no supported native credential vault. pumd did not fall back to file storage; run `pumd auth setup --client-file oauth-client.json --credential-store=file` only to opt into reduced protection explicitly.",
       )
     _ => report_failure(error.user_message())
   }
@@ -115,9 +366,17 @@ fn project_authentication_problem(
       @publish.AuthenticationProblem::CredentialsRejected
     @authorization.ProjectAuthorizationError::RefreshTransient =>
       @publish.AuthenticationProblem::CredentialsRefreshFailed
+    @authorization.ProjectAuthorizationError::StorageMissingEntitlement =>
+      @publish.AuthenticationProblem::CredentialsUnavailable
+    @authorization.ProjectAuthorizationError::StorageLocked =>
+      @publish.AuthenticationProblem::CredentialVaultDenied
     @authorization.ProjectAuthorizationError::StorageDenied =>
       @publish.AuthenticationProblem::CredentialVaultDenied
     @authorization.ProjectAuthorizationError::StorageUnavailable =>
+      @publish.AuthenticationProblem::CredentialsUnavailable
+    @authorization.ProjectAuthorizationError::PreferenceUnavailable
+    | @authorization.ProjectAuthorizationError::CredentialRollbackFailed
+    | @authorization.ProjectAuthorizationError::StaleCredentialCleanupFailed =>
       @publish.AuthenticationProblem::CredentialsUnavailable
     @authorization.ProjectAuthorizationError::InvalidClientFile(_) =>
       @publish.AuthenticationProblem::CredentialsInvalid
@@ -131,14 +390,16 @@ fn project_authentication_problem(
 ///|
 async fn project_access_token(
   http : &@google_http.HttpClient,
-  selection : @args.CredentialStore,
+  request : @args.CredentialStoreRequest,
 ) -> Result[String, @publish.AuthenticationProblem] {
-  let store = match selected_credential_store(selection) {
-    Ok(store) => store
+  let resolved = match resolve_credential_store(request) {
+    Ok(resolved) => resolved
     Err(error) => return Err(project_authentication_problem(error))
   }
   match
-    @authorization.project_access_token_classified(store, async fn(request) {
+    @authorization.project_access_token_classified(resolved.store, async fn(
+      request,
+    ) {
       @authorization.refresh_with_http_classified(http, request)
     }) {
     Ok(token) => Ok(token)
@@ -169,20 +430,29 @@ async fn publish_file(
   }
   let http = @google_http.DefaultHttpClient::new()
   let result = match authorization {
-    @args.Authorization::Project(store) =>
+    @args.Authorization::Project(store_request) =>
       @publish.publish_prepared_with_project_onboarding(
         prepared,
         terminal_is_interactive(),
-        async fn() { project_access_token(http, store) },
+        async fn() { project_access_token(http, store_request) },
         fn() {
           confirm_yes(
             "Project Authorization is not configured. Run guided setup now?",
           )
         },
         async fn() {
-          match run_guided_setup(store) {
+          let setup_request = match publish_setup_store_request(store_request) {
+            Ok(request) => request
+            Err(error) => return Err(project_authentication_problem(error))
+          }
+          let selection = match choose_setup_credential_store(setup_request) {
+            Ok(selection) => selection
+            Err(error) => return Err(project_authentication_problem(error))
+          }
+          let probe = setup_request is @args.SetupCredentialStore::Prompt
+          match run_guided_setup(selection, probe) {
             Ok(status) => {
-              report_setup_success(status, store)
+              report_setup_success(status, selection)
               Ok(())
             }
             Err(error) => {
@@ -486,6 +756,72 @@ async fn finish_setup(
 }
 
 ///|
+priv struct SetupStoreCommit {
+  selected_identifier : @authorization.CredentialStoreIdentifier
+  selected_store : @authorization.CredentialStore
+  previous_identifier : @authorization.CredentialStoreIdentifier
+  previous_store : @authorization.CredentialStore
+  preference : @authorization.CredentialStorePreference
+}
+
+///|
+async fn prepare_setup_store_commit(
+  selection : @args.CredentialStore,
+  selected_store : @authorization.CredentialStore,
+) -> Result[SetupStoreCommit, @authorization.ProjectAuthorizationError] {
+  let preference = match project_authorization_preference() {
+    Ok(preference) => preference
+    Err(error) => return Err(error)
+  }
+  let remembered_identifier = match (preference.load)() {
+    Ok(identifier) => identifier
+    Err(_) =>
+      return Err(
+        @authorization.ProjectAuthorizationError::PreferenceUnavailable,
+      )
+  }
+  let mut previous_identifier = match remembered_identifier {
+    Some(identifier) => identifier
+    None => @authorization.CredentialStoreIdentifier::Native
+  }
+  let previous_selection = credential_store_selection(previous_identifier)
+  let previous_store = match selected_credential_store(previous_selection) {
+    Ok(store) => store
+    Err(_) if remembered_identifier is None => {
+      previous_identifier = credential_store_identifier(selection)
+      selected_store
+    }
+    Err(error) => return Err(error)
+  }
+  Ok({
+    selected_identifier: credential_store_identifier(selection),
+    selected_store,
+    previous_identifier,
+    previous_store,
+    preference,
+  })
+}
+
+///|
+async fn finish_setup_and_commit_store(
+  client_document : String,
+  commit : SetupStoreCommit,
+  http : &@google_http.HttpClient,
+) -> Result[
+  @authorization.ProjectAuthorizationStatus,
+  @authorization.ProjectAuthorizationError,
+] {
+  @authorization.commit_credential_store_selection(
+    commit.selected_identifier,
+    commit.selected_store,
+    commit.previous_identifier,
+    commit.previous_store,
+    commit.preference,
+    async fn(store) { finish_setup(client_document, store, http) },
+  )
+}
+
+///|
 async fn report_setup_success(
   status : @authorization.ProjectAuthorizationStatus,
   selection : @args.CredentialStore,
@@ -504,6 +840,7 @@ async fn report_setup_success(
 ///|
 async fn prepared_setup_store(
   selection : @args.CredentialStore,
+  probe : Bool,
 ) -> Result[
   @authorization.CredentialStore,
   @authorization.ProjectAuthorizationError,
@@ -512,9 +849,11 @@ async fn prepared_setup_store(
     Ok(store) => store
     Err(error) => return Err(error)
   }
-  match credential_store_ready(store) {
-    Ok(_) => ()
-    Err(error) => return Err(error)
+  if probe {
+    match credential_store_ready(store) {
+      Ok(_) => ()
+      Err(error) => return Err(error)
+    }
   }
   if selection is @args.CredentialStore::File {
     @stdio.stderr.write(
@@ -528,6 +867,7 @@ async fn prepared_setup_store(
 async fn setup_from_client_file(
   client_file : String,
   selection : @args.CredentialStore,
+  probe : Bool,
 ) -> Unit {
   let client_document = match read_source(client_file) {
     Ok(document) => document
@@ -538,12 +878,16 @@ async fn setup_from_client_file(
         "`",
       )
   }
-  let store = match prepared_setup_store(selection) {
+  let store = match prepared_setup_store(selection, probe) {
     Ok(store) => store
     Err(error) => return report_project_authorization_failure(error, selection)
   }
+  let commit = match prepare_setup_store_commit(selection, store) {
+    Ok(commit) => commit
+    Err(error) => return report_project_authorization_failure(error, selection)
+  }
   let http = @google_http.DefaultHttpClient::new()
-  match finish_setup(client_document, store, http) {
+  match finish_setup_and_commit_store(client_document, commit, http) {
     Ok(status) => report_setup_success(status, selection)
     Err(error) => report_project_authorization_failure(error, selection)
   }
@@ -552,12 +896,17 @@ async fn setup_from_client_file(
 ///|
 async fn run_guided_setup(
   selection : @args.CredentialStore,
+  probe : Bool,
 ) -> Result[
   @authorization.ProjectAuthorizationStatus,
   @authorization.ProjectAuthorizationError,
 ] {
-  let store = match prepared_setup_store(selection) {
+  let store = match prepared_setup_store(selection, probe) {
     Ok(store) => store
+    Err(error) => return Err(error)
+  }
+  let commit = match prepare_setup_store_commit(selection, store) {
+    Ok(commit) => commit
     Err(error) => return Err(error)
   }
   let adapter = @authorization.production_gcloud_adapter()
@@ -611,7 +960,9 @@ async fn run_guided_setup(
     ensure_minimal_external_consent: complete_consent_handoff,
     begin_desktop_client_handoff,
     receive_desktop_client_json: fn() { receive_desktop_client_json() },
-    complete_oauth: async fn(document) { finish_setup(document, store, http) },
+    complete_oauth: async fn(document) {
+      finish_setup_and_commit_store(document, commit, http)
+    },
   })
   match result {
     Ok(status) => Ok(status)
@@ -620,29 +971,54 @@ async fn run_guided_setup(
 }
 
 ///|
-async fn guided_setup(selection : @args.CredentialStore) -> Unit {
+async fn guided_setup(selection : @args.CredentialStore, probe : Bool) -> Unit {
   if !terminal_is_interactive() {
     return report_failure(
       "guided Project Authorization requires an interactive terminal. Supply a preconfigured Desktop client with `pumd auth setup --client-file <path>` or use explicit automation credentials.",
     )
   }
-  match run_guided_setup(selection) {
+  match run_guided_setup(selection, probe) {
     Ok(status) => report_setup_success(status, selection)
     Err(error) => report_project_authorization_failure(error, selection)
   }
 }
 
 ///|
-async fn report_project_authorization_status(
-  selection : @args.CredentialStore,
+async fn auth_setup(
+  client_file : @args.ClientFile,
+  store_request : @args.SetupCredentialStore,
 ) -> Unit {
-  let store = match selected_credential_store(selection) {
-    Ok(store) => store
-    Err(error) => return report_project_authorization_failure(error, selection)
+  let selection = match choose_setup_credential_store(store_request) {
+    Ok(selection) => selection
+    Err(error) =>
+      return report_project_authorization_failure(
+        error,
+        @args.CredentialStore::Native,
+      )
+  }
+  let probe = store_request is @args.SetupCredentialStore::Prompt
+  match client_file {
+    @args.ClientFile::Guided => guided_setup(selection, probe)
+    @args.ClientFile::Provided(path) =>
+      setup_from_client_file(path, selection, probe)
+  }
+}
+
+///|
+async fn report_project_authorization_status(
+  request : @args.CredentialStoreRequest,
+) -> Unit {
+  let resolved = match resolve_credential_store(request) {
+    Ok(resolved) => resolved
+    Err(error) =>
+      return report_project_authorization_failure(
+        error,
+        @args.CredentialStore::Native,
+      )
   }
   let http = @google_http.DefaultHttpClient::new()
   match
-    @authorization.inspect_project_authorization_status(store, async fn(
+    @authorization.inspect_project_authorization_status(resolved.store, async fn(
       request,
     ) {
       @authorization.refresh_with_http_classified(http, request)
@@ -664,7 +1040,7 @@ async fn report_project_authorization_status(
       }
       @stdio.stdout.write("Project Authorization: " + usability + "\n")
       @stdio.stdout.write(
-        "credential store: " + credential_store_label(selection) + "\n",
+        "credential store: " + credential_store_label(resolved.selection) + "\n",
       )
       @stdio.stdout.write("scope: " + status.scope + "\n")
       match status.project_id {
@@ -672,29 +1048,35 @@ async fn report_project_authorization_status(
         None => ()
       }
       match inspection.usability_error {
-        Some(error) => report_project_authorization_failure(error, selection)
+        Some(error) =>
+          report_project_authorization_failure(error, resolved.selection)
         None => ()
       }
     }
-    Err(error) => report_project_authorization_failure(error, selection)
+    Err(error) =>
+      report_project_authorization_failure(error, resolved.selection)
   }
 }
 
 ///|
 async fn logout_project_authorization(
-  selection : @args.CredentialStore,
+  request : @args.CredentialStoreRequest,
 ) -> Unit {
-  let store = match selected_credential_store(selection) {
-    Ok(store) => store
-    Err(error) => return report_project_authorization_failure(error, selection)
+  let resolved = match resolve_credential_store(request) {
+    Ok(resolved) => resolved
+    Err(error) =>
+      return report_project_authorization_failure(
+        error,
+        @args.CredentialStore::Native,
+      )
   }
-  match (store.delete)() {
+  match (resolved.store.delete)() {
     Ok(_) | Err(@authorization.CredentialStoreError::NotConfigured) => {
       @stdio.stdout.write(
         "Project Authorization credentials removed locally.\n",
       )
       @stdio.stdout.write(
-        "credential store: " + credential_store_label(selection) + "\n",
+        "credential store: " + credential_store_label(resolved.selection) + "\n",
       )
       @stdio.stdout.write(
         "Google's remote authorization may still be active; revoke it separately in your Google Account if required.\n",
@@ -703,17 +1085,17 @@ async fn logout_project_authorization(
     Err(@authorization.CredentialStoreError::Denied) =>
       report_project_authorization_failure(
         @authorization.ProjectAuthorizationError::StorageDenied,
-        selection,
+        resolved.selection,
       )
     Err(@authorization.CredentialStoreError::Unsupported) =>
       report_project_authorization_failure(
         @authorization.ProjectAuthorizationError::UnsupportedPlatform,
-        selection,
+        resolved.selection,
       )
     Err(_) =>
       report_project_authorization_failure(
         @authorization.ProjectAuthorizationError::StorageUnavailable,
-        selection,
+        resolved.selection,
       )
   }
 }
@@ -723,10 +1105,8 @@ async fn main {
   match @args.parse_command(@env.args()) {
     Ok(@args.Command::Publish(path, authorization)) =>
       publish_file(path, authorization)
-    Ok(@args.Command::AuthSetup(@args.ClientFile::Guided, store)) =>
-      guided_setup(store)
-    Ok(@args.Command::AuthSetup(@args.ClientFile::Provided(path), store)) =>
-      setup_from_client_file(path, store)
+    Ok(@args.Command::AuthSetup(client_file, store)) =>
+      auth_setup(client_file, store)
     Ok(@args.Command::AuthStatus(store)) =>
       report_project_authorization_status(store)
     Ok(@args.Command::AuthLogout(store)) => logout_project_authorization(store)

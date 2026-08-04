@@ -17,6 +17,7 @@ async test "Linux Secret Service adapter creates, reads, safely replaces, and id
   let mut saved : String? = None
   let mut fail_replace = false
   let store = linux_secret_service_credential_store_with_backend({
+    probe: fn() { Ok(()) },
     load: fn() {
       match saved {
         Some(document) => Ok(document)
@@ -76,6 +77,7 @@ async test "Linux Secret Service adapter creates, reads, safely replaces, and id
 ///|
 async test "Linux Secret Service adapter classifies malformed, locked, unavailable, and unsupported without diagnostics" {
   let malformed = linux_secret_service_credential_store_with_backend({
+    probe: fn() { Ok(()) },
     load: fn() { Ok("not-an-authorization-document") },
     replace: fn(_) { Ok(()) },
     delete: fn() { Ok(()) },
@@ -85,6 +87,7 @@ async test "Linux Secret Service adapter classifies malformed, locked, unavailab
   }
   let secret = "never-display-secret-service-value"
   let denied = linux_secret_service_credential_store_with_backend({
+    probe: fn() { Err(CredentialStoreError::Denied) },
     load: fn() { Err(CredentialStoreError::Denied) },
     replace: fn(_) { Err(CredentialStoreError::Denied) },
     delete: fn() { Err(CredentialStoreError::Denied) },
@@ -105,6 +108,7 @@ async test "Linux Secret Service adapter classifies malformed, locked, unavailab
     fail("denied Secret Service errors must contain no native diagnostic")
   }
   let unavailable = linux_secret_service_credential_store_with_backend({
+    probe: fn() { Err(CredentialStoreError::Unavailable) },
     load: fn() { Err(CredentialStoreError::Unavailable) },
     replace: fn(_) { Err(CredentialStoreError::Unavailable) },
     delete: fn() { Err(CredentialStoreError::Unavailable) },
@@ -113,6 +117,7 @@ async test "Linux Secret Service adapter classifies malformed, locked, unavailab
     fail("missing service, session bus, or collection must be unavailable")
   }
   let unsupported = linux_secret_service_credential_store_with_backend({
+    probe: fn() { Err(CredentialStoreError::Unsupported) },
     load: fn() { Err(CredentialStoreError::Unsupported) },
     replace: fn(_) { Err(CredentialStoreError::Unsupported) },
     delete: fn() { Err(CredentialStoreError::Unsupported) },
@@ -125,6 +130,7 @@ async test "Linux Secret Service adapter classifies malformed, locked, unavailab
 ///|
 async test "Linux Secret Service selection has no file fallback when unavailable" {
   let backend : CredentialDocumentBackend = {
+    probe: fn() { Ok(()) },
     load: fn() { Err(CredentialStoreError::NotConfigured) },
     replace: fn(_) { Ok(()) },
     delete: fn() { Ok(()) },

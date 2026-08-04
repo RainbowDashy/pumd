@@ -139,16 +139,30 @@ validated Milestone 2 contract.
 ### Set up Project Authorization
 
 Project Authorization is the default: an author grants access through the OAuth
-identity of a Google Cloud project they select. Durable authorization uses the
-platform-native vault by default: macOS Keychain on Apple Silicon, Secret
-Service on Linux x64, and Windows Credential Manager on Windows x64. Native
-vault failure never falls back to a credential file.
+identity of a Google Cloud project they select. Publishing, status, and logout
+use the platform-native vault by default: macOS Keychain on Apple Silicon,
+Secret Service on Linux x64, and Windows Credential Manager on Windows x64.
+Interactive setup asks where to store credentials and recommends the native
+vault when it is usable. Native-vault failure never falls back to a credential
+file. On macOS, the native adapter uses the normal login Keychain model for a
+standalone command-line tool; it does not require an app access-group
+entitlement.
 
 Run the guided flow from an interactive terminal:
 
 ```console
 pumd auth setup
 ```
+
+Before starting the Google flow, setup performs a write/read/delete capability
+check using a separate, non-secret probe record. It shows both storage choices:
+the native vault and the permission-hardened file store. An unusable native
+vault remains visible but disabled with a specific explanation, such as a
+locked service, an unsupported platform, or an unexpected macOS
+missing-entitlement packaging result. The file option remains selectable with a
+reduced-protection warning and is never selected by pressing Enter or as a
+fallback. Enter `r` to recheck native-vault availability after unlocking or
+repairing it without restarting setup.
 
 The guide requires the Google Cloud CLI. Install `gcloud` if prompted, then
 sign in before retrying:
@@ -191,20 +205,37 @@ pumd auth setup --client-file oauth-client.json
 ```
 
 `oauth-client.json` is a Google Desktop OAuth client configuration. It is not a
-user token, refresh credential, or service-account key. `pumd` opens the direct
-installed-app OAuth flow, then stores the resulting authorization in the native
-vault. If the vault is locked, denied, or unavailable, unlock or repair it and
-retry; choose file storage only deliberately.
+user token, refresh credential, or service-account key. Interactive use prompts
+for the credential store before `pumd` opens the direct installed-app OAuth
+flow. If the native vault is disabled, follow its displayed remediation or
+choose file storage deliberately.
 
-`--credential-store=file` is the explicit reduced-protection alternative. Use
-the same store selection consistently for setup, status, publishing, and
-logout:
+`--credential-store=file` is the explicit reduced-protection alternative:
 
 ```console
 pumd auth setup --client-file oauth-client.json --credential-store=file
 pumd auth status --credential-store=file
 pumd publish --auth=project --credential-store=file document.md
 pumd auth logout --credential-store=file
+```
+
+After setup stores and validates the new authorization, it atomically remembers
+only the non-secret `native` or `file` identifier. Bare publish, status, and
+logout use that remembered choice; with no preference, they use native storage.
+An explicit command option overrides the remembered store for that command.
+Changing stores commits the new authorization and preference before removing
+the previous local credential. A cleanup failure is reported and is never
+presented as a completed single-credential migration.
+
+Noninteractive setup never displays the selector. It honors an explicit store,
+otherwise uses the remembered store, and otherwise attempts the native default.
+It never changes to file storage because a native probe or write failed. To
+bypass the interactive store menu while retaining native storage, select it
+explicitly:
+
+```console
+pumd auth setup --credential-store=native
+pumd auth setup --client-file oauth-client.json --credential-store=native
 ```
 
 The default native-vault forms are:
@@ -215,14 +246,15 @@ pumd publish document.md
 pumd auth logout
 ```
 
-`auth status` reports the native/file store type, usability or reauthorization
-state, and the Google Cloud project when the downloaded client configuration
-provided it. `auth logout` removes local credentials idempotently; it does not
-claim that Google's remote grant was revoked. Refresh credentials obtain fresh
-access tokens as needed. A transient refresh failure leaves the stored grant in
-place for retry; a revoked or invalid grant requires setup again. Diagnostic and
-status output redact OAuth client secrets, refresh credentials, access tokens,
-authorization codes, and native vault diagnostics.
+`auth status` reports the remembered or explicitly selected native/file store
+type, usability or reauthorization state, and the Google Cloud project when the
+downloaded client configuration provided it. `auth logout` removes local
+credentials idempotently; it does not claim that Google's remote grant was
+revoked. Refresh credentials obtain fresh access tokens as needed. A transient
+refresh failure leaves the stored grant in place for retry; a revoked or invalid
+grant requires setup again. Diagnostic and status output redact OAuth client
+secrets, refresh credentials, access tokens, authorization codes, preference
+contents beyond the store identifier, and native vault diagnostics.
 
 Guided setup requires an interactive terminal. On a first interactive publish,
 `pumd` offers guided setup only after source reading, rendering, validation, and
@@ -263,7 +295,9 @@ After setup, publish with the default Project Authorization:
 pumd publish document.md
 ```
 
-For the explicit file store, add `--credential-store=file` as shown above.
+If setup remembered the explicit file store, the same bare publish command uses
+it. Add `--credential-store=native|file` only to override the remembered choice
+for one publish.
 
 Each successful invocation creates a new Google Doc, including when the same
 Markdown file was published before. The document title is the source file name
@@ -298,11 +332,12 @@ silently renumbered.
   before credential access or remote mutation, so no Google Doc was created.
 - For a Project Authorization authentication failure, run `pumd auth status`;
   then repeat setup with the same credential-store choice if reauthorization is
-  required. For a native-vault denial, unlock the platform vault and allow
-  access; `pumd` does not fall back to a file. For a permission failure, confirm the
-  exact `drive.file` scope and that `docs.googleapis.com` is enabled in the
-  selected project. For the explicit ADC route, recreate its ADC separately;
-  neither route falls back to the other.
+  required. For a locked native vault, unlock it and recheck. For permission
+  denial, allow `pumd` or correct the platform policy; `pumd` does not fall back
+  to a file. For a Google permission failure, confirm the exact `drive.file`
+  scope and that `docs.googleapis.com` is enabled in the selected project. For
+  the explicit ADC route, recreate its ADC separately; neither route falls back
+  to the other.
 - If Google throttles a request, wait before trying again. For another explicit
   5xx response, wait and retry later; report other unexpected HTTP statuses
   before retrying.
@@ -333,8 +368,9 @@ moon test --target native -p rainbowdashy/pumd/publish --include-skipped --filte
 
 Packaged Project Authorization smoke tests are opt-in for macOS arm64, Linux
 x64, and Windows x64. Each uses that platform's native vault, replaces the
-active Project Authorization, and creates a real Google Doc. Run one only with a
-dedicated account and project:
+active Project Authorization twice to cover create and replacement, creates a
+real Google Doc, then deletes the local authorization to cover logout. Run one
+only with a dedicated account and project:
 
 ```console
 PUMD_MACOS_PROJECT_AUTH_SMOKE=1 \
