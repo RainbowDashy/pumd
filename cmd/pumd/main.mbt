@@ -720,7 +720,7 @@ async fn logout_project_authorization(
 
 ///|
 async fn main {
-  match @args.parse_command(@sys.get_cli_args()) {
+  match @args.parse_command(@env.args()) {
     Ok(@args.Command::Publish(path, authorization)) =>
       publish_file(path, authorization)
     Ok(@args.Command::AuthSetup(@args.ClientFile::Guided, store)) =>

@@ -61,9 +61,6 @@ jobs:
       - name: Resolve dependencies and check native packages
         run: moon check --target native --deny-warn
 
-      - name: Run release tests
-        run: moon test --target native --release --frozen
-
       - name: Build stripped release binary
         run: moon build --target native --release --strip --frozen cmd/pumd
 
