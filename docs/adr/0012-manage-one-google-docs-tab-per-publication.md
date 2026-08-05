@@ -1,0 +1,3 @@
+# Manage one Google Docs tab per Publication
+
+Each Publication will record and manage exactly one Google Docs tab: the initial content tab established by first publish. Every other tab is outside pumd's authority and remains untouched, allowing reviewers to add supplementary material without making it Markdown-owned. The Google Doc title is derived from the source only at creation and becomes reviewer-owned afterward, avoiding a separate non-atomic metadata write during updates. If the Managed Tab is deleted, publishing reports the remote as missing and does not switch tabs or recreate content automatically.

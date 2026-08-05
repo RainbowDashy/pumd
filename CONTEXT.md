@@ -23,3 +23,27 @@ _Avoid_: Default ADC, built-in credentials
 **Project Authorization**:
 An author's grant of Google access through the OAuth identity owned by a user-selected Google Cloud project. It is the default authorization and provides independent consent configuration and quota ownership.
 _Avoid_: BYO client, custom credentials
+
+**Publication**:
+The single active relationship, owned by one local `pumd` installation, between a Markdown source and the Google Doc that installation created and may update.
+_Avoid_: Remote document, shared publication
+
+**Publication Registry**:
+The local installation's authoritative collection of Publications. It determines which documents `pumd` can list or update and is not synchronized through Google Drive or version control.
+_Avoid_: Remote catalog, shared registry
+
+**Published Baseline**:
+The Desired Document from the last successful publish of a Publication. It is the reference for distinguishing subsequent Markdown changes from reviewer changes in Google Docs.
+_Avoid_: Merge base, cached document, remote snapshot
+
+**Publication Conflict**:
+An overlap within one reconciliation unit between Markdown changes and Google Docs changes relative to the Published Baseline. A Publication Conflict blocks the complete publish rather than choosing one side.
+_Avoid_: Sync error, merge failure
+
+**Review Barrier**:
+Unresolved review feedback that prevents a content-changing publish because `pumd` cannot prove the update will preserve its anchor. Version one treats every unresolved comment as a Review Barrier.
+_Avoid_: Comment conflict, warning
+
+**Managed Tab**:
+The single Google Docs tab whose content belongs to a Publication. Other tabs in the same document are outside `pumd`'s authority.
+_Avoid_: First tab, primary tab, document body

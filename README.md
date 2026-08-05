@@ -517,7 +517,6 @@ The initial product will not attempt to:
 These decisions should follow from the goals rather than be fixed prematurely:
 
 - Exact command names beyond the core publish workflow.
-- Local state-file layout and stable block identity strategy.
+- Stable unit-matching strategy within three-way reconciliation.
 - Whether custom templates belong in version one.
-- The policy for accepting remote-only edits back into local Markdown.
 - How suggestions are surfaced or reconciled after reviewers finish.
