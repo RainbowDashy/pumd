@@ -1,0 +1,15 @@
+import {
+  "rainbowdashy/pumd" @pumd,
+  "moonbitlang/async/fs" @async_fs,
+  "moonbitlang/core/debug",
+  "moonbitlang/core/encoding/utf8",
+  "moonbitlang/core/env",
+  "moonbitlang/core/json",
+  "moonbitlang/x/codec/base64",
+}
+
+import {
+  "moonbitlang/async" @async,
+} for "test"
+
+options("native-stub": [ "registry_native.c" ])

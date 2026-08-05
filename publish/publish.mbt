@@ -8,6 +8,7 @@ pub(all) struct PublishSuccess {
 pub(all) enum PublicationRemoteStage {
   DocumentCreation
   DocumentPopulation
+  DocumentRead
 } derive(Eq, @debug.Debug)
 
 ///|
@@ -32,8 +33,9 @@ pub(all) enum AuthorizationMode {
 /// A locally validated and fully planned first publication. Constructing this
 /// value performs every source/render/planning step and no authorization or
 /// remote work, so interactive onboarding can only begin after preflight.
-pub struct PreparedPublication {
+pub(all) struct PreparedPublication {
   title : String
+  document : @pumd.DesiredDocument
   plan : DocsUpdatePlan
 }
 
@@ -65,6 +67,10 @@ pub(all) enum PublishError {
     message~ : String,
     created_document~ : PublishSuccess?
   )
+  Registry(String)
+  BlockedPublication(source_path~ : String)
+  Read(document_id~ : String, url~ : String, message~ : String)
+  RemoteMissing(document_id~ : String, url~ : String)
 } derive(@debug.Debug)
 
 ///|
@@ -86,6 +92,7 @@ fn remote_stage_name(stage : PublicationRemoteStage) -> String {
   match stage {
     DocumentCreation => "document creation"
     DocumentPopulation => "document population"
+    DocumentRead => "document read"
   }
 }
 
@@ -248,6 +255,25 @@ pub fn PublishError::user_message(self : PublishError) -> String {
       ": " +
       message +
       response_decode_recovery_guidance(created_document)
+    Registry(message) => "publication registry failed: " + message
+    BlockedPublication(source_path~) =>
+      "publication is blocked for `" +
+      source_path +
+      "`; inspect Google Drive and explicitly `pumd forget <path>` before retrying."
+    Read(document_id~, url~, message~) =>
+      "registered document readback failed (document ID " +
+      document_id +
+      ", " +
+      url +
+      "): " +
+      message
+    RemoteMissing(document_id~, url~) =>
+      "the registered document or its Managed Tab is no longer available " +
+      "(document ID " +
+      document_id +
+      ", " +
+      url +
+      "); pumd will not create a replacement; restore the document or forget the Publication explicitly."
   }
 }
 
@@ -291,7 +317,7 @@ pub fn prepare_publication_markdown(
     Ok(plan) => plan
     Err(error) => return Err(Planning(error.message()))
   }
-  Ok({ title, plan })
+  Ok({ title, document, plan })
 }
 
 ///|
@@ -416,7 +442,7 @@ pub async fn publish_desired_document_with_authorization(
     Ok(plan) => plan
     Err(error) => return Err(Planning(error.message()))
   }
-  let prepared : PreparedPublication = { title, plan }
+  let prepared : PreparedPublication = { title, document, plan }
   publish_prepared_with_authorization_providers(
     prepared, authorization_mode, get_project_token, get_adc_token, http,
   )

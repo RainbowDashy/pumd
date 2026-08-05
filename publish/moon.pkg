@@ -1,7 +1,9 @@
 import {
   "rainbowdashy/pumd",
+  "rainbowdashy/pumd/registry",
   "moonbitlang/core/debug",
   "moonbitlang/core/json",
+  "moonbitlang/x/time",
   "ryota0624/googleauth/lib" @googleauth,
   "ryota0624/googleapis/core" @google_core,
   "ryota0624/googleapis/http" @google_http,
@@ -18,3 +20,7 @@ import {
 import {
   "moonbitlang/async",
 } for "wbtest"
+
+options(
+  "native-stub": [ "clock_native.c" ],
+)

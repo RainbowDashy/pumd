@@ -1,7 +1,7 @@
 ///|
 test "publish resolves Project Authorization through remembered-or-native storage" {
   match parse_command(["pumd", "publish", "proposal.md"]) {
-    Ok(Publish(path, Project(RememberedOrNative))) =>
+    Ok(Publish(path, Project(RememberedOrNative), false)) =>
       inspect(path, content="proposal.md")
     Ok(_) => fail("expected native-vault Project Authorization publish command")
     Err(message) => fail(message)
@@ -11,7 +11,7 @@ test "publish resolves Project Authorization through remembered-or-native storag
 ///|
 test "explicit project authorization still resolves remembered-or-native storage" {
   match parse_command(["pumd", "publish", "--auth=project", "proposal.md"]) {
-    Ok(Publish(path, Project(RememberedOrNative))) =>
+    Ok(Publish(path, Project(RememberedOrNative), false)) =>
       inspect(path, content="proposal.md")
     Ok(_) => fail("expected Project Authorization publish command")
     Err(message) => fail(message)
@@ -24,7 +24,7 @@ test "publish accepts the platform-neutral native store and legacy keychain alia
     parse_command([
       "pumd", "publish", "--auth=project", "--credential-store=native", "proposal.md",
     ]) {
-    Ok(Publish(path, Project(Explicit(Native)))) =>
+    Ok(Publish(path, Project(Explicit(Native)), false)) =>
       inspect(path, content="proposal.md")
     Ok(_) => fail("expected native-vault Project Authorization publish command")
     Err(message) => fail(message)
@@ -33,7 +33,7 @@ test "publish accepts the platform-neutral native store and legacy keychain alia
     parse_command([
       "pumd", "publish", "--auth=project", "--credential-store=keychain", "proposal.md",
     ]) {
-    Ok(Publish(path, Project(Explicit(Native)))) =>
+    Ok(Publish(path, Project(Explicit(Native)), false)) =>
       inspect(path, content="proposal.md")
     Ok(_) => fail("expected compatibility alias to select the native vault")
     Err(message) => fail(message)
@@ -46,7 +46,7 @@ test "publish accepts an explicit file store in either option order" {
     parse_command([
       "pumd", "publish", "--credential-store=file", "--auth=project", "proposal.md",
     ]) {
-    Ok(Publish(path, Project(Explicit(File)))) =>
+    Ok(Publish(path, Project(Explicit(File)), false)) =>
       inspect(path, content="proposal.md")
     Ok(_) => fail("expected file-backed Project Authorization publish command")
     Err(message) => fail(message)
@@ -55,7 +55,7 @@ test "publish accepts an explicit file store in either option order" {
     parse_command([
       "pumd", "publish", "--auth=project", "--credential-store=file", "proposal.md",
     ]) {
-    Ok(Publish(path, Project(Explicit(File)))) =>
+    Ok(Publish(path, Project(Explicit(File)), false)) =>
       inspect(path, content="proposal.md")
     Ok(_) => fail("expected file-backed Project Authorization publish command")
     Err(message) => fail(message)
@@ -65,7 +65,7 @@ test "publish accepts an explicit file store in either option order" {
 ///|
 test "publish accepts explicit ADC authorization" {
   match parse_command(["pumd", "publish", "--auth=adc", "proposal.md"]) {
-    Ok(Publish(path, Adc)) => inspect(path, content="proposal.md")
+    Ok(Publish(path, Adc, false)) => inspect(path, content="proposal.md")
     Ok(_) => fail("expected ADC publish command")
     Err(message) => fail(message)
   }
@@ -74,7 +74,7 @@ test "publish accepts explicit ADC authorization" {
 ///|
 test "publish accepts an explicit ephemeral access token environment" {
   match parse_command(["pumd", "publish", "--auth=token-env", "proposal.md"]) {
-    Ok(Publish(path, AccessTokenEnvironment)) =>
+    Ok(Publish(path, AccessTokenEnvironment, false)) =>
       inspect(path, content="proposal.md")
     Ok(_) => fail("expected ephemeral access-token environment command")
     Err(message) => fail(message)
@@ -202,7 +202,7 @@ test "publish rejects an unknown authorization mode with Project Authorization u
     Err(message) =>
       inspect(
         message,
-        content="Project Authorization usage: pumd publish [--auth=project|adc|token-env] [--credential-store=native|file] <markdown-path>",
+        content="Project Authorization usage: pumd publish [--dry-run] [--auth=project|adc|token-env] [--credential-store=native|file] <markdown-path>",
       )
   }
 }
@@ -226,7 +226,7 @@ test "publish rejects a missing Markdown path" {
     Err(message) =>
       inspect(
         message,
-        content="Project Authorization usage: pumd publish [--auth=project|adc|token-env] [--credential-store=native|file] <markdown-path>",
+        content="Project Authorization usage: pumd publish [--dry-run] [--auth=project|adc|token-env] [--credential-store=native|file] <markdown-path>",
       )
   }
 }
@@ -238,7 +238,7 @@ test "publish rejects an option where its Markdown path belongs" {
     Err(message) =>
       inspect(
         message,
-        content="Project Authorization usage: pumd publish [--auth=project|adc|token-env] [--credential-store=native|file] <markdown-path>",
+        content="Project Authorization usage: pumd publish [--dry-run] [--auth=project|adc|token-env] [--credential-store=native|file] <markdown-path>",
       )
   }
 }
@@ -290,5 +290,131 @@ test "parse_publish_path remains available only for explicit ADC" {
   match parse_publish_path(["pumd", "publish", "--auth=adc", "proposal.md"]) {
     Ok(path) => inspect(path, content="proposal.md")
     Err(message) => fail(message)
+  }
+}
+
+///|
+test "list accepts its optional flags in either order" {
+  match parse_command(["pumd", "list"]) {
+    Ok(List({ json: false, refresh: false })) => ()
+    Ok(_) => fail("expected bare list command")
+    Err(message) => fail(message)
+  }
+  match parse_command(["pumd", "list", "--json"]) {
+    Ok(List({ json: true, refresh: false })) => ()
+    Ok(_) => fail("expected JSON list command")
+    Err(message) => fail(message)
+  }
+  match parse_command(["pumd", "list", "--refresh"]) {
+    Ok(List({ json: false, refresh: true })) => ()
+    Ok(_) => fail("expected refreshed list command")
+    Err(message) => fail(message)
+  }
+  match parse_command(["pumd", "list", "--refresh", "--json"]) {
+    Ok(List({ json: true, refresh: true })) => ()
+    Ok(_) => fail("expected JSON refreshed list command")
+    Err(message) => fail(message)
+  }
+  match parse_command(["pumd", "list", "--json", "--refresh"]) {
+    Ok(List({ json: true, refresh: true })) => ()
+    Ok(_) => fail("expected JSON refreshed list command")
+    Err(message) => fail(message)
+  }
+}
+
+///|
+test "list rejects unknown, repeated, and positional arguments" {
+  for arguments in [
+    ["pumd", "list", "--unknown"],
+    ["pumd", "list", "--json", "--json"],
+    ["pumd", "list", "notes.md"],
+  ] {
+    match parse_command(arguments) {
+      Ok(_) => fail("expected list argument validation to fail")
+      Err(message) => inspect(message, content="Project Authorization usage: pumd list [--json] [--refresh]")
+    }
+  }
+}
+
+///|
+test "move and forget validate positional paths" {
+  match parse_command(["pumd", "move", "old.md", "new.md"]) {
+    Ok(Move(old_path, new_path)) => {
+      inspect(old_path, content="old.md")
+      inspect(new_path, content="new.md")
+    }
+    Ok(_) => fail("expected move command")
+    Err(message) => fail(message)
+  }
+  match parse_command(["pumd", "forget", "old.md"]) {
+    Ok(Forget(path)) => inspect(path, content="old.md")
+    Ok(_) => fail("expected forget command")
+    Err(message) => fail(message)
+  }
+  for arguments in [
+    ["pumd", "move", "old.md"],
+    ["pumd", "move", "--old", "new.md"],
+    ["pumd", "move", "", "new.md"],
+    ["pumd", "forget"],
+    ["pumd", "forget", "--path"],
+    ["pumd", "forget", ""],
+  ] {
+    match parse_command(arguments) {
+      Ok(_) => fail("expected path validation to fail")
+      Err(_) => ()
+    }
+  }
+}
+
+///|
+test "publish accepts dry-run in any position with supported options" {
+  match parse_command(["pumd", "publish", "--dry-run", "proposal.md"]) {
+    Ok(Publish(path, Project(RememberedOrNative), true)) => inspect(path, content="proposal.md")
+    Ok(_) => fail("expected dry-run Project Authorization publish command")
+    Err(message) => fail(message)
+  }
+  match parse_command(["pumd", "publish", "--auth=adc", "--dry-run", "proposal.md"]) {
+    Ok(Publish(path, Adc, true)) => inspect(path, content="proposal.md")
+    Ok(_) => fail("expected dry-run ADC publish command")
+    Err(message) => fail(message)
+  }
+  match parse_command(["pumd", "publish", "--dry-run", "--auth=project", "--credential-store=file", "proposal.md"]) {
+    Ok(Publish(path, Project(Explicit(File)), true)) => inspect(path, content="proposal.md")
+    Ok(_) => fail("expected dry-run file-backed publish command")
+    Err(message) => fail(message)
+  }
+  match parse_command(["pumd", "publish", "proposal.md", "--credential-store=file", "--dry-run"]) {
+    Ok(Publish(path, Project(Explicit(File)), true)) => inspect(path, content="proposal.md")
+    Ok(_) => fail("expected trailing dry-run file-backed publish command")
+    Err(message) => fail(message)
+  }
+}
+
+///|
+test "publish rejects duplicate or pathless dry-run" {
+  for arguments in [
+    ["pumd", "publish", "--dry-run", "--dry-run", "proposal.md"],
+    ["pumd", "publish", "--dry-run"],
+  ] {
+    match parse_command(arguments) {
+      Ok(_) => fail("expected dry-run validation to fail")
+      Err(message) => assert_true(message.contains("Project Authorization usage"))
+    }
+  }
+}
+
+///|
+test "unknown commands return command usage" {
+  match parse_command(["pumd", "frobnicate"]) {
+    Ok(_) => fail("expected unknown command validation to fail")
+    Err(message) => assert_true(message.contains("pumd list [--json] [--refresh]"))
+  }
+}
+
+///|
+test "parse_publish_path rejects dry-run forms" {
+  match parse_publish_path(["pumd", "publish", "--auth=adc", "--dry-run", "proposal.md"]) {
+    Ok(_) => fail("expected dry-run ADC publish to stay outside the compatibility seam")
+    Err(message) => assert_true(message.contains("Project Authorization usage"))
   }
 }

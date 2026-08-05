@@ -384,6 +384,7 @@ async fn adc_access_token() -> Result[String, @publish.AuthenticationProblem] {
 async fn publish_file(
   path : String,
   authorization : @args.Authorization,
+  dry_run : Bool,
 ) -> Unit {
   let prepared = match
     @publish.prepare_publication_path(path, fn(source_path) {
@@ -392,51 +393,48 @@ async fn publish_file(
     Ok(prepared) => prepared
     Err(error) => return report_failure(error.user_message())
   }
+  let registry_directory = match @registry.default_registry_directory() {
+    Ok(directory) => directory
+    Err(error) =>
+      return report_failure(
+        @publish.PublishError::Registry(error.user_message()).user_message(),
+      )
+  }
   let http = @google_http.DefaultHttpClient::new()
   let result = match authorization {
     @args.Authorization::Project(store_request) =>
-      @publish.publish_prepared_with_project_onboarding(
+      @publish.publish_prepared_with_registry(
         prepared,
-        terminal_is_interactive(),
-        async fn() { project_access_token(http, store_request) },
-        fn() {
-          confirm_yes(
-            "Project Authorization is not configured. Run guided setup now?",
-          )
-        },
-        async fn() {
-          let setup_request = match publish_setup_store_request(store_request) {
-            Ok(request) => request
-            Err(error) => return Err(project_authentication_problem(error))
-          }
-          let selection = match choose_setup_credential_store(setup_request) {
-            Ok(selection) => selection
-            Err(error) => return Err(project_authentication_problem(error))
-          }
-          let probe = setup_request is @args.SetupCredentialStore::Prompt
-          match run_guided_setup(selection, probe) {
-            Ok(status) => {
-              report_setup_success(status, selection)
-              Ok(())
-            }
-            Err(error) => {
-              @stdio.stderr.write("pumd: " + error.user_message() + "\n")
-              Err(project_authentication_problem(error))
-            }
+        path,
+        registry_directory,
+        @publish.AuthorizationMode::Project,
+        if dry_run {
+          async fn() { project_access_token(http, store_request) }
+        } else {
+          async fn() {
+            project_access_token_with_onboarding(http, store_request)
           }
         },
-        http,
-      )
-    @args.Authorization::Adc =>
-      @publish.publish_prepared(
-        prepared,
-        @publish.AuthorizationMode::Adc,
         adc_access_token,
         http,
+        dry_run,
+      )
+    @args.Authorization::Adc =>
+      @publish.publish_prepared_with_registry(
+        prepared,
+        path,
+        registry_directory,
+        @publish.AuthorizationMode::Adc,
+        adc_access_token,
+        adc_access_token,
+        http,
+        dry_run,
       )
     @args.Authorization::AccessTokenEnvironment =>
-      @publish.publish_prepared(
+      @publish.publish_prepared_with_registry(
         prepared,
+        path,
+        registry_directory,
         @publish.AuthorizationMode::Ephemeral,
         fn() {
           match @env.get_env_var("PUMD_ACCESS_TOKEN") {
@@ -444,15 +442,394 @@ async fn publish_file(
             _ => Err(@publish.AuthenticationProblem::CredentialsNotConfigured)
           }
         },
+        fn() {
+          match @env.get_env_var("PUMD_ACCESS_TOKEN") {
+            Some(token) if !token.is_empty() => Ok(token)
+            _ => Err(@publish.AuthenticationProblem::CredentialsNotConfigured)
+          }
+        },
         http,
+        dry_run,
       )
   }
   match result {
-    Ok(success) => {
+    Ok(outcome) => report_publish_outcome(outcome)
+    Err(error) => report_failure(error.user_message())
+  }
+}
+
+///|
+/// Offer first-publish setup only when Project Authorization is genuinely
+/// absent, only in an interactive session, and only after callers have
+/// successfully prepared the publication. Mirrors the previous
+/// publish_prepared_with_project_onboarding contract for the registry flow.
+async fn project_access_token_with_onboarding(
+  http : &@google_http.HttpClient,
+  request : @args.CredentialStoreRequest,
+) -> Result[String, @publish.AuthenticationProblem] {
+  match project_access_token(http, request) {
+    Ok(token) => Ok(token)
+    Err(@publish.AuthenticationProblem::CredentialsNotConfigured) if terminal_is_interactive() => {
+      if !confirm_yes(
+          "Project Authorization is not configured. Run guided setup now?",
+        ) {
+        Err(@publish.AuthenticationProblem::CredentialsNotConfigured)
+      } else {
+        let setup_request = match publish_setup_store_request(request) {
+          Ok(request) => request
+          Err(error) => return Err(project_authentication_problem(error))
+        }
+        let selection = match choose_setup_credential_store(setup_request) {
+          Ok(selection) => selection
+          Err(error) => return Err(project_authentication_problem(error))
+        }
+        let probe = setup_request is @args.SetupCredentialStore::Prompt
+        match run_guided_setup(selection, probe) {
+          Ok(status) => {
+            report_setup_success(status, selection)
+            project_access_token(http, request)
+          }
+          Err(error) => {
+            @stdio.stderr.write("pumd: " + error.user_message() + "\n")
+            Err(project_authentication_problem(error))
+          }
+        }
+      }
+    }
+    Err(problem) => Err(problem)
+  }
+}
+
+///|
+async fn report_publish_outcome(outcome : @publish.PublishOutcome) -> Unit {
+  match outcome {
+    @publish.PublishOutcome::Completed(success) => {
       @stdio.stdout.write("document ID: " + success.document_id + "\n")
       @stdio.stdout.write("edit URL: " + success.url + "\n")
+      @stdio.stdout.write("Publication registered locally.\n")
     }
-    Err(error) => report_failure(error.user_message())
+    @publish.PublishOutcome::AlreadyPublished(success, last_publish) => {
+      @stdio.stdout.write("already published\n")
+      @stdio.stdout.write("document ID: " + success.document_id + "\n")
+      @stdio.stdout.write("edit URL: " + success.url + "\n")
+      @stdio.stdout.write(
+        "last successful publish: " + last_publish + "\n",
+      )
+      @stdio.stdout.write(
+        "this release cannot update an existing Publication yet.\n",
+      )
+    }
+    @publish.PublishOutcome::DryRunCreation(title~) => {
+      @stdio.stdout.write(
+        "dry run: this source has no Publication; publishing would create\n",
+      )
+      @stdio.stdout.write("  a new document titled \"" + title + "\"\n")
+      @stdio.stdout.write(
+        "  and register it locally as a Publication.\n",
+      )
+      @stdio.stdout.write(
+        "No authorization, document creation, or registry change was performed.\n",
+      )
+    }
+    @publish.PublishOutcome::DryRunInspection(inspection~) => {
+      @stdio.stdout.write(
+        "dry run: existing Publication readback succeeded\n",
+      )
+      @stdio.stdout.write(
+        "document ID: " + inspection.document_id + "\n",
+      )
+      @stdio.stdout.write("edit URL: " + inspection.url + "\n")
+      match inspection.title {
+        Some(title) =>
+          @stdio.stdout.write("current title: " + title + "\n")
+        None => @stdio.stdout.write("current title: unavailable\n")
+      }
+      @stdio.stdout.write("managed tab: present\n")
+      @stdio.stdout.write(
+        "No remote write or registry change was performed.\n",
+      )
+    }
+    @publish.PublishOutcome::DryRunProvisional(success) => {
+      @stdio.stdout.write(
+        "dry run: this source has a Publication whose population is not\n",
+      )
+      @stdio.stdout.write("  yet confirmed.\n")
+      @stdio.stdout.write(
+        "document ID: " + success.document_id + "\n",
+      )
+      @stdio.stdout.write("edit URL: " + success.url + "\n")
+      @stdio.stdout.write(
+        "Run publish again to resume population; no state changed.\n",
+      )
+    }
+    @publish.PublishOutcome::DryRunBlocked(source_path~) => {
+      @stdio.stdout.write(
+        "dry run: this source has a blocked Publication from an earlier\n",
+      )
+      @stdio.stdout.write("  ambiguous document creation.\n")
+      @stdio.stdout.write(
+        "Inspect Google Drive; then `pumd forget " +
+        source_path +
+        "` to retry. No state changed.\n",
+      )
+    }
+  }
+}
+
+///|
+fn publication_status_label(
+  lifecycle : @registry.PublicationLifecycle,
+) -> String {
+  match lifecycle {
+    @registry.PublicationLifecycle::Ready => "ready"
+    @registry.PublicationLifecycle::Provisional =>
+      "provisional (population not confirmed)"
+    @registry.PublicationLifecycle::Blocked =>
+      "blocked (inspect Google Drive, then forget)"
+  }
+}
+
+///|
+fn remote_status_label(
+  status : @publish.RemotePublicationStatus,
+) -> String {
+  match status {
+    @publish.RemotePublicationStatus::Ready => "ready"
+    @publish.RemotePublicationStatus::Trashed => "trashed"
+    @publish.RemotePublicationStatus::ReadOnly => "read-only"
+    @publish.RemotePublicationStatus::RemoteMissing => "remote-missing"
+    @publish.RemotePublicationStatus::Inaccessible => "inaccessible"
+    @publish.RemotePublicationStatus::Unavailable => "unavailable"
+  }
+}
+
+///|
+async fn print_publication_listing(
+  entry : @registry.PublicationEntry,
+  inspection : @publish.RemotePublicationInspection?,
+  missing_source : Bool,
+) -> Unit {
+  @stdio.stdout.write(entry.source_path + "\n")
+  match entry.document_id {
+    Some(document_id) => {
+      @stdio.stdout.write("  document ID: " + document_id + "\n")
+      match entry.url {
+        Some(url) => @stdio.stdout.write("  edit URL: " + url + "\n")
+        None => ()
+      }
+    }
+    None => ()
+  }
+  match entry.last_successful_publish {
+    Some(timestamp) =>
+      @stdio.stdout.write(
+        "  last successful publish: " + timestamp + "\n",
+      )
+    None => ()
+  }
+  @stdio.stdout.write(
+    "  status: " + publication_status_label(entry.lifecycle),
+  )
+  if missing_source {
+    @stdio.stdout.write(" (source missing)")
+  }
+  @stdio.stdout.write("\n")
+  match inspection {
+    Some(inspection) => {
+      @stdio.stdout.write(
+        "  remote: " + remote_status_label(inspection.status),
+      )
+      match inspection.title {
+        Some(title) => @stdio.stdout.write(" (title \"" + title + "\"")
+        None => @stdio.stdout.write(" (title unavailable")
+      }
+      match inspection.editable {
+        Some(editable) =>
+          if editable {
+            @stdio.stdout.write(", editable")
+          } else {
+            @stdio.stdout.write(", read-only")
+          }
+        None => ()
+      }
+      @stdio.stdout.write(")\n")
+    }
+    None => ()
+  }
+}
+
+///|
+async fn list_publications(options : @args.ListOptions) -> Unit {
+  let directory = match @registry.default_registry_directory() {
+    Ok(directory) => directory
+    Err(error) =>
+      return report_failure(
+        @publish.PublishError::Registry(error.user_message()).user_message(),
+      )
+  }
+  let document = match @registry.registry_snapshot(directory) {
+    Ok(document) => document
+    Err(error) =>
+      return report_failure(
+        @publish.PublishError::Registry(error.user_message()).user_message(),
+      )
+  }
+  let missing_source = fn(path : String) { !@fs.path_exists(path) }
+  if options.json && !options.refresh {
+    @stdio.stdout.write(
+      @publish.publication_list_json(document, missing_source) + "\n",
+    )
+    return
+  }
+  if options.refresh {
+    let http = @google_http.DefaultHttpClient::new()
+    let token = match
+      project_access_token(
+        http,
+        @args.CredentialStoreRequest::RememberedOrNative,
+      ) {
+      Ok(token) => token
+      Err(problem) =>
+        return report_failure(
+          @publish.PublishError::Authentication(
+            authorization_mode=@publish.AuthorizationMode::Project,
+            problem~,
+            created_document=None,
+          ).user_message(),
+        )
+    }
+    let inspections : Array[@publish.RemotePublicationInspection] = []
+    let entries = document.entries.copy()
+    entries.sort_by(fn(a, b) {
+      if a.source_path < b.source_path {
+        -1
+      } else if a.source_path > b.source_path {
+        1
+      } else {
+        0
+      }
+    })
+    for entry in entries {
+      inspections.push(
+        @publish.inspect_registered_publication(token, http, entry),
+      )
+    }
+    if options.json {
+      @stdio.stdout.write(
+        @publish.publication_refresh_json(
+          document,
+          missing_source,
+          inspections,
+        ) + "\n",
+      )
+      return
+    }
+    for index = 0; index < entries.length(); index = index + 1 {
+      let entry = entries[index]
+      let inspection = match entry.document_id {
+        Some(_) => Some(inspections[index])
+        None => None
+      }
+      print_publication_listing(
+        entry,
+        inspection,
+        !@fs.path_exists(entry.source_path),
+      )
+    }
+    return
+  }
+  if options.json {
+    @stdio.stdout.write(
+      @publish.publication_list_json(document, missing_source) + "\n",
+    )
+    return
+  }
+  let entries = document.entries.copy()
+  entries.sort_by(fn(a, b) {
+    if a.source_path < b.source_path {
+      -1
+    } else if a.source_path > b.source_path {
+      1
+    } else {
+      0
+    }
+  })
+  for entry in entries {
+    print_publication_listing(
+      entry,
+      None,
+      !@fs.path_exists(entry.source_path),
+    )
+  }
+}
+
+///|
+async fn move_publication(old_path : String, new_path : String) -> Unit {
+  let directory = match @registry.default_registry_directory() {
+    Ok(directory) => directory
+    Err(error) =>
+      return report_failure(
+        @publish.PublishError::Registry(error.user_message()).user_message(),
+      )
+  }
+  // Publications are keyed by canonical absolute source paths, so resolve the
+  // typed paths before touching the registry. The old file may be absent
+  // (the reassociation case); canonical_source_path keeps typed paths then.
+  let canonical_old = @registry.canonical_source_path(old_path)
+  let canonical_new = @registry.canonical_source_path(new_path)
+  match @registry.reassociate_publication(
+    directory,
+    canonical_old,
+    canonical_new,
+  ) {
+    Ok(_) =>
+      @stdio.stdout.write(
+        "moved Publication: " + canonical_old + " -> " + canonical_new + "\n",
+      )
+    Err(error) =>
+      report_failure(
+        @publish.PublishError::Registry(error.user_message()).user_message(),
+      )
+  }
+}
+
+///|
+async fn forget_publication(path : String) -> Unit {
+  let directory = match @registry.default_registry_directory() {
+    Ok(directory) => directory
+    Err(error) =>
+      return report_failure(
+        @publish.PublishError::Registry(error.user_message()).user_message(),
+      )
+  }
+  let canonical = @registry.canonical_source_path(path)
+  match @registry.forget_publication(directory, canonical) {
+    Ok(true) =>
+      @stdio.stdout.write("forgotten Publication: " + canonical + "\n")
+    Ok(false) =>
+      @stdio.stdout.write("no Publication found for " + canonical + "\n")
+    Err(error) =>
+      report_failure(
+        @publish.PublishError::Registry(error.user_message()).user_message(),
+      )
+  }
+}
+
+///|
+async fn main {
+  match @args.parse_command(@env.args()) {
+    Ok(@args.Command::Publish(path, authorization, dry_run)) =>
+      publish_file(path, authorization, dry_run)
+    Ok(@args.Command::List(options)) => list_publications(options)
+    Ok(@args.Command::Move(old_path, new_path)) =>
+      move_publication(old_path, new_path)
+    Ok(@args.Command::Forget(path)) => forget_publication(path)
+    Ok(@args.Command::AuthSetup(client_file, store)) =>
+      auth_setup(client_file, store)
+    Ok(@args.Command::AuthStatus(store)) =>
+      report_project_authorization_status(store)
+    Ok(@args.Command::AuthLogout(store)) => logout_project_authorization(store)
+    Err(message) => report_failure(message)
   }
 }
 
@@ -849,19 +1226,5 @@ async fn logout_project_authorization(
         @authorization.ProjectAuthorizationError::StorageUnavailable,
         resolved.selection,
       )
-  }
-}
-
-///|
-async fn main {
-  match @args.parse_command(@env.args()) {
-    Ok(@args.Command::Publish(path, authorization)) =>
-      publish_file(path, authorization)
-    Ok(@args.Command::AuthSetup(client_file, store)) =>
-      auth_setup(client_file, store)
-    Ok(@args.Command::AuthStatus(store)) =>
-      report_project_authorization_status(store)
-    Ok(@args.Command::AuthLogout(store)) => logout_project_authorization(store)
-    Err(message) => report_failure(message)
   }
 }

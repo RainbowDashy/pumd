@@ -100,6 +100,60 @@ priv struct CreatedDocumentResponse {
 } derive(@json.FromJson)
 
 ///|
+/// A created Google Document and its initially managed tab.
+pub(all) struct CreatedDocument {
+  document_id : String
+  managed_tab_id : String
+}
+
+///|
+/// The small tab-aware document read model needed by publication inspection.
+pub(all) struct RemoteDocumentView {
+  document_id : String
+  title : String?
+  tab_ids : Array[String]
+}
+
+///|
+/// The Drive file properties needed to determine whether a publication remains usable.
+pub(all) struct DriveFileView {
+  document_id : String
+  name : String?
+  trashed : Bool
+  can_edit : Bool?
+}
+
+///|
+priv struct DocumentTabPropertiesResponse {
+  tabId : String
+} derive(@json.FromJson)
+
+///|
+priv struct DocumentTabResponse {
+  tabProperties : DocumentTabPropertiesResponse?
+} derive(@json.FromJson)
+
+///|
+priv struct TabbedDocumentResponse {
+  documentId : String
+  title : String?
+  tabs : Array[DocumentTabResponse]?
+} derive(@json.FromJson)
+
+///|
+priv struct DriveCapabilitiesResponse {
+  canEdit : Bool?
+} derive(@json.FromJson)
+
+///|
+priv struct DriveFileResponse {
+  id : String
+  name : String?
+  trashed : Bool?
+  capabilities : DriveCapabilitiesResponse?
+} derive(@json.FromJson)
+
+///|
 priv struct LegacyGoogleErrorReason {
   reason : String
 } derive(@json.FromJson)
@@ -879,6 +933,74 @@ pub async fn create_document(
 }
 
 ///|
+/// Create a document and retain the first tab as its Managed Tab.
+pub async fn create_document_with_managed_tab(
+  client : @google_core.GoogleClient,
+  title : String,
+) -> Result[CreatedDocument, DocsAdapterError] {
+  let body = StringBuilder::new()
+  body.write_string("{\"title\":")
+  write_json_string(title, body)
+  body.write_char('}')
+  let response = send_post(
+    client,
+    "https://docs.googleapis.com/v1/documents",
+    body.to_string(),
+  )
+  let decoded = match response {
+    Ok(response) => {
+      let document = @json.parse(response.body) catch {
+        error => return Err(AdapterDecode(error.to_string()))
+      }
+      let decoded : TabbedDocumentResponse = @json.from_json(document) catch {
+        error => return Err(AdapterDecode(error.to_string()))
+      }
+      decoded
+    }
+    Err(error) => return Err(error)
+  }
+  if decoded.documentId.is_empty() {
+    return Err(
+      AdapterDecode("Google Docs create response has an empty documentId"),
+    )
+  }
+  match decoded.tabs {
+    Some(tabs) =>
+      match first_managed_tab(tabs) {
+        Some(tab_id) =>
+          Ok({ document_id: decoded.documentId, managed_tab_id: tab_id })
+        None => resolve_managed_tab(client, decoded.documentId)
+      }
+    None => resolve_managed_tab(client, decoded.documentId)
+  }
+}
+
+///|
+fn first_managed_tab(tabs : Array[DocumentTabResponse]) -> String? {
+  for tab in tabs {
+    match tab.tabProperties {
+      Some(properties) if !properties.tabId.is_empty() =>
+        return Some(properties.tabId)
+      _ => ()
+    }
+  }
+  None
+}
+
+///|
+async fn resolve_managed_tab(
+  client : @google_core.GoogleClient,
+  document_id : String,
+) -> Result[CreatedDocument, DocsAdapterError] {
+  match get_document_view(client, document_id) {
+    Ok(view) if !view.tab_ids.is_empty() =>
+      Ok({ document_id, managed_tab_id: view.tab_ids[0] })
+    Ok(_) => Err(AdapterDecode("created document has no managed tab"))
+    Err(error) => Err(error)
+  }
+}
+
+///|
 pub async fn batch_update_document(
   client : @google_core.GoogleClient,
   document_id : String,
@@ -927,6 +1049,87 @@ pub async fn get_document(
       } else {
         Ok({ document_id: decoded.documentId, body: response.body })
       }
+    }
+    Err(error) => Err(error)
+  }
+}
+
+///|
+/// Retrieve a document's identity, title, and tab identifiers.
+pub async fn get_document_view(
+  client : @google_core.GoogleClient,
+  document_id : String,
+) -> Result[RemoteDocumentView, DocsAdapterError] {
+  let response = send_get(
+    client,
+    "https://docs.googleapis.com/v1/documents/" +
+    document_id +
+    "?includeTabsContent=true",
+  )
+  match response {
+    Ok(response) => {
+      let document = @json.parse(response.body) catch {
+        error => return Err(AdapterDecode(error.to_string()))
+      }
+      let decoded : TabbedDocumentResponse = @json.from_json(document) catch {
+        error => return Err(AdapterDecode(error.to_string()))
+      }
+      if decoded.documentId.is_empty() {
+        return Err(
+          AdapterDecode("Google Docs get response has an empty documentId"),
+        )
+      }
+      let tab_ids = []
+      match decoded.tabs {
+        Some(tabs) =>
+          for tab in tabs {
+            match tab.tabProperties {
+              Some(properties) if !properties.tabId.is_empty() =>
+                tab_ids.push(properties.tabId)
+              _ => ()
+            }
+          }
+        None => ()
+      }
+      Ok({ document_id: decoded.documentId, title: decoded.title, tab_ids })
+    }
+    Err(error) => Err(error)
+  }
+}
+
+///|
+/// Retrieve the Drive properties relevant to publication inspection.
+pub async fn get_drive_file(
+  client : @google_core.GoogleClient,
+  document_id : String,
+) -> Result[DriveFileView, DocsAdapterError] {
+  let response = send_get(
+    client,
+    "https://www.googleapis.com/drive/v3/files/" +
+    document_id +
+    "?fields=id,name,trashed,capabilities(canEdit)",
+  )
+  match response {
+    Ok(response) => {
+      let file = @json.parse(response.body) catch {
+        error => return Err(AdapterDecode(error.to_string()))
+      }
+      let decoded : DriveFileResponse = @json.from_json(file) catch {
+        error => return Err(AdapterDecode(error.to_string()))
+      }
+      if decoded.id.is_empty() {
+        return Err(AdapterDecode("Google Drive get response has an empty id"))
+      }
+      let can_edit = match decoded.capabilities {
+        Some(capabilities) => capabilities.canEdit
+        None => None
+      }
+      Ok({
+        document_id: decoded.id,
+        name: decoded.name,
+        trashed: decoded.trashed.unwrap_or(false),
+        can_edit,
+      })
     }
     Err(error) => Err(error)
   }

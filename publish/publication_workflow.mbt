@@ -1,0 +1,702 @@
+///|
+/// Result of a registry-aware publish operation.
+pub(all) enum PublishOutcome {
+  Completed(PublishSuccess)
+  AlreadyPublished(PublishSuccess, String)
+  DryRunCreation(title~ : String)
+  DryRunInspection(inspection~ : DryRunInspection)
+  DryRunProvisional(PublishSuccess)
+  DryRunBlocked(source_path~ : String)
+} derive(@debug.Debug)
+
+///|
+/// The remote state reported by a dry-run of an existing Publication.
+pub(all) struct DryRunInspection {
+  document_id : String
+  url : String
+  title : String?
+  managed_tab_present : Bool
+} derive(@debug.Debug)
+
+///|
+/// The state of a registered document observed through Drive and Docs.
+pub(all) enum RemotePublicationStatus {
+  Ready
+  Trashed
+  ReadOnly
+  RemoteMissing
+  Inaccessible
+  Unavailable
+} derive(Eq, @debug.Debug)
+
+///|
+/// A remote inspection suitable for `pumd list --refresh`.
+pub(all) struct RemotePublicationInspection {
+  document_id : String
+  url : String
+  title : String?
+  trashed : Bool
+  editable : Bool?
+  managed_tab_present : Bool
+  status : RemotePublicationStatus
+} derive(@debug.Debug)
+
+///|
+async fn selected_token(
+  authorization_mode : AuthorizationMode,
+  get_project_token : async () -> Result[String, AuthenticationProblem],
+  get_adc_token : async () -> Result[String, AuthenticationProblem],
+) -> Result[String, AuthenticationProblem] {
+  match authorization_mode {
+    Project | Ephemeral => get_project_token()
+    Adc => get_adc_token()
+  }
+}
+
+///|
+fn authentication_error(
+  authorization_mode : AuthorizationMode,
+  problem : AuthenticationProblem,
+) -> PublishError {
+  Authentication(authorization_mode~, problem~, created_document=None)
+}
+
+///|
+fn success_from_entry(entry : @registry.PublicationEntry) -> PublishSuccess {
+  let document_id = match entry.document_id {
+    Some(value) => value
+    None => abort("registry entry has no document ID")
+  }
+  let url = match entry.url {
+    Some(value) => value
+    None => abort("registry entry has no URL")
+  }
+  { document_id, url }
+}
+
+///|
+fn population_error(
+  authorization_mode : AuthorizationMode,
+  success : PublishSuccess,
+  error : DocsAdapterError,
+) -> PublishError {
+  match error {
+    AdapterTransport(_) => AmbiguousPopulation(success)
+    AdapterHttpStatus(status~, kind~) =>
+      match
+        classified_google_error(
+          authorization_mode,
+          DocumentPopulation,
+          kind,
+          Some(success),
+        ) {
+        Some(error) => error
+        None =>
+          Population(
+            created_document=success,
+            message=AdapterHttpStatus(status~, kind~).message(),
+          )
+      }
+    AdapterDecode(message) =>
+      ResponseDecode(
+        stage=DocumentPopulation,
+        message~,
+        created_document=Some(success),
+      )
+  }
+}
+
+///|
+fn read_error(
+  authorization_mode : AuthorizationMode,
+  document_id : String,
+  url : String,
+  error : DocsAdapterError,
+) -> PublishError {
+  match error {
+    AdapterHttpStatus(status=404, ..) => RemoteMissing(document_id~, url~)
+    AdapterHttpStatus(kind=Some(PermissionDenied), ..) =>
+      Permission(authorization_mode~, stage=DocumentRead, created_document=None)
+    AdapterHttpStatus(kind=Some(Throttled), ..) =>
+      Throttled(stage=DocumentRead, created_document=None)
+    AdapterHttpStatus(kind=Some(Unauthenticated), ..) =>
+      Authentication(
+        authorization_mode~,
+        problem=CredentialsRejected,
+        created_document=None,
+      )
+    _ => Read(document_id~, url~, message=error.message())
+  }
+}
+
+///|
+fn registry_error(error : @registry.RegistryError) -> PublishError {
+  Registry(error.user_message())
+}
+
+///|
+/// Publish a Markdown source through the local Publication Registry.
+pub async fn publish_path_with_registry(
+  path : String,
+  read_source : async (String) -> Result[String, String],
+  registry_directory : String,
+  authorization_mode : AuthorizationMode,
+  get_project_token : async () -> Result[String, AuthenticationProblem],
+  get_adc_token : async () -> Result[String, AuthenticationProblem],
+  http : &@google_http.HttpClient,
+  dry_run : Bool,
+) -> Result[PublishOutcome, PublishError] {
+  let prepared = match prepare_publication_path(path, read_source) {
+    Ok(prepared) => prepared
+    Err(error) => return Err(error)
+  }
+  publish_prepared_with_registry(
+    prepared, path, registry_directory, authorization_mode, get_project_token, get_adc_token,
+    http, dry_run,
+  )
+}
+
+///|
+/// Publish an already prepared document through the local Publication Registry.
+pub async fn publish_prepared_with_registry(
+  prepared : PreparedPublication,
+  source_path : String,
+  registry_directory : String,
+  authorization_mode : AuthorizationMode,
+  get_project_token : async () -> Result[String, AuthenticationProblem],
+  get_adc_token : async () -> Result[String, AuthenticationProblem],
+  http : &@google_http.HttpClient,
+  dry_run : Bool,
+) -> Result[PublishOutcome, PublishError] {
+  let canonical = @registry.canonical_source_path(source_path)
+  if dry_run {
+    // Read-only inspection: loading without the lock keeps dry-run free of
+    // every registry mutation, including lock-file and directory creation.
+    let document = match @registry.load_registry_document(registry_directory) {
+      Ok(document) => document
+      Err(error) => return Err(registry_error(error))
+    }
+    match @registry.publication_for_source(document, canonical) {
+      None => Ok(DryRunCreation(title=prepared.title))
+      Some(entry) =>
+        match entry.lifecycle {
+          Blocked => Ok(DryRunBlocked(source_path=canonical))
+          Provisional => Ok(DryRunProvisional(success_from_entry(entry)))
+          Ready => {
+            let success = success_from_entry(entry)
+            let token = match
+              selected_token(
+                authorization_mode, get_project_token, get_adc_token,
+              ) {
+              Ok(token) => token
+              Err(problem) =>
+                return Err(authentication_error(authorization_mode, problem))
+            }
+            let client = @google_core.GoogleClient::new(
+              fn() { token },
+              http=Some(http),
+            )
+            match get_document_view(client, success.document_id) {
+              Ok(view) => {
+                let managed_tab_id = match entry.managed_tab_id {
+                  Some(value) => value
+                  None => abort("invalid ready registry entry")
+                }
+                if !view.tab_ids.contains(managed_tab_id) {
+                  return Err(
+                    RemoteMissing(
+                      document_id=success.document_id,
+                      url=success.url,
+                    ),
+                  )
+                }
+                Ok(
+                  DryRunInspection(inspection={
+                    document_id: success.document_id,
+                    url: success.url,
+                    title: view.title,
+                    managed_tab_present: true,
+                  }),
+                )
+              }
+              Err(error) =>
+                Err(
+                  read_error(
+                    authorization_mode,
+                    success.document_id,
+                    success.url,
+                    error,
+                  ),
+                )
+            }
+          }
+        }
+    }
+  } else {
+    let lock = match @registry.acquire_registry_lock(registry_directory) {
+      Ok(lock) => lock
+      Err(error) => return Err(registry_error(error))
+    }
+    defer lock.release()
+    let document = match @registry.load_registry_document(registry_directory) {
+      Ok(document) => document
+      Err(error) => return Err(registry_error(error))
+    }
+    match @registry.publication_for_source(document, canonical) {
+      Some(entry) =>
+        match entry.lifecycle {
+          Ready => {
+            let timestamp = match entry.last_successful_publish {
+              Some(value) => value
+              None => abort("invalid ready registry entry")
+            }
+            Ok(AlreadyPublished(success_from_entry(entry), timestamp))
+          }
+          Blocked => Err(BlockedPublication(source_path=canonical))
+          Provisional => {
+            let success = success_from_entry(entry)
+            let token = match
+              selected_token(
+                authorization_mode, get_project_token, get_adc_token,
+              ) {
+              Ok(token) => token
+              Err(problem) =>
+                return Err(authentication_error(authorization_mode, problem))
+            }
+            let client = @google_core.GoogleClient::new(
+              fn() { token },
+              http=Some(http),
+            )
+            match
+              batch_update_document(client, success.document_id, prepared.plan) {
+              Ok(_) => {
+                let updated = match
+                  @registry.document_with_ready(
+                    document,
+                    canonical,
+                    prepared.document,
+                    format_unix_timestamp(current_unix_seconds()),
+                  ) {
+                  Ok(updated) => updated
+                  Err(error) => return Err(registry_error(error))
+                }
+                match
+                  @registry.save_registry_document(registry_directory, updated) {
+                  Ok(_) => Ok(Completed(success))
+                  Err(error) => Err(registry_error(error))
+                }
+              }
+              Err(error) =>
+                Err(population_error(authorization_mode, success, error))
+            }
+          }
+        }
+      None => {
+        match @registry.probe_registry_writable(registry_directory) {
+          Ok(_) => ()
+          Err(error) => return Err(registry_error(error))
+        }
+        let token = match
+          selected_token(authorization_mode, get_project_token, get_adc_token) {
+          Ok(token) => token
+          Err(problem) =>
+            return Err(authentication_error(authorization_mode, problem))
+        }
+        let client = @google_core.GoogleClient::new(
+          fn() { token },
+          http=Some(http),
+        )
+        match create_document_with_managed_tab(client, prepared.title) {
+          Ok(created) => {
+            let success : PublishSuccess = {
+              document_id: created.document_id,
+              url: canonical_document_url(created.document_id),
+            }
+            let provisional : @registry.PublicationEntry = {
+              source_path: canonical,
+              document_id: Some(created.document_id),
+              url: Some(success.url),
+              managed_tab_id: Some(created.managed_tab_id),
+              lifecycle: Provisional,
+              last_successful_publish: None,
+              published_baseline: None,
+            }
+            let provisional_document = match
+              @registry.document_with_provisional(document, provisional) {
+              Ok(value) => value
+              Err(error) => return Err(registry_error(error))
+            }
+            match
+              @registry.save_registry_document(
+                registry_directory, provisional_document,
+              ) {
+              Ok(_) => ()
+              Err(error) =>
+                return Err(
+                  Registry(
+                    "could not record the created document " +
+                    success.document_id +
+                    "; " +
+                    error.user_message(),
+                  ),
+                )
+            }
+            match
+              batch_update_document(client, success.document_id, prepared.plan) {
+              Ok(_) => {
+                let updated = match
+                  @registry.document_with_ready(
+                    provisional_document,
+                    canonical,
+                    prepared.document,
+                    format_unix_timestamp(current_unix_seconds()),
+                  ) {
+                  Ok(updated) => updated
+                  Err(error) => return Err(registry_error(error))
+                }
+                match
+                  @registry.save_registry_document(registry_directory, updated) {
+                  Ok(_) => Ok(Completed(success))
+                  Err(error) => Err(registry_error(error))
+                }
+              }
+              Err(error) =>
+                Err(population_error(authorization_mode, success, error))
+            }
+          }
+          Err(AdapterTransport(_)) => {
+            match @registry.document_with_blocked(document, canonical) {
+              Ok(blocked) =>
+                match
+                  @registry.save_registry_document(registry_directory, blocked) {
+                  Ok(_) => ()
+                  Err(error) =>
+                    return Err(
+                      Registry(
+                        "could not record blocked state for `" +
+                        canonical +
+                        "`; " +
+                        error.user_message() +
+                        " A duplicate document may exist; inspect Google Drive before retrying.",
+                      ),
+                    )
+                }
+              Err(error) => return Err(registry_error(error))
+            }
+            Err(AmbiguousCreation)
+          }
+          Err(AdapterHttpStatus(status~, kind~)) =>
+            match
+              classified_google_error(
+                authorization_mode,
+                DocumentCreation,
+                kind,
+                None,
+              ) {
+              Some(error) => Err(error)
+              None => Err(Creation(AdapterHttpStatus(status~, kind~).message()))
+            }
+          Err(AdapterDecode(message)) => {
+            match @registry.document_with_blocked(document, canonical) {
+              Ok(blocked) =>
+                match
+                  @registry.save_registry_document(registry_directory, blocked) {
+                  Ok(_) => ()
+                  Err(error) =>
+                    return Err(
+                      Registry(
+                        "could not record blocked state for `" +
+                        canonical +
+                        "`; " +
+                        error.user_message() +
+                        " A duplicate document may exist; inspect Google Drive before retrying.",
+                      ),
+                    )
+                }
+              Err(error) => return Err(registry_error(error))
+            }
+            Err(
+              ResponseDecode(
+                stage=DocumentCreation,
+                message~,
+                created_document=None,
+              ),
+            )
+          }
+        }
+      }
+    }
+  }
+}
+
+///|
+fn two_digits(value : Int) -> String {
+  if value < 10 {
+    "0" + value.to_string()
+  } else {
+    value.to_string()
+  }
+}
+
+///|
+/// Format a UTC timestamp for a successful registry commit.
+pub fn format_unix_timestamp(seconds : Int64) -> String {
+  let time = @time.ZonedDateTime::from_unix_second(seconds) catch {
+    _ => return seconds.to_string()
+  }
+  time.year().to_string() +
+  "-" +
+  two_digits(time.month()) +
+  "-" +
+  two_digits(time.day()) +
+  "T" +
+  two_digits(time.hour()) +
+  ":" +
+  two_digits(time.minute()) +
+  ":" +
+  two_digits(time.second()) +
+  "Z"
+}
+
+///|
+fn inspection_for_unavailable_entry(
+  entry : @registry.PublicationEntry,
+) -> RemotePublicationInspection {
+  {
+    document_id: "",
+    url: entry.url.unwrap_or(""),
+    title: None,
+    trashed: false,
+    editable: None,
+    managed_tab_present: false,
+    status: Unavailable,
+  }
+}
+
+///|
+fn remote_error_status(error : DocsAdapterError) -> RemotePublicationStatus {
+  match error {
+    AdapterHttpStatus(status=404, ..) => RemoteMissing
+    AdapterHttpStatus(status=403, ..)
+    | AdapterHttpStatus(kind=Some(Unauthenticated), ..) => Inaccessible
+    _ => Unavailable
+  }
+}
+
+///|
+/// Inspect a registered publication without mutating the registry or remote document.
+pub async fn inspect_registered_publication(
+  token : String,
+  http : &@google_http.HttpClient,
+  entry : @registry.PublicationEntry,
+) -> RemotePublicationInspection {
+  let document_id = match entry.document_id {
+    Some(value) => value
+    None => return inspection_for_unavailable_entry(entry)
+  }
+  let url = entry.url.unwrap_or(canonical_document_url(document_id))
+  let client = @google_core.GoogleClient::new(fn() { token }, http=Some(http))
+  let drive = match get_drive_file(client, document_id) {
+    Ok(view) => view
+    Err(error) =>
+      return {
+        document_id,
+        url,
+        title: None,
+        trashed: false,
+        editable: None,
+        managed_tab_present: false,
+        status: remote_error_status(error),
+      }
+  }
+  if drive.trashed {
+    return {
+      document_id,
+      url,
+      title: drive.name,
+      trashed: true,
+      editable: drive.can_edit,
+      managed_tab_present: false,
+      status: Trashed,
+    }
+  }
+  let docs = match get_document_view(client, document_id) {
+    Ok(view) => view
+    Err(error) =>
+      return {
+        document_id,
+        url,
+        title: drive.name,
+        trashed: false,
+        editable: drive.can_edit,
+        managed_tab_present: false,
+        status: remote_error_status(error),
+      }
+  }
+  let managed_tab_present = match entry.managed_tab_id {
+    Some(tab_id) => docs.tab_ids.contains(tab_id)
+    None => false
+  }
+  let title = match docs.title {
+    Some(value) => Some(value)
+    None => drive.name
+  }
+  let status = if !managed_tab_present {
+    RemotePublicationStatus::RemoteMissing
+  } else {
+    match drive.can_edit {
+      Some(false) => ReadOnly
+      _ => Ready
+    }
+  }
+  {
+    document_id,
+    url,
+    title,
+    trashed: false,
+    editable: drive.can_edit,
+    managed_tab_present,
+    status,
+  }
+}
+
+fn write_optional_string(value : String?, output : StringBuilder) -> Unit {
+  match value {
+    Some(value) => write_json_string(value, output)
+    None => output.write_string("null")
+  }
+}
+
+///|
+fn write_optional_bool(value : Bool?, output : StringBuilder) -> Unit {
+  match value {
+    Some(value) => output.write_string(value.to_string())
+    None => output.write_string("null")
+  }
+}
+
+///|
+fn lifecycle_name(lifecycle : @registry.PublicationLifecycle) -> String {
+  match lifecycle {
+    Ready => "ready"
+    Provisional => "provisional"
+    Blocked => "blocked"
+  }
+}
+
+///|
+fn remote_status_name(status : RemotePublicationStatus) -> String {
+  match status {
+    Ready => "ready"
+    Trashed => "trashed"
+    ReadOnly => "read-only"
+    RemoteMissing => "remote-missing"
+    Inaccessible => "inaccessible"
+    Unavailable => "unavailable"
+  }
+}
+
+///|
+fn write_publication(
+  entry : @registry.PublicationEntry,
+  missing_source : (String) -> Bool,
+  inspection : RemotePublicationInspection?,
+  output : StringBuilder,
+) -> Unit {
+  output.write_string("{\"source_path\":")
+  write_json_string(entry.source_path, output)
+  output.write_string(",\"document_id\":")
+  write_optional_string(entry.document_id, output)
+  output.write_string(",\"url\":")
+  write_optional_string(entry.url, output)
+  output.write_string(",\"managed_tab_id\":")
+  write_optional_string(entry.managed_tab_id, output)
+  output.write_string(",\"lifecycle\":")
+  write_json_string(lifecycle_name(entry.lifecycle), output)
+  output.write_string(",\"last_successful_publish\":")
+  write_optional_string(entry.last_successful_publish, output)
+  output.write_string(",\"source_missing\":")
+  output.write_string(missing_source(entry.source_path).to_string())
+  match inspection {
+    Some(inspection) => {
+      output.write_string(",\"title\":")
+      write_optional_string(inspection.title, output)
+      output.write_string(",\"editable\":")
+      write_optional_bool(inspection.editable, output)
+      output.write_string(",\"remote_status\":")
+      write_json_string(remote_status_name(inspection.status), output)
+    }
+    None => ()
+  }
+  output.write_char('}')
+}
+
+///|
+fn sorted_entries(
+  document : @registry.RegistryDocument,
+) -> Array[@registry.PublicationEntry] {
+  let entries = document.entries.copy()
+  entries.sort_by(fn(a, b) {
+    if a.source_path < b.source_path {
+      -1
+    } else if a.source_path > b.source_path {
+      1
+    } else {
+      0
+    }
+  })
+  entries
+}
+
+///|
+/// Render the stable machine JSON contract for local registry listing.
+pub fn publication_list_json(
+  document : @registry.RegistryDocument,
+  missing_source : (String) -> Bool,
+) -> String {
+  let output = StringBuilder::new()
+  output.write_string("{\"version\":1,\"publications\":[")
+  let mut first = true
+  for entry in sorted_entries(document) {
+    if !first {
+      output.write_char(',')
+    }
+    first = false
+    write_publication(entry, missing_source, None, output)
+  }
+  output.write_string("]}")
+  output.to_string()
+}
+
+///|
+/// Render the stable machine JSON contract enriched with remote inspections.
+pub fn publication_refresh_json(
+  document : @registry.RegistryDocument,
+  missing_source : (String) -> Bool,
+  inspections : Array[RemotePublicationInspection],
+) -> String {
+  let output = StringBuilder::new()
+  output.write_string("{\"version\":1,\"publications\":[")
+  let mut first = true
+  for entry in sorted_entries(document) {
+    if !first {
+      output.write_char(',')
+    }
+    first = false
+    let inspection = match entry.document_id {
+      Some(document_id) => {
+        let mut found = None
+        for candidate in inspections {
+          if candidate.document_id == document_id {
+            found = Some(candidate)
+          }
+        }
+        found
+      }
+      None => None
+    }
+    write_publication(entry, missing_source, inspection, output)
+  }
+  output.write_string("]}")
+  output.to_string()
+}

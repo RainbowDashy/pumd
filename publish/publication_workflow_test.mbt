@@ -1,0 +1,718 @@
+///|
+/// A deterministic injected transport for registry workflow tests.
+priv struct WorkflowFakeHttpClient {
+  requests : Array[@google_http.HttpRequest]
+  responses : Array[@google_http.HttpResponse]
+}
+
+///|
+impl @google_http.HttpClient for WorkflowFakeHttpClient with fn request(
+  self,
+  request,
+) {
+  let index = self.requests.length()
+  self.requests.push(request)
+  self.responses[index]
+}
+
+///|
+priv struct WorkflowNetworkFailureClient {
+  requests : Array[@google_http.HttpRequest]
+}
+
+///|
+impl @google_http.HttpClient for WorkflowNetworkFailureClient with fn request(
+  self,
+  request,
+) {
+  self.requests.push(request)
+  raise @google_http.HttpError::NetworkError("deterministic network failure")
+}
+
+///|
+fn workflow_directory(name : String) -> String {
+  "_build/publication-workflow-" + name
+}
+
+///|
+async fn clean_workflow_directory(directory : String) -> Unit {
+  @async_fs.rmdir(directory, recursive=true) catch {
+    _ => ()
+  }
+}
+
+///|
+fn create_response(id : String, tab : String) -> @google_http.HttpResponse {
+  @google_http.HttpResponse::new(
+    200,
+    {},
+    "{\"documentId\":\"" +
+    id +
+    "\",\"tabs\":[{\"tabProperties\":{\"tabId\":\"" +
+    tab +
+    "\"}}]}",
+  )
+}
+
+///|
+fn success_response() -> @google_http.HttpResponse {
+  @google_http.HttpResponse::new(200, {}, "{}")
+}
+
+///|
+fn ready_entry(
+  path : String,
+  id : String,
+  tab : String,
+) -> @registry.PublicationEntry {
+  {
+    source_path: path,
+    document_id: Some(id),
+    url: Some(canonical_document_url(id)),
+    managed_tab_id: Some(tab),
+    lifecycle: Provisional,
+    last_successful_publish: None,
+    published_baseline: None,
+  }
+}
+
+///|
+fn hello_document() -> @pumd.DesiredDocument {
+  match @pumd.render_markdown("Hello") {
+    Ok(document) => document
+    Err(_) => abort("Hello must render")
+  }
+}
+
+///|
+async fn seed_ready(
+  directory : String,
+  path : String,
+  id : String,
+  tab : String,
+) -> Unit {
+  let canonical = @registry.canonical_source_path(path)
+  assert_eq(
+    @registry.register_provisional_publication(
+      directory,
+      ready_entry(canonical, id, tab),
+    ),
+    Ok(()),
+  )
+  assert_eq(
+    @registry.commit_ready_publication(
+      directory,
+      canonical,
+      hello_document(),
+      "2026-08-05T12:00:00Z",
+    ),
+    Ok(()),
+  )
+}
+
+///|
+/// The first publish records provisional ownership before filling its Managed Tab.
+async test "registry first publish records baseline after population" {
+  let directory = workflow_directory("first")
+  clean_workflow_directory(directory)
+  let fake = WorkflowFakeHttpClient::{
+    requests: [],
+    responses: [create_response("first-doc", "tab-1"), success_response()],
+  }
+  let result = publish_path_with_registry(
+    "proposal.md",
+    fn(_) { Ok("Hello") },
+    directory,
+    Adc,
+    fn() { Ok("project") },
+    fn() { Ok("adc") },
+    fake,
+    false,
+  )
+  guard result is Ok(Completed(success)) else {
+    fail("first publication must complete")
+  }
+  inspect(success.document_id, content="first-doc")
+  assert_eq(fake.requests.length(), 2)
+  inspect(
+    fake.requests[0].url,
+    content="https://docs.googleapis.com/v1/documents",
+  )
+  inspect(
+    fake.requests[1].url,
+    content="https://docs.googleapis.com/v1/documents/first-doc:batchUpdate",
+  )
+  guard @registry.load_registry_document(directory) is Ok(document) else {
+    fail("registry must load")
+  }
+  let entry = document.entries[0]
+  assert_eq(entry.lifecycle, Ready)
+  assert_eq(entry.managed_tab_id, Some("tab-1"))
+  guard entry.last_successful_publish is Some(timestamp) else {
+    fail("ready entry needs timestamp")
+  }
+  assert_eq(timestamp.length(), 20)
+  assert_true(timestamp.has_suffix("Z"))
+  assert_eq(timestamp[4], '-')
+  assert_eq(timestamp[7], '-')
+  assert_eq(timestamp[10], 'T')
+  assert_eq(timestamp[13], ':')
+  assert_eq(timestamp[16], ':')
+  guard entry.published_baseline is Some(baseline) else {
+    fail("ready entry needs baseline")
+  }
+  assert_eq(@debug.to_string(baseline), @debug.to_string(hello_document()))
+  clean_workflow_directory(directory)
+}
+
+///|
+/// A failed population resumes the recorded provisional document without creating another.
+async test "registry resumes provisional population" {
+  let directory = workflow_directory("resume")
+  clean_workflow_directory(directory)
+  let first = WorkflowFakeHttpClient::{
+    requests: [],
+    responses: [
+      create_response("resume-doc", "tab-r"),
+      @google_http.HttpResponse::new(500, {}, "{}"),
+    ],
+  }
+  guard publish_path_with_registry(
+      "resume.md",
+      fn(_) { Ok("Hello") },
+      directory,
+      Adc,
+      fn() { Ok("p") },
+      fn() { Ok("a") },
+      first,
+      false,
+    )
+    is Err(Population(..)) else {
+    fail("population failure must surface")
+  }
+  guard @registry.load_registry_document(directory) is Ok(before) else {
+    fail("registry must load")
+  }
+  assert_eq(before.entries[0].lifecycle, Provisional)
+  let resumed = WorkflowFakeHttpClient::{
+    requests: [],
+    responses: [success_response()],
+  }
+  guard publish_path_with_registry(
+      "resume.md",
+      fn(_) { Ok("Hello") },
+      directory,
+      Adc,
+      fn() { Ok("p") },
+      fn() { Ok("a") },
+      resumed,
+      false,
+    )
+    is Ok(Completed(_)) else {
+    fail("provisional must resume")
+  }
+  assert_eq(resumed.requests.length(), 1)
+  assert_true(resumed.requests[0].url.contains("resume-doc:batchUpdate"))
+  guard @registry.load_registry_document(directory) is Ok(after) else {
+    fail("registry must load")
+  }
+  assert_eq(after.entries[0].lifecycle, Ready)
+  clean_workflow_directory(directory)
+}
+
+///|
+/// An ambiguous creation blocks a source until the user explicitly forgets it.
+async test "ambiguous creation records blocked publication" {
+  let directory = workflow_directory("blocked")
+  clean_workflow_directory(directory)
+  let broken = WorkflowNetworkFailureClient::{ requests: [] }
+  guard publish_path_with_registry(
+      "blocked.md",
+      fn(_) { Ok("Hello") },
+      directory,
+      Adc,
+      fn() { Ok("p") },
+      fn() { Ok("a") },
+      broken,
+      false,
+    )
+    is Err(AmbiguousCreation) else {
+    fail("network creation must be ambiguous")
+  }
+  guard @registry.load_registry_document(directory) is Ok(document) else {
+    fail("registry must load")
+  }
+  assert_eq(document.entries[0].lifecycle, Blocked)
+  let blocked_canonical = @registry.canonical_source_path("blocked.md")
+  let healthy = WorkflowFakeHttpClient::{
+    requests: [],
+    responses: [create_response("new-doc", "tab-n"), success_response()],
+  }
+  guard publish_path_with_registry(
+      "blocked.md",
+      fn(_) { Ok("Hello") },
+      directory,
+      Adc,
+      fn() { Ok("p") },
+      fn() { Ok("a") },
+      healthy,
+      false,
+    )
+    is Err(BlockedPublication(_)) else {
+    fail("blocked publication must fail closed")
+  }
+  assert_eq(healthy.requests.length(), 0)
+  assert_eq(
+    @registry.forget_publication(directory, blocked_canonical),
+    Ok(true),
+  )
+  guard publish_path_with_registry(
+      "blocked.md",
+      fn(_) { Ok("Hello") },
+      directory,
+      Adc,
+      fn() { Ok("p") },
+      fn() { Ok("a") },
+      healthy,
+      false,
+    )
+    is Ok(Completed(success)) else {
+    fail("forgotten publication must publish")
+  }
+  inspect(success.document_id, content="new-doc")
+  clean_workflow_directory(directory)
+}
+
+///|
+async test "ready publications short circuit before token and HTTP" {
+  let directory = workflow_directory("already")
+  clean_workflow_directory(directory)
+  seed_ready(directory, "already.md", "old-doc", "old-tab")
+  let calls : Array[Unit] = []
+  let fake = WorkflowFakeHttpClient::{ requests: [], responses: [] }
+  guard publish_path_with_registry(
+      "already.md",
+      fn(_) { Ok("Hello") },
+      directory,
+      Adc,
+      fn() {
+        calls.push(())
+        Ok("p")
+      },
+      fn() {
+        calls.push(())
+        Ok("a")
+      },
+      fake,
+      false,
+    )
+    is Ok(AlreadyPublished(success, "2026-08-05T12:00:00Z")) else {
+    fail("ready entry must short circuit")
+  }
+  inspect(success.document_id, content="old-doc")
+  assert_eq(calls.length(), 0)
+  assert_eq(fake.requests.length(), 0)
+  clean_workflow_directory(directory)
+}
+
+///|
+async test "dry run distinguishes unpublished provisional blocked and ready entries" {
+  let directory = workflow_directory("dry")
+  clean_workflow_directory(directory)
+  let calls : Array[Unit] = []
+  let empty = WorkflowFakeHttpClient::{ requests: [], responses: [] }
+  guard publish_path_with_registry(
+      "new.md",
+      fn(_) { Ok("Hello") },
+      directory,
+      Adc,
+      fn() {
+        calls.push(())
+        Ok("p")
+      },
+      fn() {
+        calls.push(())
+        Ok("a")
+      },
+      empty,
+      true,
+    )
+    is Ok(DryRunCreation(title="new")) else {
+    fail("new dry run must report creation")
+  }
+  assert_eq(calls.length(), 0)
+  assert_eq(empty.requests.length(), 0)
+  // A dry run on a clean installation must not create the registry directory,
+  // the registry file, or the lock file.
+  assert_true(!@async_fs.exists(directory))
+  assert_true(!@async_fs.exists(@registry.registry_lock_path(directory)))
+  assert_true(!@async_fs.exists(@registry.registry_file_path(directory)))
+  let provisional_canonical = @registry.canonical_source_path("provisional.md")
+  let blocked_canonical = @registry.canonical_source_path("blocked.md")
+  assert_eq(
+    @registry.register_provisional_publication(
+      directory,
+      ready_entry(provisional_canonical, "pro-doc", "pro-tab"),
+    ),
+    Ok(()),
+  )
+  assert_eq(
+    @registry.record_blocked_publication(directory, blocked_canonical),
+    Ok(()),
+  )
+  guard publish_path_with_registry(
+      "provisional.md",
+      fn(_) { Ok("Hello") },
+      directory,
+      Adc,
+      fn() { Ok("p") },
+      fn() { Ok("a") },
+      empty,
+      true,
+    )
+    is Ok(DryRunProvisional(_)) else {
+    fail("provisional dry run")
+  }
+  guard publish_path_with_registry(
+      "blocked.md",
+      fn(_) { Ok("Hello") },
+      directory,
+      Adc,
+      fn() { Ok("p") },
+      fn() { Ok("a") },
+      empty,
+      true,
+    )
+    is Ok(DryRunBlocked(_)) else {
+    fail("blocked dry run")
+  }
+  seed_ready(directory, "ready.md", "ready-doc", "ready-tab")
+  let docs = WorkflowFakeHttpClient::{
+    requests: [],
+    responses: [
+      @google_http.HttpResponse::new(
+        200,
+        {},
+        "{\"documentId\":\"ready-doc\",\"title\":\"Reviewer title\",\"tabs\":[{\"tabProperties\":{\"tabId\":\"ready-tab\"}}]}",
+      ),
+    ],
+  }
+  guard publish_path_with_registry(
+      "ready.md",
+      fn(_) { Ok("Hello") },
+      directory,
+      Adc,
+      fn() { Ok("p") },
+      fn() { Ok("a") },
+      docs,
+      true,
+    )
+    is Ok(DryRunInspection(inspection~)) else {
+    fail("ready dry run inspection")
+  }
+  assert_eq(inspection.title, Some("Reviewer title"))
+  assert_true(inspection.managed_tab_present)
+  assert_eq(docs.requests.length(), 1)
+  assert_true(
+    docs.requests[0].url.contains("ready-doc?includeTabsContent=true"),
+  )
+  clean_workflow_directory(directory)
+}
+
+///|
+async test "dry run maps missing tabs permission and 404 without mutations" {
+  let directory = workflow_directory("dry-errors")
+  clean_workflow_directory(directory)
+  seed_ready(directory, "ready.md", "doc", "tab")
+  let missing_tab = WorkflowFakeHttpClient::{
+    requests: [],
+    responses: [
+      @google_http.HttpResponse::new(
+        200,
+        {},
+        "{\"documentId\":\"doc\",\"tabs\":[]}",
+      ),
+    ],
+  }
+  guard publish_path_with_registry(
+      "ready.md",
+      fn(_) { Ok("Hello") },
+      directory,
+      Adc,
+      fn() { Ok("p") },
+      fn() { Ok("a") },
+      missing_tab,
+      true,
+    )
+    is Err(RemoteMissing(..)) else {
+    fail("missing tab must be remote missing")
+  }
+  let forbidden = WorkflowFakeHttpClient::{
+    requests: [],
+    responses: [@google_http.HttpResponse::new(403, {}, "{}")],
+  }
+  guard publish_path_with_registry(
+      "ready.md",
+      fn(_) { Ok("Hello") },
+      directory,
+      Adc,
+      fn() { Ok("p") },
+      fn() { Ok("a") },
+      forbidden,
+      true,
+    )
+    is Err(Permission(stage=DocumentRead, ..)) else {
+    fail("403 must be DocumentRead permission")
+  }
+  let missing = WorkflowFakeHttpClient::{
+    requests: [],
+    responses: [@google_http.HttpResponse::new(404, {}, "{}")],
+  }
+  guard publish_path_with_registry(
+      "ready.md",
+      fn(_) { Ok("Hello") },
+      directory,
+      Adc,
+      fn() { Ok("p") },
+      fn() { Ok("a") },
+      missing,
+      true,
+    )
+    is Err(RemoteMissing(..)) else {
+    fail("404 must be missing")
+  }
+  clean_workflow_directory(directory)
+}
+
+///|
+async test "preflight and authentication happen before remote work" {
+  let directory = workflow_directory("preflight")
+  clean_workflow_directory(directory)
+  let fake = WorkflowFakeHttpClient::{ requests: [], responses: [] }
+  guard publish_path_with_registry(
+      "nope.md",
+      fn(_) { Err("nope") },
+      directory,
+      Adc,
+      fn() { Ok("p") },
+      fn() { Ok("a") },
+      fake,
+      false,
+    )
+    is Err(SourceAccess(..)) else {
+    fail("source error")
+  }
+  guard publish_path_with_registry(
+      "image.md",
+      fn(_) { Ok("![x](y.png)") },
+      directory,
+      Adc,
+      fn() { Ok("p") },
+      fn() { Ok("a") },
+      fake,
+      false,
+    )
+    is Err(Rendering(_)) else {
+    fail("render error")
+  }
+  assert_eq(fake.requests.length(), 0)
+  guard publish_path_with_registry(
+      "auth.md",
+      fn(_) { Ok("Hello") },
+      directory,
+      Adc,
+      fn() { Ok("p") },
+      fn() { Err(CredentialsNotConfigured) },
+      fake,
+      false,
+    )
+    is Err(Authentication(problem=CredentialsNotConfigured, ..)) else {
+    fail("authentication error")
+  }
+  assert_eq(fake.requests.length(), 0)
+  assert_true(!@async_fs.exists(@registry.registry_file_path(directory)))
+  clean_workflow_directory(directory)
+
+  let file_directory = workflow_directory("registry-file")
+  @async_fs.remove(file_directory) catch {
+    _ => ()
+  }
+  @async_fs.write_file(
+    file_directory,
+    "not a directory",
+    create_mode=@async_fs.CreateNew,
+  )
+  let token_calls : Array[Unit] = []
+  guard publish_path_with_registry(
+      "registry-file.md",
+      fn(_) { Ok("Hello") },
+      file_directory,
+      Adc,
+      fn() {
+        token_calls.push(())
+        Ok("p")
+      },
+      fn() {
+        token_calls.push(())
+        Ok("a")
+      },
+      fake,
+      false,
+    )
+    is Err(Registry(_)) else {
+    fail("registry path file must fail before authorization")
+  }
+  assert_eq(token_calls.length(), 0)
+  assert_eq(fake.requests.length(), 0)
+  @async_fs.remove(file_directory) catch {
+    _ => ()
+  }
+}
+
+///|
+async test "inspection maps Drive and Docs states" {
+  let entry = ready_entry("inspect.md", "inspect-doc", "inspect-tab")
+  let ready = WorkflowFakeHttpClient::{
+    requests: [],
+    responses: [
+      @google_http.HttpResponse::new(
+        200,
+        {},
+        "{\"id\":\"inspect-doc\",\"name\":\"Drive name\",\"trashed\":false,\"capabilities\":{\"canEdit\":true}}",
+      ),
+      @google_http.HttpResponse::new(
+        200,
+        {},
+        "{\"documentId\":\"inspect-doc\",\"title\":\"Docs name\",\"tabs\":[{\"tabProperties\":{\"tabId\":\"inspect-tab\"}}]}",
+      ),
+    ],
+  }
+  let inspection = inspect_registered_publication("token", ready, entry)
+  assert_eq(inspection.status, Ready)
+  assert_eq(inspection.title, Some("Docs name"))
+  assert_true(inspection.managed_tab_present)
+  inspect(
+    ready.requests[0].url,
+    content="https://www.googleapis.com/drive/v3/files/inspect-doc?fields=id,name,trashed,capabilities(canEdit)",
+  )
+  inspect(
+    ready.requests[1].url,
+    content="https://docs.googleapis.com/v1/documents/inspect-doc?includeTabsContent=true",
+  )
+  inspect(
+    ready.requests[0].headers.get("Authorization").unwrap(),
+    content="Bearer token",
+  )
+  let trashed = WorkflowFakeHttpClient::{
+    requests: [],
+    responses: [
+      @google_http.HttpResponse::new(
+        200,
+        {},
+        "{\"id\":\"inspect-doc\",\"trashed\":true}",
+      ),
+    ],
+  }
+  assert_eq(
+    inspect_registered_publication("token", trashed, entry).status,
+    Trashed,
+  )
+  let read_only = WorkflowFakeHttpClient::{
+    requests: [],
+    responses: [
+      @google_http.HttpResponse::new(
+        200,
+        {},
+        "{\"id\":\"inspect-doc\",\"trashed\":false,\"capabilities\":{\"canEdit\":false}}",
+      ),
+      @google_http.HttpResponse::new(
+        200,
+        {},
+        "{\"documentId\":\"inspect-doc\",\"tabs\":[{\"tabProperties\":{\"tabId\":\"inspect-tab\"}}]}",
+      ),
+    ],
+  }
+  assert_eq(
+    inspect_registered_publication("token", read_only, entry).status,
+    ReadOnly,
+  )
+  let absent_tab = WorkflowFakeHttpClient::{
+    requests: [],
+    responses: [
+      @google_http.HttpResponse::new(
+        200,
+        {},
+        "{\"id\":\"inspect-doc\",\"trashed\":false}",
+      ),
+      @google_http.HttpResponse::new(
+        200,
+        {},
+        "{\"documentId\":\"inspect-doc\",\"tabs\":[]}",
+      ),
+    ],
+  }
+  assert_eq(
+    inspect_registered_publication("token", absent_tab, entry).status,
+    RemotePublicationStatus::RemoteMissing,
+  )
+  let missing = WorkflowFakeHttpClient::{
+    requests: [],
+    responses: [@google_http.HttpResponse::new(404, {}, "{}")],
+  }
+  assert_eq(
+    inspect_registered_publication("token", missing, entry).status,
+    RemotePublicationStatus::RemoteMissing,
+  )
+  let forbidden = WorkflowFakeHttpClient::{
+    requests: [],
+    responses: [@google_http.HttpResponse::new(403, {}, "{}")],
+  }
+  assert_eq(
+    inspect_registered_publication("token", forbidden, entry).status,
+    Inaccessible,
+  )
+  let unavailable = WorkflowNetworkFailureClient::{ requests: [] }
+  assert_eq(
+    inspect_registered_publication("token", unavailable, entry).status,
+    Unavailable,
+  )
+}
+
+///|
+async test "listing JSON is deterministic and refresh adds matching inspection" {
+  let blocked : @registry.PublicationEntry = {
+    source_path: "z.md",
+    document_id: None,
+    url: None,
+    managed_tab_id: None,
+    lifecycle: Blocked,
+    last_successful_publish: None,
+    published_baseline: None,
+  }
+  let ready = ready_entry("a.md", "a-doc", "a-tab")
+  let document : @registry.RegistryDocument = { entries: [blocked, ready] }
+  assert_eq(
+    publication_list_json(document, fn(path) { path == "z.md" }),
+    "{\"version\":1,\"publications\":[{\"source_path\":\"a.md\",\"document_id\":\"a-doc\",\"url\":\"https://docs.google.com/document/d/a-doc/edit\",\"managed_tab_id\":\"a-tab\",\"lifecycle\":\"provisional\",\"last_successful_publish\":null,\"source_missing\":false},{\"source_path\":\"z.md\",\"document_id\":null,\"url\":null,\"managed_tab_id\":null,\"lifecycle\":\"blocked\",\"last_successful_publish\":null,\"source_missing\":true}]}",
+  )
+  let refreshed = publication_refresh_json(document, fn(_) { false }, [
+    {
+      document_id: "a-doc",
+      url: "ignored",
+      title: Some("Remote"),
+      trashed: false,
+      editable: Some(true),
+      managed_tab_present: true,
+      status: Ready,
+    },
+  ])
+  assert_true(refreshed.contains("\"title\":\"Remote\""))
+  assert_true(refreshed.contains("\"remote_status\":\"ready\""))
+  assert_true(!refreshed.contains("\"title\":null"))
+}
+
+///|
+test "unix timestamp uses UTC" {
+  // `date -u -r 1714227729` verifies this epoch as 2024-04-27T14:22:09Z.
+  inspect(format_unix_timestamp(1714227729L), content="2024-04-27T14:22:09Z")
+}
