@@ -108,3 +108,29 @@ test "interactive credential-store selection keeps disabled native and explicit 
   assert_true(explanation.contains("entitlement"))
   assert_false(explanation.contains("unlock"))
 }
+
+///|
+test "unavailable native credential stores give explicit no-fallback guidance" {
+  let failures = [
+    ProjectAuthorizationError::StorageMissingEntitlement,
+    ProjectAuthorizationError::StorageLocked,
+    ProjectAuthorizationError::StorageDenied,
+    ProjectAuthorizationError::StorageUnavailable,
+    ProjectAuthorizationError::UnsupportedPlatform,
+  ]
+  for failure in failures {
+    let message = native_credential_store_failure_message(failure)
+    assert_true(message.contains("did not fall back to file storage"))
+    assert_true(message.contains("--credential-store=file"))
+    assert_true(message.contains("reduced protection"))
+  }
+}
+
+///|
+test "non-storage failures retain their Project Authorization guidance" {
+  let failure = ProjectAuthorizationError::ReauthorizationRequired
+  assert_eq(
+    native_credential_store_failure_message(failure),
+    failure.user_message(),
+  )
+}

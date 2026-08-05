@@ -135,6 +135,33 @@ pub fn CredentialStoreUnavailableReason::user_message(
 }
 
 ///|
+/// Give native-vault failures actionable CLI guidance without suggesting that
+/// reduced-protection file storage was selected automatically.
+pub fn native_credential_store_failure_message(
+  error : ProjectAuthorizationError,
+) -> String {
+  let explicit_file_guidance = "pumd did not fall back to file storage; run `pumd auth setup --client-file oauth-client.json --credential-store=file` only to opt into reduced protection explicitly."
+  match error {
+    StorageMissingEntitlement =>
+      "this pumd executable lacks the entitlement required by its macOS Keychain implementation. Install a compatible build. " +
+      explicit_file_guidance
+    StorageLocked =>
+      "the native OS credential vault is locked. Unlock it, then recheck availability. " +
+      explicit_file_guidance
+    StorageDenied =>
+      "permission to use the native OS credential vault was denied. Allow pumd or correct the platform policy, then recheck availability. " +
+      explicit_file_guidance
+    StorageUnavailable =>
+      "the native OS credential-vault service, session, or collection is unavailable. Restore it, then recheck availability. " +
+      explicit_file_guidance
+    UnsupportedPlatform =>
+      "this platform has no supported native credential vault. " +
+      explicit_file_guidance
+    _ => error.user_message()
+  }
+}
+
+///|
 priv enum NativeCredentialVault {
   MacOSKeychain
   LinuxSecretService

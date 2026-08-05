@@ -311,44 +311,12 @@ async fn report_project_authorization_failure(
   error : @authorization.ProjectAuthorizationError,
   store : @args.CredentialStore,
 ) -> Unit {
-  match (error, store) {
-    (
-      @authorization.ProjectAuthorizationError::StorageMissingEntitlement,
-      @args.CredentialStore::Native,
-    ) =>
-      report_failure(
-        "this pumd executable lacks the entitlement required by its macOS Keychain implementation. Install a compatible build. pumd did not fall back to file storage; run `pumd auth setup --client-file oauth-client.json --credential-store=file` only to opt into reduced protection explicitly.",
-      )
-    (
-      @authorization.ProjectAuthorizationError::StorageLocked,
-      @args.CredentialStore::Native,
-    ) =>
-      report_failure(
-        "the native OS credential vault is locked. Unlock it, then recheck availability. pumd did not fall back to file storage; run `pumd auth setup --client-file oauth-client.json --credential-store=file` only to opt into reduced protection explicitly.",
-      )
-    (
-      @authorization.ProjectAuthorizationError::StorageDenied,
-      @args.CredentialStore::Native,
-    ) =>
-      report_failure(
-        "permission to use the native OS credential vault was denied. Allow pumd or correct the platform policy, then recheck availability. pumd did not fall back to file storage; run `pumd auth setup --client-file oauth-client.json --credential-store=file` only to opt into reduced protection explicitly.",
-      )
-    (
-      @authorization.ProjectAuthorizationError::StorageUnavailable,
-      @args.CredentialStore::Native,
-    ) =>
-      report_failure(
-        "the native OS credential-vault service, session, or collection is unavailable. Restore it, then recheck availability. pumd did not fall back to file storage; run `pumd auth setup --client-file oauth-client.json --credential-store=file` only to opt into reduced protection explicitly.",
-      )
-    (
-      @authorization.ProjectAuthorizationError::UnsupportedPlatform,
-      @args.CredentialStore::Native,
-    ) =>
-      report_failure(
-        "this platform has no supported native credential vault. pumd did not fall back to file storage; run `pumd auth setup --client-file oauth-client.json --credential-store=file` only to opt into reduced protection explicitly.",
-      )
-    _ => report_failure(error.user_message())
+  let message = match store {
+    @args.CredentialStore::Native =>
+      @authorization.native_credential_store_failure_message(error)
+    @args.CredentialStore::File => error.user_message()
   }
+  report_failure(message)
 }
 
 ///|

@@ -1,5 +1,28 @@
 ///|
-async test "credential-store preference persists only the non-secret selected identifier" {
+async fn assert_preference_round_trip(
+  preference : CredentialStorePreference,
+  directory : String,
+  identifier : CredentialStoreIdentifier,
+  expected_text : String,
+) -> Unit {
+  guard (preference.replace)(identifier) is Ok(_) else {
+    fail("the explicit credential-store choice must be persisted")
+  }
+  guard (preference.load)() is Ok(Some(loaded)) else {
+    fail("the explicit credential-store choice must round-trip")
+  }
+  assert_eq(loaded, identifier)
+  let document = @fs.read_file(directory + "/credential-store.json") catch {
+    _ => fail("the preference document must exist")
+  }
+  let text = document.text()
+  assert_true(text.contains(expected_text))
+  assert_false(text.contains("token"))
+  assert_false(text.contains("secret"))
+}
+
+///|
+async test "credential-store preference persists only the selected native or file identifier" {
   let directory = "_build/credential-store-preference"
   @fs.rmdir(directory, recursive=true) catch {
     _ => ()
@@ -8,19 +31,18 @@ async test "credential-store preference persists only the non-secret selected id
   guard (preference.load)() is Ok(None) else {
     fail("an absent preference must preserve the native default")
   }
-  guard (preference.replace)(CredentialStoreIdentifier::File) is Ok(_) else {
-    fail("the explicit file choice must be persisted")
-  }
-  guard (preference.load)() is Ok(Some(CredentialStoreIdentifier::File)) else {
-    fail("the explicit file choice must round-trip")
-  }
-  let document = @fs.read_file(directory + "/credential-store.json") catch {
-    _ => fail("the preference document must exist")
-  }
-  let text = document.text()
-  assert_true(text.contains("\"credential_store\":\"file\""))
-  assert_false(text.contains("token"))
-  assert_false(text.contains("secret"))
+  assert_preference_round_trip(
+    preference,
+    directory,
+    CredentialStoreIdentifier::File,
+    "\"credential_store\":\"file\"",
+  )
+  assert_preference_round_trip(
+    preference,
+    directory,
+    CredentialStoreIdentifier::Native,
+    "\"credential_store\":\"native\"",
+  )
   @fs.rmdir(directory, recursive=true)
 }
 
@@ -48,6 +70,17 @@ async test "remembered store resolves bare lifecycle commands while explicit sel
   guard resolve_credential_store_identifier(None, absent)
     is Ok(CredentialStoreIdentifier::Native) else {
     fail("native storage must remain the no-preference default")
+  }
+  let unavailable : CredentialStorePreference = {
+    load: fn() { Err(CredentialStorePreferenceError::Unavailable) },
+    replace: fn(_) { Ok(()) },
+  }
+  guard resolve_credential_store_identifier(
+      Some(CredentialStoreIdentifier::File),
+      unavailable,
+    )
+    is Ok(CredentialStoreIdentifier::File) else {
+    fail("an explicit override must not depend on reading the preference")
   }
 }
 
