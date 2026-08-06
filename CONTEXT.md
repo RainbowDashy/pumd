@@ -12,6 +12,14 @@ _Avoid_: Document IR, request plan, API document
 The coherent set of native formatting defaults that publishing applies to body text and supported document elements. Version one has one built-in profile.
 _Avoid_: Stylesheet, theme, template
 
+**Style Migration**:
+A native-formatting change caused by a new version of the built-in Style Profile, even when the Markdown source is unchanged. A Publication applies a Style Migration through its normal safe update flow on the next publish.
+_Avoid_: Theme upgrade, forced restyle
+
+**Syntax Highlighting**:
+Token-level foreground coloring applied to a fenced code block when its explicit language tag names a supported language. It is native editable text formatting within the code block, not embedded markup or an image.
+_Avoid_: Code rendering, language detection, colored code image
+
 **Blockquote**:
 A quoted block of Markdown content introduced by the `>` marker and published as visibly distinct native document content.
 _Avoid_: Backquote, backquote block marker
