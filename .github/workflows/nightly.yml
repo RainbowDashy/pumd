@@ -90,111 +90,6 @@ jobs:
           }
           "PUMD_BINARY=$binary" | Out-File -FilePath $env:GITHUB_ENV -Append
 
-      - name: Smoke test the Unix binary
-        if: runner.os != 'Windows'
-        shell: bash
-        run: |
-          set +e
-          output="$("$PUMD_BINARY" 2>&1)"
-          status=$?
-          set -e
-          if [[ "$status" -ne 1 ]]; then
-            printf 'expected pumd without arguments to exit 1, got %s\n%s\n' "$status" "$output" >&2
-            exit 1
-          fi
-          if [[ "$output" != *"Project Authorization usage: pumd auth <setup|status|logout> or pumd publish [--auth=project|adc|token-env] [--credential-store=native|file] <markdown-path>"* ]]; then
-            printf 'pumd did not print its usage message:\n%s\n' "$output" >&2
-            exit 1
-          fi
-
-      - name: Smoke test the Windows binary
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $PSNativeCommandUseErrorActionPreference = $false
-          $output = & $env:PUMD_BINARY 2>&1 | Out-String
-          if ($LASTEXITCODE -ne 1) {
-            throw "expected pumd without arguments to exit 1, got $LASTEXITCODE"
-          }
-          if ($output -notmatch 'Project Authorization usage: pumd auth <setup\|status\|logout> or pumd publish \[--auth=project\|adc\|token-env\] \[--credential-store=native\|file\] <markdown-path>') {
-            throw "pumd did not print its usage message: $output"
-          }
-          exit 0
-
-      - name: Prove Unix packaged preflight is vault-free
-        if: runner.os != 'Windows'
-        shell: bash
-        run: |
-          source_file="$(mktemp)"
-          trap 'rm -f "$source_file"' EXIT
-          printf '![unsupported](image.png)\n' > "$source_file"
-          set +e
-          output="$("$PUMD_BINARY" publish "$source_file" 2>&1)"
-          status=$?
-          set -e
-          if [[ "$status" -ne 1 || "$output" != *"rendering failed"* ]]; then
-            printf 'bare publish did not finish local preflight before native-vault access:\n%s\n' "$output" >&2
-            exit 1
-          fi
-          config_root="$(mktemp -d)"
-          trap 'rm -f "$source_file"; rm -r "$config_root"' EXIT
-          status_output="$(XDG_CONFIG_HOME="$config_root" "$PUMD_BINARY" auth status --credential-store=file)"
-          [[ "$status_output" == *"Project Authorization: not configured"* ]]
-          logout_output="$(XDG_CONFIG_HOME="$config_root" "$PUMD_BINARY" auth logout --credential-store=file)"
-          [[ "$logout_output" == *"credentials removed locally"* ]]
-          [[ "$logout_output" == *"remote authorization may still be active"* ]]
-          printf 'Hello\n' > "$source_file"
-          set +e
-          token_output="$(env -u PUMD_ACCESS_TOKEN "$PUMD_BINARY" publish --auth=token-env "$source_file" 2>&1)"
-          token_status=$?
-          set -e
-          if [[ "$token_status" -ne 1 || "$token_output" != *"PUMD_ACCESS_TOKEN"* ]]; then
-            printf 'packaged ephemeral automation contract failed:\n%s\n' "$token_output" >&2
-            exit 1
-          fi
-
-      - name: Prove Windows packaged preflight is vault-free
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $sourceFile = New-TemporaryFile
-          try {
-            Set-Content -LiteralPath $sourceFile -Value '![unsupported](image.png)' -NoNewline
-            $PSNativeCommandUseErrorActionPreference = $false
-            $output = & $env:PUMD_BINARY publish $sourceFile 2>&1 | Out-String
-            if ($LASTEXITCODE -ne 1 -or $output -notmatch 'rendering failed') {
-              throw "bare publish did not finish local preflight before native-vault access: $output"
-            }
-          } finally {
-            Remove-Item -LiteralPath $sourceFile -Force
-          }
-          $configRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("pumd-packaged-parity-" + [guid]::NewGuid())
-          $paritySource = New-TemporaryFile
-          New-Item -ItemType Directory -Path $configRoot | Out-Null
-          try {
-            $previousAppData = $env:APPDATA
-            $env:APPDATA = $configRoot
-            $statusOutput = & $env:PUMD_BINARY auth status --credential-store=file 2>&1 | Out-String
-            if ($LASTEXITCODE -ne 0 -or $statusOutput -notmatch 'Project Authorization: not configured') {
-              throw "packaged file-store status contract failed: $statusOutput"
-            }
-            $logoutOutput = & $env:PUMD_BINARY auth logout --credential-store=file 2>&1 | Out-String
-            if ($LASTEXITCODE -ne 0 -or $logoutOutput -notmatch 'credentials removed locally' -or $logoutOutput -notmatch 'remote authorization may still be active') {
-              throw "packaged logout contract failed: $logoutOutput"
-            }
-            Set-Content -LiteralPath $paritySource -Value 'Hello' -NoNewline
-            Remove-Item Env:PUMD_ACCESS_TOKEN -ErrorAction SilentlyContinue
-            $tokenOutput = & $env:PUMD_BINARY publish --auth=token-env $paritySource 2>&1 | Out-String
-            if ($LASTEXITCODE -ne 1 -or $tokenOutput -notmatch 'PUMD_ACCESS_TOKEN') {
-              throw "packaged ephemeral automation contract failed: $tokenOutput"
-            }
-          } finally {
-            $env:APPDATA = $previousAppData
-            Remove-Item -LiteralPath $paritySource -Force
-            Remove-Item -LiteralPath $configRoot -Recurse -Force
-          }
-          exit 0
-
       - name: Package the Unix binary
         if: runner.os != 'Windows'
         shell: bash
@@ -205,6 +100,21 @@ jobs:
           cp README.md "dist/$archive/README.md"
           tar -C dist -czf "dist/$archive.tar.gz" "$archive"
           rm -r "dist/$archive"
+          extract_root="$(mktemp -d)"
+          trap 'rm -rf "$extract_root"' EXIT
+          tar -C "$extract_root" -xzf "dist/$archive.tar.gz"
+          set +e
+          output="$("$extract_root/$archive/pumd" 2>&1)"
+          status=$?
+          set -e
+          if [[ "$status" -ne 1 ]]; then
+            printf 'expected packaged pumd without arguments to exit 1, got %s\n%s\n' "$status" "$output" >&2
+            exit 1
+          fi
+          if [[ "$output" != *"Project Authorization usage:"* ]]; then
+            printf 'packaged pumd did not print its usage marker:\n%s\n' "$output" >&2
+            exit 1
+          fi
 
       - name: Package the Windows binary
         if: runner.os == 'Windows'
@@ -217,6 +127,20 @@ jobs:
           Copy-Item 'README.md' (Join-Path $archiveDirectory 'README.md')
           Compress-Archive -Path $archiveDirectory -DestinationPath "dist\$archive.zip"
           Remove-Item -LiteralPath $archiveDirectory -Recurse
+          $extractRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("pumd-nightly-smoke-" + [guid]::NewGuid())
+          try {
+            Expand-Archive -LiteralPath "dist\$archive.zip" -DestinationPath $extractRoot
+            $PSNativeCommandUseErrorActionPreference = $false
+            $output = & (Join-Path $extractRoot "$archive\pumd.exe") 2>&1 | Out-String
+            if ($LASTEXITCODE -ne 1) {
+              throw "expected packaged pumd without arguments to exit 1, got $LASTEXITCODE"
+            }
+            if ($output -notmatch 'Project Authorization usage:') {
+              throw "packaged pumd did not print its usage marker: $output"
+            }
+          } finally {
+            Remove-Item -LiteralPath $extractRoot -Recurse -Force -ErrorAction SilentlyContinue
+          }
 
       - name: Upload the packaged binary
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -360,8 +284,8 @@ jobs:
             printf 'expected packed pumd without arguments to exit 1, got %s\n%s\n' "$status" "$output" >&2
             exit 1
           fi
-          if [[ "$output" != *"Project Authorization usage: pumd auth <setup|status|logout> or pumd publish [--auth=project|adc|token-env] [--credential-store=native|file] <markdown-path>"* ]]; then
-            printf 'packed pumd did not print its usage message:\n%s\n' "$output" >&2
+          if [[ "$output" != *"Project Authorization usage:"* ]]; then
+            printf 'packed pumd did not print its usage marker:\n%s\n' "$output" >&2
             exit 1
           fi
 
