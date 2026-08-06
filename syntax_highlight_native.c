@@ -627,10 +627,10 @@ static int pumd_collect(const uint8_t *language, int32_t language_length,
 
 static int pumd_query_assets_are_present(void) {
   /* Keep every generated query blob live without reading an .scm file at build/runtime. */
-  return pumd_query_html_injections_len > 0 &&
-         pumd_query_javascript_injections_len > 0 &&
-         pumd_query_markdown_injections_len > 0 &&
-         pumd_query_http_injections_len > 0 &&
+  return sizeof(pumd_query_html_injections) > 0 &&
+         sizeof(pumd_query_javascript_injections) > 0 &&
+         sizeof(pumd_query_markdown_injections) > 0 &&
+         sizeof(pumd_query_http_injections) > 0 &&
          pumd_query_html_injections[0] != 0 &&
          pumd_query_javascript_injections[0] != 0 &&
          pumd_query_markdown_injections[0] != 0 &&

@@ -3,9 +3,11 @@
 `pumd` vendors the C runtime, generated parsers, external scanners, and reviewed
 highlight/injection queries below. Normal builds compile only these files: they
 never download an asset, locate a grammar, or read a `.scm` file. The query
-strings in `generated/highlight_queries.h` were generated with `xxd -i` from
-the checked-in query files and have SHA-256
-`3c7cd42d4bfd86e2c54db8ad55a2c5a3b670af8fe5ca15be62b0f7fee008b421`.
+strings in `generated/highlight_queries.h` are generated from the checked-in
+query files with `npm run generate:highlight-queries`; consumers derive each
+byte length with `sizeof` rather than generated length objects. The generated
+header has SHA-256
+`79b4f47636c4f61b704bfe0a57b9b746d3be0e044117c131cf987627e142f974`.
 
 ## Runtime
 

@@ -20,7 +20,9 @@
     "node": ">=18"
   },
   "scripts": {
-    "test": "node --test test/npm-launcher.test.cjs test/npm-nightly-version.test.cjs test/windows-powershell-workflow.test.cjs"
+    "generate:highlight-queries": "node scripts/generate-highlight-queries.cjs",
+    "check:highlight-queries": "node scripts/generate-highlight-queries.cjs --check",
+    "test": "node --test test/generate-highlight-queries.test.cjs test/npm-launcher.test.cjs test/npm-nightly-version.test.cjs test/windows-powershell-workflow.test.cjs"
   },
   "publishConfig": {
     "access": "public"
