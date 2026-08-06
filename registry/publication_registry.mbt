@@ -320,6 +320,15 @@ pub fn document_with_ready(document : RegistryDocument, source_path : String, ba
   match validate_registry_document(updated) { Ok(_) => Ok(updated); Err(error) => Err(error) }
 }
 
+///| Update a ready publication's published baseline.
+pub fn document_with_updated_baseline(document : RegistryDocument, source_path : String, baseline : @pumd.DesiredDocument, last_successful_publish : String) -> Result[RegistryDocument, RegistryError] {
+  let entries = document.entries.copy(); let mut found = false
+  for index = 0; index < entries.length(); index = index + 1 { if entries[index].source_path == source_path { found = true; guard entries[index].lifecycle is Ready else { return Err(Invalid("publication is not ready")) }; entries[index] = { ..entries[index], published_baseline: Some(baseline), last_successful_publish: Some(last_successful_publish) } } }
+  if !found { return Err(NotFound(source_path)) }
+  let updated : RegistryDocument = { entries, }
+  match validate_registry_document(updated) { Ok(_) => Ok(updated); Err(error) => Err(error) }
+}
+
 ///| Record a source as blocked before it acquires a destination.
 pub fn document_with_blocked(document : RegistryDocument, source_path : String) -> Result[RegistryDocument, RegistryError] {
   if publication_for_source(document, source_path) is Some(_) { return Err(DuplicateSource(source_path)) }
@@ -355,6 +364,8 @@ async fn mutate(directory : String, operation : (RegistryDocument) -> Result[Reg
 pub async fn register_provisional_publication(directory : String, entry : PublicationEntry) -> Result[Unit, RegistryError] { mutate(directory, fn(document) { document_with_provisional(document, entry) }) }
 ///| Commit a successful publication under the registry lock.
 pub async fn commit_ready_publication(directory : String, source_path : String, baseline : @pumd.DesiredDocument, last_successful_publish : String) -> Result[Unit, RegistryError] { mutate(directory, fn(document) { document_with_ready(document, source_path, baseline, last_successful_publish) }) }
+///| Update a ready publication's baseline under the registry lock.
+pub async fn update_publication_baseline(directory : String, source_path : String, baseline : @pumd.DesiredDocument, last_successful_publish : String) -> Result[Unit, RegistryError] { mutate(directory, fn(document) { document_with_updated_baseline(document, source_path, baseline, last_successful_publish) }) }
 ///| Record a blocked publication under the registry lock.
 pub async fn record_blocked_publication(directory : String, source_path : String) -> Result[Unit, RegistryError] { mutate(directory, fn(document) { document_with_blocked(document, source_path) }) }
 ///| Forget a publication under the registry lock.

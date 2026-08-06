@@ -30,6 +30,10 @@ test "project console handoff exposes the exact setup destinations" {
     "https://console.cloud.google.com/flows/enableapi?apiid=docs.googleapis.com",
   )
   assert_eq(
+    handoff.enable_drive_api_url,
+    "https://console.cloud.google.com/flows/enableapi?apiid=drive.googleapis.com",
+  )
+  assert_eq(
     handoff.oauth_clients_url,
     "https://console.cloud.google.com/auth/clients",
   )
@@ -75,6 +79,10 @@ async test "guided Project Authorization hands off to Cloud Console, validates t
   assert_eq(
     handoff.enable_docs_api_url,
     "https://console.cloud.google.com/flows/enableapi?apiid=docs.googleapis.com",
+  )
+  assert_eq(
+    handoff.enable_drive_api_url,
+    "https://console.cloud.google.com/flows/enableapi?apiid=drive.googleapis.com",
   )
   assert_eq(
     handoff.oauth_clients_url,

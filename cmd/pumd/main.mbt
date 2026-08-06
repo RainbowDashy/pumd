@@ -515,8 +515,26 @@ async fn report_publish_outcome(outcome : @publish.PublishOutcome) -> Unit {
       @stdio.stdout.write(
         "last successful publish: " + last_publish + "\n",
       )
+    }
+    @publish.PublishOutcome::Updated(success, last_publish) => {
+      @stdio.stdout.write("Publication updated.\n")
+      @stdio.stdout.write("document ID: " + success.document_id + "\n")
+      @stdio.stdout.write("edit URL: " + success.url + "\n")
       @stdio.stdout.write(
-        "this release cannot update an existing Publication yet.\n",
+        "last successful publish: " + last_publish + "\n",
+      )
+    }
+    @publish.PublishOutcome::NoOp(success, last_publish) => {
+      @stdio.stdout.write(
+        "no local changes; the Google Doc was left untouched\n",
+      )
+      @stdio.stdout.write("document ID: " + success.document_id + "\n")
+      @stdio.stdout.write("edit URL: " + success.url + "\n")
+      @stdio.stdout.write(
+        "last successful publish: " + last_publish + "\n",
+      )
+      @stdio.stdout.write(
+        "reviewer changes and the Published Baseline were preserved.\n",
       )
     }
     @publish.PublishOutcome::DryRunCreation(title~) => {
@@ -531,20 +549,39 @@ async fn report_publish_outcome(outcome : @publish.PublishOutcome) -> Unit {
         "No authorization, document creation, or registry change was performed.\n",
       )
     }
-    @publish.PublishOutcome::DryRunInspection(inspection~) => {
+    @publish.PublishOutcome::DryRunUpdate(report~) => {
       @stdio.stdout.write(
-        "dry run: existing Publication readback succeeded\n",
+        "dry run: update inspection succeeded\n",
       )
-      @stdio.stdout.write(
-        "document ID: " + inspection.document_id + "\n",
-      )
-      @stdio.stdout.write("edit URL: " + inspection.url + "\n")
-      match inspection.title {
+      @stdio.stdout.write("document ID: " + report.document_id + "\n")
+      @stdio.stdout.write("edit URL: " + report.url + "\n")
+      match report.title {
         Some(title) =>
           @stdio.stdout.write("current title: " + title + "\n")
         None => @stdio.stdout.write("current title: unavailable\n")
       }
-      @stdio.stdout.write("managed tab: present\n")
+      @stdio.stdout.write(
+        "planned structural units: " + report.planned_units.to_string() + "\n",
+      )
+      for unit in report.planned {
+        @stdio.stdout.write("  planned: " + unit + "\n")
+      }
+      @stdio.stdout.write(
+        "publication conflicts: " + report.conflicts.to_string() + "\n",
+      )
+      for unit in report.conflicted {
+        @stdio.stdout.write("  conflict: " + unit + "\n")
+      }
+      @stdio.stdout.write(
+        "review barriers (unresolved comments): " +
+        report.review_barriers.to_string() +
+        "\n",
+      )
+      @stdio.stdout.write(
+        "concurrency-sensitive: " +
+        (if report.concurrency_sensitive { "yes" } else { "no" }) +
+        "\n",
+      )
       @stdio.stdout.write(
         "No remote write or registry change was performed.\n",
       )
@@ -860,11 +897,14 @@ async fn complete_project_console_handoff(
   handoff : @authorization.ProjectConsoleHandoff,
 ) -> Result[Unit, @authorization.ProjectConsoleHandoffError] {
   println(
-    "Guided Project Authorization hands off two browser-owned steps to Google Cloud Console:",
+    "Guided Project Authorization hands off three browser-owned steps to Google Cloud Console:",
   )
   println("  1) Enable the Google Docs API: " + handoff.enable_docs_api_url)
   println(
-    "  2) Create a Desktop OAuth client and download its JSON: " +
+    "  2) Enable the Google Drive API: " + handoff.enable_drive_api_url
+  )
+  println(
+    "  3) Create a Desktop OAuth client and download its JSON: " +
     handoff.oauth_clients_url,
   )
   println(
@@ -885,12 +925,23 @@ async fn complete_project_console_handoff(
   println(
     "  - Create a Desktop app client and download its JSON when prompted.",
   )
+  println(
+    "  - Drive is used only for comment inspection; pumd still requests exactly " +
+    @authorization.drive_file_scope +
+    ".",
+  )
   if !confirm_yes("Open the first step (enable the Google Docs API) now?") {
     return Err(@authorization.ProjectConsoleHandoffError::Cancelled)
   }
   open_project_console_url(handoff.enable_docs_api_url)
   if !confirm_yes(
       "Have you enabled the Google Docs API for the project you will use?",
+    ) {
+    return Err(@authorization.ProjectConsoleHandoffError::Cancelled)
+  }
+  open_project_console_url(handoff.enable_drive_api_url)
+  if !confirm_yes(
+      "Have you enabled the Google Drive API for the same project?",
     ) {
     return Err(@authorization.ProjectConsoleHandoffError::Cancelled)
   }

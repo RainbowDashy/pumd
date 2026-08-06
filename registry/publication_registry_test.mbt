@@ -159,6 +159,148 @@ fn test_baseline() -> @pumd.DesiredDocument {
 }
 
 ///|
+fn updated_baseline(title : String) -> @pumd.DesiredDocument {
+  { ..test_baseline(), metadata: { title: Some(title), locale: Some("en") } }
+}
+
+///|
+async test "updating a ready publication replaces its baseline without changing other entries" {
+  let original = test_baseline()
+  let replacement = updated_baseline("Updated publication")
+  let ready : PublicationEntry = {
+    source_path: "notes/ready.md",
+    document_id: Some("doc-ready"),
+    url: Some("https://docs.google.com/document/d/doc-ready/edit"),
+    managed_tab_id: Some("tab-ready"),
+    lifecycle: Ready,
+    last_successful_publish: Some("2026-08-05T09:30:00Z"),
+    published_baseline: Some(original),
+  }
+  let untouched : PublicationEntry = {
+    source_path: "notes/other.md",
+    document_id: Some("doc-other"),
+    url: Some("https://docs.google.com/document/d/doc-other/edit"),
+    managed_tab_id: Some("tab-other"),
+    lifecycle: Provisional,
+    last_successful_publish: None,
+    published_baseline: None,
+  }
+  let document : RegistryDocument = { entries: [ready, untouched] }
+  guard document_with_updated_baseline(document, "notes/ready.md", replacement, "2026-08-06T09:30:00Z") is Ok(updated) else {
+    fail("ready publication update must succeed")
+  }
+  let updated_ready = updated.entries[0]
+  assert_eq(updated_ready.lifecycle, Ready)
+  assert_eq(updated_ready.document_id, ready.document_id)
+  assert_eq(updated_ready.url, ready.url)
+  assert_eq(updated_ready.managed_tab_id, ready.managed_tab_id)
+  assert_eq(updated_ready.last_successful_publish, Some("2026-08-06T09:30:00Z"))
+  assert_eq(@debug.to_string(updated_ready.published_baseline), @debug.to_string(Some(replacement)))
+  assert_eq(@debug.to_string(updated.entries[1]), @debug.to_string(untouched))
+}
+
+///|
+async test "updating provisional, blocked, or missing publications is rejected" {
+  let provisional : PublicationEntry = {
+    source_path: "notes/provisional.md",
+    document_id: Some("doc-provisional"),
+    url: Some("https://docs.google.com/document/d/doc-provisional/edit"),
+    managed_tab_id: Some("tab-provisional"),
+    lifecycle: Provisional,
+    last_successful_publish: None,
+    published_baseline: None,
+  }
+  let blocked : PublicationEntry = {
+    source_path: "notes/blocked.md",
+    document_id: None,
+    url: None,
+    managed_tab_id: None,
+    lifecycle: Blocked,
+    last_successful_publish: None,
+    published_baseline: None,
+  }
+  let document : RegistryDocument = { entries: [provisional, blocked] }
+  guard document_with_updated_baseline(document, "notes/provisional.md", test_baseline(), "now") is Err(Invalid(_)) else {
+    fail("provisional publication update must be invalid")
+  }
+  guard document_with_updated_baseline(document, "notes/blocked.md", test_baseline(), "now") is Err(Invalid(_)) else {
+    fail("blocked publication update must be invalid")
+  }
+  guard document_with_updated_baseline(document, "notes/missing.md", test_baseline(), "now") is Err(NotFound("notes/missing.md")) else {
+    fail("missing publication update must be not found")
+  }
+}
+
+///|
+async test "updating a publication baseline persists a valid registry" {
+  let directory = test_directory("update-persistence")
+  clean_directory(directory)
+  let entry : PublicationEntry = {
+    source_path: "notes/persist.md",
+    document_id: Some("doc-persist"),
+    url: Some("https://docs.google.com/document/d/doc-persist/edit"),
+    managed_tab_id: Some("tab-persist"),
+    lifecycle: Provisional,
+    last_successful_publish: None,
+    published_baseline: None,
+  }
+  assert_eq(register_provisional_publication(directory, entry), Ok(()))
+  assert_eq(commit_ready_publication(directory, "notes/persist.md", test_baseline(), "first"), Ok(()))
+  let replacement = updated_baseline("Persisted update")
+  assert_eq(update_publication_baseline(directory, "notes/persist.md", replacement, "second"), Ok(()))
+  guard load_registry_document(directory) is Ok(loaded) else {
+    fail("updated registry must load")
+  }
+  assert_eq(validate_registry_document(loaded), Ok(()))
+  let updated = loaded.entries[0]
+  assert_eq(updated.last_successful_publish, Some("second"))
+  assert_eq(@debug.to_string(updated.published_baseline), @debug.to_string(Some(replacement)))
+  clean_directory(directory)
+}
+
+///|
+async test "updating twice replaces the previous published baseline" {
+  let first = updated_baseline("First update")
+  let second = updated_baseline("Second update")
+  let ready : PublicationEntry = {
+    source_path: "notes/twice.md",
+    document_id: Some("doc-twice"),
+    url: Some("https://docs.google.com/document/d/doc-twice/edit"),
+    managed_tab_id: Some("tab-twice"),
+    lifecycle: Ready,
+    last_successful_publish: Some("original"),
+    published_baseline: Some(test_baseline()),
+  }
+  guard document_with_updated_baseline({ entries: [ready] }, "notes/twice.md", first, "first") is Ok(after_first) else {
+    fail("first update must succeed")
+  }
+  guard document_with_updated_baseline(after_first, "notes/twice.md", second, "second") is Ok(after_second) else {
+    fail("second update must succeed")
+  }
+  assert_eq(after_second.entries[0].last_successful_publish, Some("second"))
+  assert_eq(@debug.to_string(after_second.entries[0].published_baseline), @debug.to_string(Some(second)))
+}
+
+///|
+async test "updating a publication never changes its destination identity" {
+  let ready : PublicationEntry = {
+    source_path: "notes/identity.md",
+    document_id: Some("doc-identity"),
+    url: Some("https://docs.google.com/document/d/doc-identity/edit"),
+    managed_tab_id: Some("tab-identity"),
+    lifecycle: Ready,
+    last_successful_publish: Some("before"),
+    published_baseline: Some(test_baseline()),
+  }
+  guard document_with_updated_baseline({ entries: [ready] }, "notes/identity.md", updated_baseline("Identity update"), "after") is Ok(updated) else {
+    fail("ready publication update must succeed")
+  }
+  assert_eq(updated.entries[0].document_id, ready.document_id)
+  assert_eq(updated.entries[0].url, ready.url)
+  assert_eq(updated.entries[0].managed_tab_id, ready.managed_tab_id)
+}
+
+///|
 async test "ready publication round-trips a complete Published Baseline" {
   let directory = test_directory("baseline")
   clean_directory(directory)

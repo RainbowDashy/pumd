@@ -262,3 +262,112 @@ async test "live smoke publishes and reads a real Google Doc" {
   }
   println("Live smoke passed: " + url)
 }
+
+///|
+fn updated_live_smoke_markdown() -> String {
+  live_smoke_markdown() +
+  "\n# Pumd live smoke update heading\n\nLIVE SMOKE UPDATED CONTENT 🚀\n"
+}
+
+///|
+async fn run_publish_cli_and_return_output(
+  pumd : String,
+  markdown : String,
+  temporary_directory : String,
+) -> Result[String, String] {
+  let markdown_path = temporary_directory + "/pumd-live-smoke.md"
+  @fs.write_string_to_file(markdown_path, markdown) catch {
+    @fs.IOError(message) =>
+      return Err("could not write live smoke Markdown: " + message)
+  }
+  let (exit_code, stdout, stderr) = @process.collect_output(pumd, [
+    "publish", "--auth=adc", markdown_path,
+  ])
+  let stdout_text = stdout.text() catch {
+    _ => return Err("could not decode pumd stdout")
+  }
+  let stderr_text = stderr.text() catch {
+    _ => return Err("could not decode pumd stderr")
+  }
+  if exit_code != 0 {
+    return Err(
+      "pumd publish failed (exit " +
+      exit_code.to_string() +
+      "):\n" +
+      stderr_text +
+      stdout_text,
+    )
+  }
+  Ok(stdout_text)
+}
+
+///|
+#skip("run explicitly after configuring ADC; creates and updates a real Google Doc")
+async test "live smoke creates, updates, and re-reads one real Google Doc" {
+  let pumd = match native_pumd_binary() {
+    Ok(path) => path
+    Err(message) => abort(message)
+  }
+  let temporary_directory = @async_fs.tmpdir(prefix="pumd-live-update-") catch {
+    error => abort("could not create live smoke directory: " + error.to_string())
+  }
+  let first_output = match (run_publish_cli_and_return_output(pumd, live_smoke_markdown(), temporary_directory)) {
+    Ok(output) => output
+    Err(message) => abort(message)
+  }
+  let created = match parse_cli_publish_success(first_output) {
+    Some(success) => success
+    None => abort("first publish must print the document ID and edit URL:\n" + first_output)
+  }
+  println("REAL GOOGLE DOC CREATED: " + created.url)
+
+  // Republish the same Markdown: no local changes must produce a no-op.
+  let noop_output = match (run_publish_cli_and_return_output(pumd, live_smoke_markdown(), temporary_directory)) {
+    Ok(output) => output
+    Err(message) => abort(message)
+  }
+  assert_true(noop_output.contains("no local changes"))
+  let noop_identity = match parse_cli_publish_success(noop_output) {
+    Some(success) => success
+    None => abort("no-op publish must still print identity:\n" + noop_output)
+  }
+  assert_eq(noop_identity.document_id, created.document_id)
+
+  // Republish with a local change: the same document and Managed Tab must be
+  // updated in place.
+  let update_output = match (run_publish_cli_and_return_output(pumd, updated_live_smoke_markdown(), temporary_directory)) {
+    Ok(output) => output
+    Err(message) => abort(message)
+  }
+  assert_true(update_output.contains("Publication updated."))
+  let updated = match parse_cli_publish_success(update_output) {
+    Some(success) => success
+    None => abort("update publish must print identity:\n" + update_output)
+  }
+  assert_eq(updated.document_id, created.document_id)
+  assert_eq(updated.url, created.url)
+
+  let token = match application_default_access_token() {
+    Ok(token) => token
+    Err(error) => abort(error.user_message())
+  }
+  let http = @google_http.DefaultHttpClient::new()
+  let client = @google_core.GoogleClient::new(fn() { token }, http=Some(http))
+  let document = match get_document(client, created.document_id) {
+    Ok(document) => document
+    Err(error) => abort(error.message())
+  }
+  assert_eq(document.document_id, created.document_id)
+  assert_true(document.body.contains("Pumd live smoke update heading"))
+  assert_true(document.body.contains("LIVE SMOKE UPDATED CONTENT"))
+  // The reviewer-owned title and the Managed Tab must survive the update.
+  let decoded = match decode_remote_document(document.body, created.document_id) {
+    Ok(decoded) => decoded
+    Err(error) => abort(error.user_message())
+  }
+  assert_true(decoded.tabs.length() >= 1)
+  println("Live update smoke passed: " + created.url)
+  @async_fs.rmdir(temporary_directory, recursive=true) catch {
+    _ => ()
+  }
+}

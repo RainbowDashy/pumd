@@ -5,6 +5,7 @@
 /// enumerates, creates, or mutates cloud resources itself.
 pub(all) struct ProjectConsoleHandoff {
   enable_docs_api_url : String
+  enable_drive_api_url : String
   oauth_clients_url : String
 }
 
@@ -12,6 +13,7 @@ pub(all) struct ProjectConsoleHandoff {
 /// The concrete Cloud Console destinations for a browser-first setup run.
 pub let project_console_handoff : ProjectConsoleHandoff = {
   enable_docs_api_url: "https://console.cloud.google.com/flows/enableapi?apiid=docs.googleapis.com",
+  enable_drive_api_url: "https://console.cloud.google.com/flows/enableapi?apiid=drive.googleapis.com",
   oauth_clients_url: "https://console.cloud.google.com/auth/clients",
 }
 
@@ -50,7 +52,7 @@ pub fn GuidedSetupError::user_message(self : GuidedSetupError) -> String {
     Cancelled =>
       "Project Authorization setup was cancelled before OAuth was completed."
     ConsoleHandoffFailed =>
-      "Project Authorization could not open Google Cloud Console. Enable the Google Docs API and create a Desktop OAuth client, then run setup again."
+      "Project Authorization could not open Google Cloud Console. Enable the Google Docs and Google Drive APIs and create a Desktop OAuth client, then run setup again."
     DesktopClientFileUnavailable =>
       "Project Authorization needs the downloaded Desktop OAuth client JSON to continue."
     DesktopClientFileInvalid =>

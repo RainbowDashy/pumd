@@ -182,12 +182,74 @@ async fn run_packaged_project_authorization_smoke(
     ["publish", markdown_path],
     "publish",
   )
-  @async_fs.rmdir(directory, recursive=true) catch {
-    _ => ()
-  }
   guard published is Ok(output) else { abort("packaged publish failed") }
   guard parse_packaged_smoke_publish_success(output) is Some(success) else {
     abort("publish did not print a canonical document identity")
+  }
+  // Create-then-update identity: republishing the same source must update the
+  // same document and Managed Tab in place.
+  @fs.write_string_to_file(
+    markdown_path,
+    "# " + platform_name + " Project Authorization smoke updated\n",
+  ) catch {
+    @fs.IOError(_) => abort("could not write updated smoke Markdown")
+  }
+  let updated_output = smoke_command_stdout(
+    pumd,
+    ["publish", markdown_path],
+    "update publish",
+  )
+  guard updated_output is Ok(update_text) else {
+    abort("packaged update publish failed")
+  }
+  if !update_text.contains("Publication updated.") {
+    abort("update publish did not report an in-place update:\n" + update_text)
+  }
+  guard parse_packaged_smoke_publish_success(update_text) is Some(updated) else {
+    abort("update publish did not print a canonical document identity")
+  }
+  if updated.document_id != success.document_id {
+    abort("update must reuse the created document identity")
+  }
+  // Dry-run runs the full inspection pipeline without writing.
+  let dry_run = smoke_command_stdout(
+    pumd,
+    ["publish", "--dry-run", markdown_path],
+    "dry-run",
+  )
+  guard dry_run is Ok(dry_text) else { abort("packaged dry-run failed") }
+  if !dry_text.contains("planned structural units: 0") ||
+    !dry_text.contains("No remote write or registry change was performed.") {
+    abort("dry-run did not report a zero-write inspection:\n" + dry_text)
+  }
+  // Offline listing must enumerate the local Publication Registry.
+  let listed = smoke_command_stdout(pumd, ["list", "--json"], "list")
+  guard listed is Ok(list_text) else { abort("packaged list failed") }
+  if !list_text.contains(success.document_id) {
+    abort("list must include the created Publication")
+  }
+  // Reassociation and forgetting must update only the local relationship.
+  let moved_path = directory + "/smoke-moved.md"
+  @fs.write_string_to_file(
+    moved_path,
+    "# " + platform_name + " Project Authorization smoke moved\n",
+  ) catch {
+    @fs.IOError(_) => abort("could not write moved smoke Markdown")
+  }
+  let moved = smoke_command_stdout(
+    pumd,
+    ["move", markdown_path, moved_path],
+    "move",
+  )
+  guard moved is Ok(_) else { abort("packaged move failed") }
+  let forgotten = smoke_command_stdout(
+    pumd,
+    ["forget", moved_path],
+    "forget",
+  )
+  guard forgotten is Ok(_) else { abort("packaged forget failed") }
+  @async_fs.rmdir(directory, recursive=true) catch {
+    _ => ()
   }
   match smoke_command_stdout(pumd, ["auth", "logout"], "auth logout") {
     Ok(_) => ()

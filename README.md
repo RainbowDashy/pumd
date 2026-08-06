@@ -7,10 +7,14 @@ The local Markdown file remains the authoritative source. Publishing it again
 should update the existing Google Doc safely and incrementally instead of
 replacing the entire document.
 
-> **Current Milestone 2 behavior:** `pumd` can create and populate a native
-> Google Doc, but it does not republish to an existing document. Every publish
-> creates a new document. Stable republishing, diffing, and remote
-> reconciliation are version-one goals that remain deferred.
+> **Current behavior:** `pumd publish <path>` creates a Publication on its
+> first run and safely updates that Publication thereafter. An update reads the
+> Managed Tab, compares local Markdown and Google Docs changes with the
+> Published Baseline, and writes only non-conflicting local changes in one
+> revision-checked Google Docs batch. Unresolved comments, overlapping edits,
+> ambiguous remote alignment, and concurrent edits block safely; there is no
+> force bypass or legacy-document discovery. `--dry-run` performs the same
+> checks without remote or Publication Registry writes.
 
 ## Nightly binaries
 
@@ -98,10 +102,10 @@ The common workflow should require one obvious command:
 pumd publish proposal.md
 ```
 
-The current publishing milestone creates a new document for every invocation;
-safe incremental updates are a later milestone. Google document IDs, tab IDs,
-UTF-16 indexes, named ranges, and request ordering are implementation concerns
-that the author should not need to manage.
+`pumd publish` creates a document when the source is unlinked and safely updates
+its existing Publication when it is linked. Google document IDs, Managed Tab
+IDs, UTF-16 indexes, named ranges, and request ordering are implementation
+concerns that the author should not need to manage.
 
 ### Make every write inspectable
 
@@ -109,7 +113,7 @@ Authors should be able to preview what would change before publishing. Results
 and failures should explain which Markdown sections are affected and why a push
 is safe, blocked, or requires intervention.
 
-## Current Milestone 2 setup and publishing
+## Current setup and publishing
 
 ### Toolchain, target, and dependencies
 
@@ -167,13 +171,17 @@ repairing it without restarting setup.
 Project provisioning happens in the browser, in Google-owned Cloud Console
 flows. This avoids asking for a second, broad Cloud-management authorization
 that would still leave consent settings and OAuth-client creation as manual
-steps. `pumd` opens two flows and waits for the downloaded Desktop client JSON;
+steps. `pumd` opens three flows and waits for the downloaded Desktop client JSON;
 it never creates a project, enables an API, or mutates cloud state itself:
 
 - **Enable the Docs API:**
   `https://console.cloud.google.com/flows/enableapi?apiid=docs.googleapis.com`
   handles Google sign-in, lets you select an existing project or create one,
   and enables `docs.googleapis.com`.
+- **Enable the Drive API:**
+  `https://console.cloud.google.com/flows/enableapi?apiid=drive.googleapis.com`
+  enables `drive.googleapis.com` in the same project. `pumd` uses Drive only
+  to inspect comments; it never uses Drive for Publication discovery.
 - **Create the Desktop client:** `https://console.cloud.google.com/auth/clients`
   handles OAuth app registration when needed. Create a **Desktop app** client
   and download its JSON.
@@ -196,7 +204,8 @@ For consent configuration, choose an audience that matches the account:
   production audience.
 
 The direct OAuth flow accepts installed Desktop OAuth clients only and requests
-exactly `drive.file`; it requests no identity scopes.
+exactly `drive.file`; enabling the Drive API for comment inspection does not
+broaden that scope, and it requests no identity scopes.
 
 If you have already downloaded the Desktop client JSON, skip the browser
 provisioning steps and use the direct shortcut instead:
@@ -264,6 +273,52 @@ succeeds. Declining performs no setup or remote mutation. Noninteractive publish
 never prompts, opens a browser, or waits for an OAuth callback; run `auth setup`
 deliberately or use one of the explicit automation routes below.
 
+### Republishing, conflicts, and review safety
+
+`pumd publish proposal.md` creates a Google Doc and local Publication the first
+time. Later publishes use that Publication: pumd re-reads its Managed Tab,
+compares the current Markdown and Google Docs content with the Published
+Baseline, and applies only safe local changes. It does not discover or adopt
+older documents, and it never replaces a missing, trashed, inaccessible,
+read-only, or deleted Managed Tab. Other tabs and the document title after
+creation remain untouched.
+
+Reconciliation works on body paragraphs and whole tables, with text and
+formatting both included. A local-only change is applied; a remote-only change
+stays in Google Docs and is not imported into Markdown. Changes in separate
+units can merge. If both sides changed the same unit, pumd stops with a
+**Publication Conflict** instead of choosing a side. There is no force bypass.
+Unsupported remote structures, such as images, section breaks, and footnotes,
+are preserved as opaque remote-only content; pumd blocks rather than risking a
+write when their alignment is ambiguous.
+
+Every unresolved Google Docs comment is a **Review Barrier** for a
+content-changing publish. Resolve the comments, then publish again. Resolved
+comments do not block, and a publish with no content changes remains allowed.
+Google Docs suggestions, including inserted/deleted text and style changes,
+count as remote changes: disjoint suggestions survive, while an overlapping
+local change becomes a Publication Conflict.
+
+Before writing, pumd reads the document revision and includes it as
+`writeControl.requiredRevisionId` in one atomic Docs batch. If the document
+changes during that interval, Google rejects the batch and applies nothing;
+re-read and retry. If a transport result is ambiguous, pumd re-reads the
+Managed Tab to determine whether the intended state landed and never blindly
+replays the write. A confirmed successful publish advances the Published
+Baseline to the new Desired Document; a no-op publish leaves that baseline
+unchanged.
+
+Use `--dry-run` for either a new source or an existing Publication:
+
+```console
+pumd publish --dry-run proposal.md
+```
+
+It runs authorization, remote reading, comment inspection, normalization,
+suggestion interpretation, and reconciliation, then reports planned structural
+units, Publication Conflicts, Review Barriers, and concurrency-sensitive status.
+It makes zero remote writes and zero Publication Registry changes.
+
 ### Explicit automation routes
 
 ADC remains available only when explicitly selected:
@@ -313,10 +368,12 @@ If setup remembered the explicit file store, the same bare publish command uses
 it. Add `--credential-store=native|file` only to override the remembered choice
 for one publish.
 
-Each successful invocation creates a new Google Doc, including when the same
-Markdown file was published before. The document title is the source file name
-without its final extension. Republish-to-the-same-document, local publication
-state, diffing, conflict detection, and remote reconciliation are deferred.
+The first successful invocation creates a Google Doc and records its
+Publication. Later invocations safely update the recorded Managed Tab rather
+than creating another document. The document title is derived from the source
+file name only at creation and is reviewer-owned afterward. Use
+`pumd publish --dry-run document.md` to inspect the same create-or-update path
+without writing.
 
 On success, `pumd` prints this two-line result shape (with Google's real ID
 substituted):
@@ -326,7 +383,7 @@ document ID: 1AbCdEfGhIjKlMnOpQrStUvWxYz
 edit URL: https://docs.google.com/document/d/1AbCdEfGhIjKlMnOpQrStUvWxYz/edit
 ```
 
-Images are not supported in Milestone 2. Both direct images such as
+Images are not supported yet. Both direct images such as
 `![diagram](diagram.png)` and reference images produce a source-located
 unsupported diagnostic. Source reading and decoding, rendering (including this
 image check), and Desired Document planning all finish before authorization is
@@ -349,7 +406,8 @@ silently renumbered.
   required. For a locked native vault, unlock it and recheck. For permission
   denial, allow `pumd` or correct the platform policy; `pumd` does not fall back
   to a file. For a Google permission failure, confirm the exact `drive.file`
-  scope and that `docs.googleapis.com` is enabled in the selected project. For
+  scope and that both `docs.googleapis.com` and `drive.googleapis.com` are
+  enabled in the selected project. For
   the explicit ADC route, recreate its ADC separately; neither route falls back
   to the other.
 - If Google throttles a request, wait before trying again. For another explicit
@@ -358,10 +416,9 @@ silently renumbered.
 - If document creation succeeded but population failed, the error includes the
   created document ID and edit URL. Inspect that document before deciding what
   to do next.
-- A transport or response-decoding failure can be ambiguous: the remote mutation
-  may have succeeded. `pumd` does not retry automatically. Inspect Google Drive
-  and any reported document before retrying, because every retry creates another
-  new document.
+- If an update result is ambiguous, pumd re-reads before deciding whether the
+  intended state landed. Do not assume a retry is safe until that diagnosis
+  reports the current state.
 
 Errors are classified without printing credential or access-token contents.
 
@@ -491,11 +548,11 @@ Rendering applies one versioned, built-in style profile with opinionated default
 for body text and every supported document element. Configurable themes and
 templates are outside this milestone.
 
-Milestone 2 adds the native `pumd publish <markdown-path>` command. It reads and
-decodes the source, derives the Google Doc title from the file name, then uses
-authorized-user Application Default Credentials to create and populate one new
-Google Doc. Every invocation creates a new document. Incremental updates, local
-publishing state, diffing, and remote reconciliation remain deferred.
+The publishing milestone adds the native `pumd publish <markdown-path>` command.
+It reads and decodes the source, creates and records a Publication when
+unlinked, and safely reconciles updates to the recorded Managed Tab when linked.
+It uses the Published Baseline to preserve remote-only work and block
+Publication Conflicts or Review Barriers rather than overwriting review work.
 
 ## Non-goals
 

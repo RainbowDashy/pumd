@@ -32,6 +32,21 @@ pub fn DocsAdapterError::message(self : DocsAdapterError) -> String {
 }
 
 ///|
+pub(all) enum UpdateBatchError {
+  Adapter(DocsAdapterError)
+  RevisionConflict
+} derive(@debug.Debug)
+
+///|
+pub fn UpdateBatchError::message(self : UpdateBatchError) -> String {
+  match self {
+    Adapter(error) => error.message()
+    RevisionConflict =>
+      "Google Docs changed since it was read; reload the publication and retry."
+  }
+}
+
+///|
 fn google_error_kind_from_status(status : String) -> GoogleErrorKind? {
   match status {
     "UNAUTHENTICATED" => Some(Unauthenticated)
@@ -234,7 +249,7 @@ fn hex_digit(value : Char) -> Int? {
 }
 
 ///|
-fn hex_component(first : Char, second : Char) -> Int? {
+fn docs_adapter_hex_component(first : Char, second : Char) -> Int? {
   match hex_digit(first) {
     Some(high) =>
       match hex_digit(second) {
@@ -253,9 +268,9 @@ fn write_rgb_color(value : String, output : StringBuilder) -> Bool {
   }
   match
     (
-      hex_component(chars[1], chars[2]),
-      hex_component(chars[3], chars[4]),
-      hex_component(chars[5], chars[6]),
+      docs_adapter_hex_component(chars[1], chars[2]),
+      docs_adapter_hex_component(chars[3], chars[4]),
+      docs_adapter_hex_component(chars[5], chars[6]),
     ) {
     (Some(red), Some(green), Some(blue)) => {
       output.write_string("{\"color\":{\"rgbColor\":{\"red\":")
@@ -282,12 +297,38 @@ fn write_dimension(points : Int, output : StringBuilder) -> Unit {
 fn write_range(
   start_index : Int,
   end_index : Int,
+  tab_id : String?,
   output : StringBuilder,
 ) -> Unit {
   output.write_string("{\"startIndex\":")
   output.write_string(start_index.to_string())
   output.write_string(",\"endIndex\":")
   output.write_string(end_index.to_string())
+  match tab_id {
+    Some(tab_id) => {
+      output.write_string(",\"tabId\":")
+      write_json_string(tab_id, output)
+    }
+    None => ()
+  }
+  output.write_char('}')
+}
+
+///|
+fn write_location(
+  index : Int,
+  tab_id : String?,
+  output : StringBuilder,
+) -> Unit {
+  output.write_string("{\"index\":")
+  output.write_string(index.to_string())
+  match tab_id {
+    Some(tab_id) => {
+      output.write_string(",\"tabId\":")
+      write_json_string(tab_id, output)
+    }
+    None => ()
+  }
   output.write_char('}')
 }
 
@@ -578,12 +619,13 @@ fn write_update_paragraph_request(
   start_index : Int,
   end_index : Int,
   style : @pumd.ParagraphStyle,
+  tab_id : String?,
   output : StringBuilder,
   first : Bool,
 ) -> Bool {
   let next_first = begin_request(output, first)
   output.write_string("{\"updateParagraphStyle\":{\"range\":")
-  write_range(start_index, end_index, output)
+  write_range(start_index, end_index, tab_id, output)
   output.write_string(",\"paragraphStyle\":")
   write_paragraph_style(style, output)
   output.write_string(",\"fields\":")
@@ -593,7 +635,7 @@ fn write_update_paragraph_request(
   // the desired paragraph style intentionally owns the corresponding profile
   // defaults. Lower them as the companion native text-style update.
   write_update_paragraph_text_style_request(
-    start_index, end_index, style, output, next_first,
+    start_index, end_index, style, tab_id, output, next_first,
   )
 }
 
@@ -602,12 +644,13 @@ fn write_update_paragraph_text_style_request(
   start_index : Int,
   end_index : Int,
   style : @pumd.ParagraphStyle,
+  tab_id : String?,
   output : StringBuilder,
   first : Bool,
 ) -> Bool {
   let next_first = begin_request(output, first)
   output.write_string("{\"updateTextStyle\":{\"range\":")
-  write_range(start_index, end_index, output)
+  write_range(start_index, end_index, tab_id, output)
   output.write_string(",\"textStyle\":{\"weightedFontFamily\":{\"fontFamily\":")
   write_json_string(style.font_family, output)
   output.write_string("},\"fontSize\":")
@@ -621,6 +664,7 @@ fn write_update_paragraph_decoration_request(
   start_index : Int,
   end_index : Int,
   style : @pumd.ParagraphStyle,
+  tab_id : String?,
   output : StringBuilder,
   first : Bool,
 ) -> Bool {
@@ -628,7 +672,7 @@ fn write_update_paragraph_decoration_request(
   let decoration = StringBuilder::new()
   let fields = write_paragraph_decoration(style, decoration)
   output.write_string("{\"updateParagraphStyle\":{\"range\":")
-  write_range(start_index, end_index, output)
+  write_range(start_index, end_index, tab_id, output)
   output.write_string(",\"paragraphStyle\":")
   output.write_string(decoration.to_string())
   output.write_string(",\"fields\":")
@@ -643,6 +687,7 @@ fn write_update_text_request(
   end_index : Int,
   style : @pumd.TextStyle,
   link : @pumd.LinkIntent?,
+  tab_id : String?,
   output : StringBuilder,
   first : Bool,
 ) -> Bool {
@@ -650,7 +695,7 @@ fn write_update_text_request(
   let text_style = StringBuilder::new()
   let fields = write_text_style(style, link, text_style)
   output.write_string("{\"updateTextStyle\":{\"range\":")
-  write_range(start_index, end_index, output)
+  write_range(start_index, end_index, tab_id, output)
   output.write_string(",\"textStyle\":")
   output.write_string(text_style.to_string())
   output.write_string(",\"fields\":")
@@ -665,6 +710,7 @@ fn write_update_cell_background_request(
   row : Int,
   column : Int,
   color : String,
+  tab_id : String?,
   output : StringBuilder,
   first : Bool,
 ) -> Bool {
@@ -674,10 +720,10 @@ fn write_update_cell_background_request(
   }
   let next_first = begin_request(output, first)
   output.write_string(
-    "{\"updateTableCellStyle\":{\"tableRange\":{\"tableCellLocation\":{\"tableStartLocation\":{\"index\":",
+    "{\"updateTableCellStyle\":{\"tableRange\":{\"tableCellLocation\":{\"tableStartLocation\":",
   )
-  output.write_string((layout.location + 1).to_string())
-  output.write_string("},\"rowIndex\":")
+  write_location(layout.location + 1, tab_id, output)
+  output.write_string(",\"rowIndex\":")
   output.write_string(row.to_string())
   output.write_string(",\"columnIndex\":")
   output.write_string(column.to_string())
@@ -690,7 +736,7 @@ fn write_update_cell_background_request(
 }
 
 ///|
-fn lower_plan(plan : DocsUpdatePlan) -> String {
+fn lower_plan_for_tab(plan : DocsUpdatePlan, tab_id : String?) -> String {
   let output = StringBuilder::new()
   let layouts : Array[TableLayout] = []
   let insertions : Array[CellInsertion] = []
@@ -700,31 +746,31 @@ fn lower_plan(plan : DocsUpdatePlan) -> String {
     match request {
       InsertText(index~, text~) => {
         first = begin_request(output, first)
-        output.write_string("{\"insertText\":{\"location\":{\"index\":")
-        output.write_string(index.to_string())
-        output.write_string("},\"text\":")
+        output.write_string("{\"insertText\":{\"location\":")
+        write_location(index, tab_id, output)
+        output.write_string(",\"text\":")
         write_json_string(text, output)
         output.write_string("}}")
       }
       UpdateParagraphStyle(start_index~, end_index~, style~) =>
         first = write_update_paragraph_request(
-          start_index, end_index, style, output, first,
+          start_index, end_index, style, tab_id, output, first,
         )
       UpdateParagraphDecoration(start_index~, end_index~, style~) =>
         first = write_update_paragraph_decoration_request(
-          start_index, end_index, style, output, first,
+          start_index, end_index, style, tab_id, output, first,
         )
       CreateParagraphBullets(start_index~, end_index~, bullet~) => {
         first = begin_request(output, first)
         output.write_string("{\"createParagraphBullets\":{\"range\":")
-        write_range(start_index, end_index, output)
+        write_range(start_index, end_index, tab_id, output)
         output.write_string(",\"bulletPreset\":")
         write_json_string(bullet_preset(bullet), output)
         output.write_string("}}")
       }
       UpdateTextStyle(start_index~, end_index~, style~, link~) =>
         first = write_update_text_request(
-          start_index, end_index, style, link, output, first,
+          start_index, end_index, style, link, tab_id, output, first,
         )
       InsertTable(index~, rows~, columns~) => {
         let location = index
@@ -734,18 +780,18 @@ fn lower_plan(plan : DocsUpdatePlan) -> String {
         output.write_string(rows.to_string())
         output.write_string(",\"columns\":")
         output.write_string(columns.to_string())
-        output.write_string(",\"location\":{\"index\":")
-        output.write_string(location.to_string())
-        output.write_string("}}}")
+        output.write_string(",\"location\":")
+        write_location(location, tab_id, output)
+        output.write_string("}}")
       }
       InsertTableCellText(table_index~, row~, column~, text~) =>
         match lookup_table(layouts, table_index) {
           Some(layout) => {
             let index = resolve_cell_index(layout, row, column, insertions)
             first = begin_request(output, first)
-            output.write_string("{\"insertText\":{\"location\":{\"index\":")
-            output.write_string(index.to_string())
-            output.write_string("},\"text\":")
+            output.write_string("{\"insertText\":{\"location\":")
+            write_location(index, tab_id, output)
+            output.write_string(",\"text\":")
             write_json_string(text, output)
             output.write_string("}}")
             insertions.push({
@@ -769,7 +815,7 @@ fn lower_plan(plan : DocsUpdatePlan) -> String {
             match background_color {
               Some(color) =>
                 first = write_update_cell_background_request(
-                  layout, row, column, color, output, first,
+                  layout, row, column, color, tab_id, output, first,
                 )
               None => ()
             }
@@ -779,7 +825,7 @@ fn lower_plan(plan : DocsUpdatePlan) -> String {
               cell_inserted_width(layout, row, column, insertions)
             first = begin_request(output, first)
             output.write_string("{\"updateParagraphStyle\":{\"range\":")
-            write_range(cell_start, cell_end, output)
+            write_range(cell_start, cell_end, tab_id, output)
             output.write_string(",\"paragraphStyle\":{\"alignment\":")
             write_json_string(table_alignment(alignment), output)
             output.write_string("},\"fields\":\"alignment\"}}")
@@ -801,6 +847,7 @@ fn lower_plan(plan : DocsUpdatePlan) -> String {
               cell_start + start_offset,
               cell_start + end_offset,
               style,
+              tab_id,
               output,
               first,
             )
@@ -824,16 +871,33 @@ fn lower_plan(plan : DocsUpdatePlan) -> String {
               cell_start + end_offset,
               style,
               link,
+              tab_id,
               output,
               first,
             )
           }
           None => ()
         }
+      DeleteContentRange(start_index~, end_index~) => {
+        first = begin_request(output, first)
+        output.write_string("{\"deleteContentRange\":{\"range\":")
+        write_range(start_index, end_index, tab_id, output)
+        output.write_string("}}")
+      }
     }
   }
   output.write_string("]}")
   output.to_string()
+}
+
+///|
+fn lower_plan(plan : DocsUpdatePlan) -> String {
+  lower_plan_for_tab(plan, None)
+}
+
+///|
+pub fn lower_update_plan(plan : DocsUpdatePlan, tab_id : String) -> String {
+  lower_plan_for_tab(plan, Some(tab_id))
 }
 
 ///|
@@ -933,7 +997,7 @@ pub async fn create_document(
 }
 
 ///|
-/// Create a document and retain the first tab as its Managed Tab.
+/// Create a document and retain the initially established tab as its Managed Tab.
 pub async fn create_document_with_managed_tab(
   client : @google_core.GoogleClient,
   title : String,
@@ -1023,6 +1087,67 @@ pub async fn batch_update_document(
 }
 
 ///|
+fn lower_update_plan_with_revision(
+  plan : DocsUpdatePlan,
+  tab_id : String,
+  required_revision_id : String,
+) -> String {
+  let lowered = lower_update_plan(plan, tab_id)
+  let body = StringBuilder::new()
+  body.write_string(lowered[:lowered.length() - 1].to_owned())
+  body.write_string(",\"writeControl\":{\"requiredRevisionId\":")
+  write_json_string(required_revision_id, body)
+  body.write_string("}}")
+  body.to_string()
+}
+
+///|
+pub async fn batch_update_document_with_revision(
+  client : @google_core.GoogleClient,
+  document_id : String,
+  tab_id : String,
+  plan : DocsUpdatePlan,
+  required_revision_id : String,
+) -> Result[Unit, UpdateBatchError] {
+  let url = "https://docs.googleapis.com/v1/documents/" +
+    document_id +
+    ":batchUpdate"
+  let request = @google_http.HttpRequest::new(
+    url,
+    @google_http.HttpMethod::POST,
+    { "Content-Type": "application/json" },
+    body=Some(
+      lower_update_plan_with_revision(plan, tab_id, required_revision_id),
+    ),
+  )
+  let response = client.request(request) catch {
+    @google_http.HttpError::NetworkError(message) =>
+      return Err(Adapter(AdapterTransport(message)))
+    @google_http.HttpError::TimeoutError(message) =>
+      return Err(Adapter(AdapterTransport(message)))
+    @google_http.HttpError::InvalidUrl(message) =>
+      return Err(Adapter(AdapterTransport(message)))
+  }
+  if response.status_code == 400 {
+    return Err(RevisionConflict)
+  }
+  if response.status_code < 200 || response.status_code >= 300 {
+    return Err(
+      Adapter(
+        AdapterHttpStatus(
+          status=response.status_code,
+          kind=safe_google_error_kind(response.status_code, response.body),
+        ),
+      ),
+    )
+  }
+  let _ = @json.parse(response.body) catch {
+    error => return Err(Adapter(AdapterDecode(error.to_string())))
+  }
+  Ok(())
+}
+
+///|
 /// Retrieves the document after publication for opt-in live verification.
 /// `includeTabsContent=true` ensures the native body is present in the raw
 /// response for documents using the current Google Docs tab model.
@@ -1035,6 +1160,36 @@ pub async fn get_document(
     "https://docs.googleapis.com/v1/documents/" +
     document_id +
     "?includeTabsContent=true",
+  )
+  match response {
+    Ok(response) => {
+      let document = @json.parse(response.body) catch {
+        error => return Err(AdapterDecode(error.to_string()))
+      }
+      let decoded : CreatedDocumentResponse = @json.from_json(document) catch {
+        error => return Err(AdapterDecode(error.to_string()))
+      }
+      if decoded.documentId.is_empty() {
+        Err(AdapterDecode("Google Docs get response has an empty documentId"))
+      } else {
+        Ok({ document_id: decoded.documentId, body: response.body })
+      }
+    }
+    Err(error) => Err(error)
+  }
+}
+
+///|
+/// Retrieves a document body with suggested edits represented inline.
+pub async fn get_remote_document_body(
+  client : @google_core.GoogleClient,
+  document_id : String,
+) -> Result[RetrievedDocument, DocsAdapterError] {
+  let response = send_get(
+    client,
+    "https://docs.googleapis.com/v1/documents/" +
+    document_id +
+    "?includeTabsContent=true&suggestionsViewMode=SUGGESTIONS_INLINE",
   )
   match response {
     Ok(response) => {

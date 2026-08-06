@@ -25,32 +25,42 @@ create-or-update relationship, and another installation does not inherit it.
 
 ## Current repository state
 
-The current implementation is create-only. It calls
-`POST https://docs.googleapis.com/v1/documents`, then one
-`POST .../{documentId}:batchUpdate`, and returns only the ID and canonical URL;
-it stores no mapping or remote marker
-([adapter](https://github.com/RainbowDashy/pumd/blob/7d0632c3304ca68b13d2f6a6b4a158a540b54094/publish/docs_adapter.mbt#L848-L901),
-[publish flow](https://github.com/RainbowDashy/pumd/blob/7d0632c3304ca68b13d2f6a6b4a158a540b54094/publish/publish.mbt#L491-L549)).
-The request planner assumes a blank body starting at index 1, and the lowered
-batch contains only `requests`, with no delete or write control
-([planner](https://github.com/RainbowDashy/pumd/blob/7d0632c3304ca68b13d2f6a6b4a158a540b54094/publish/docs_plan.mbt#L300-L318),
-[lowering](https://github.com/RainbowDashy/pumd/blob/7d0632c3304ca68b13d2f6a6b4a158a540b54094/publish/docs_adapter.mbt#L639-L653)).
-The CLI exposes only `publish` and auth lifecycle commands
-([arguments](https://github.com/RainbowDashy/pumd/blob/7d0632c3304ca68b13d2f6a6b4a158a540b54094/cmd/pumd/args/args.mbt#L69-L99)).
-There is a `documents.get` adapter for opt-in live smoke verification, but it
-retains the response as raw JSON and is not part of an update path
-([smoke read adapter](https://github.com/RainbowDashy/pumd/blob/7d0632c3304ca68b13d2f6a6b4a158a540b54094/publish/docs_adapter.mbt#L903-L929)).
+The implementation now has a machine-local Publication Registry keyed by
+canonical source path. Each Publication records the Google document ID, Managed
+Tab ID, and Published Baseline, so `pumd publish` is create-or-update rather
+than create-only. First publish creates and registers the destination; later
+publishes re-read only that Managed Tab and never discover or replace a legacy
+document.
 
-Project Authorization deliberately requests exactly
-`https://www.googleapis.com/auth/drive.file`
-([source](https://github.com/RainbowDashy/pumd/blob/7d0632c3304ca68b13d2f6a6b4a158a540b54094/authorization/project_authorization.mbt#L89-L105),
-[authorization URL](https://github.com/RainbowDashy/pumd/blob/7d0632c3304ca68b13d2f6a6b4a158a540b54094/authorization/project_authorization.mbt#L270-L288)).
-The current guided setup enables only `docs.googleapis.com`
-([ADR-0008](../adr/0008-browser-owned-project-authorization-provisioning.md));
-comment inspection additionally requires `drive.googleapis.com` to be enabled.
-Google documents API enablement as a project prerequisite and lists the
-separate service IDs for Docs and Drive
-([Enable Google Workspace APIs](https://developers.google.com/workspace/guides/enable-apis)).
+The update path reads tab-aware Google Docs content with
+`includeTabsContent=true` and `suggestionsViewMode=SUGGESTIONS_INLINE`, then
+normalizes the remote document and reconciles it with the local Desired Document
+and Published Baseline. It treats body paragraphs and whole tables as units,
+including text and formatting, preserves remote-only units, and lowers
+non-conflicting local changes into minimal ordered requests. Unsupported remote
+structures remain opaque remote-only units; ambiguous alignment becomes a
+Publication Conflict. Inline suggestions participate as remote changes.
+
+Before any content-changing update, pumd paginates Drive comment inspection.
+An unresolved comment is a Review Barrier; a no-op inspection is allowed. A
+write uses one atomic Docs batch with `writeControl.requiredRevisionId` from the
+read. A revision conflict applies nothing, and an ambiguous transport outcome
+is recovered by re-reading before pumd decides whether the intended state
+landed. Confirmed success atomically advances the Published Baseline to the new
+Desired Document; a no-op does not.
+
+`publish --dry-run` executes authorization, remote reading, comment inspection,
+normalization, suggestion interpretation, and reconciliation, and reports its
+planned units, Publication Conflicts, Review Barriers, and concurrency-sensitive
+status without remote writes or Publication Registry changes. `pumd list` is
+local by default, while `pumd list --refresh` explicitly inspects registered
+documents; `pumd move` and `pumd forget` manage only local Publication records.
+
+Project Authorization still requests exactly
+`https://www.googleapis.com/auth/drive.file`, with no identity scopes. Its
+browser handoff now requires enabling `docs.googleapis.com` first and
+`drive.googleapis.com` second before creating the Desktop client. Drive is used
+only for comment inspection, never Publication discovery.
 
 ## Rejected remote identity and tagging alternative
 
@@ -367,6 +377,9 @@ Consequences:
   comment inspection uses Drive.
 
 ## Recommended delivery order
+
+**Status: implemented.** The sequence remains below as the delivery record for
+the completed create-or-update behavior.
 
 1. Define and atomically persist the user-level, machine-local Publication
    Registry keyed by canonical absolute source path.

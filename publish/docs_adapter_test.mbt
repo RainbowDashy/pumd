@@ -22,6 +22,45 @@ fn docs_adapter_client(
 }
 
 ///|
+priv struct DocsAdapterNetworkFailureClient {
+  requests : Array[@google_http.HttpRequest]
+}
+
+///|
+impl @google_http.HttpClient for DocsAdapterNetworkFailureClient with fn request(
+  self,
+  request,
+) {
+  self.requests.push(request)
+  raise @google_http.HttpError::NetworkError("deterministic network failure")
+}
+
+///|
+fn docs_adapter_revision_plan() -> DocsUpdatePlan {
+  let markdown =
+    #|- body
+    #|
+    #|| Header |
+    #|| --- |
+    #|| cell |
+  let plan = match @pumd.render_markdown(markdown) {
+    Ok(document) => compile_docs_update_plan(document)
+    Err(_) => abort("fixture must render")
+  }
+  plan.append_delete_content_range(start_index=1, end_index=2)
+  plan
+}
+
+///|
+fn count_occurrences(body : String, needle : String) -> Int {
+  let mut count = 0
+  for _ in body.split(needle) {
+    count = count + 1
+  }
+  count - 1
+}
+
+///|
 async test "create document uses a title-only Docs REST request" {
   let fake = DocsAdapterFakeHttpClient::{
     requests: [],
@@ -395,6 +434,97 @@ async test "batch update rejects a malformed success response" {
 }
 
 ///|
+async test "revision-controlled batch updates lower every location into the managed tab" {
+  let fake = DocsAdapterFakeHttpClient::{
+    requests: [],
+    responses: [@google_http.HttpResponse::new(200, {}, "{}")],
+  }
+  match
+    batch_update_document_with_revision(
+      docs_adapter_client(fake),
+      "doc-123",
+      "tab-7",
+      docs_adapter_revision_plan(),
+      "revision-9",
+    ) {
+    Ok(_) => ()
+    Err(_) => assert_true(false)
+  }
+  assert_eq(fake.requests.length(), 1)
+  let body = match fake.requests[0].body {
+    Some(body) => body
+    None => abort("revision-controlled batch update must have JSON")
+  }
+  assert_true(@json.valid(body))
+  assert_true(body.contains("\"writeControl\":{\"requiredRevisionId\":\"revision-9\"}"))
+  assert_true(body.contains("\"insertText\""))
+  assert_true(body.contains("\"updateParagraphStyle\""))
+  assert_true(body.contains("\"updateTextStyle\""))
+  assert_true(body.contains("\"createParagraphBullets\""))
+  assert_true(body.contains("\"insertTable\""))
+  assert_true(body.contains("\"updateTableCellStyle\""))
+  assert_true(body.contains("\"deleteContentRange\""))
+  let tab_count = count_occurrences(body, "\"tabId\":\"tab-7\"")
+  assert_eq(
+    tab_count,
+    count_occurrences(body, "\"index\":") +
+    count_occurrences(body, "\"startIndex\":"),
+  )
+  assert_true(tab_count >= 13)
+}
+
+///|
+async test "revision-controlled batch updates classify conflicts and adapter failures" {
+  let conflict = DocsAdapterFakeHttpClient::{
+    requests: [],
+    responses: [@google_http.HttpResponse::new(400, {}, "stale revision")],
+  }
+  match
+    batch_update_document_with_revision(
+      docs_adapter_client(conflict),
+      "doc-123",
+      "tab-7",
+      docs_adapter_revision_plan(),
+      "revision-9",
+    ) {
+    Err(RevisionConflict) => ()
+    _ => assert_true(false)
+  }
+  let forbidden = DocsAdapterFakeHttpClient::{
+    requests: [],
+    responses: [@google_http.HttpResponse::new(403, {}, "forbidden")],
+  }
+  match
+    batch_update_document_with_revision(
+      docs_adapter_client(forbidden),
+      "doc-123",
+      "tab-7",
+      docs_adapter_revision_plan(),
+      "revision-9",
+    ) {
+    Err(Adapter(AdapterHttpStatus(status=403, kind=Some(PermissionDenied)))) =>
+      ()
+    _ => assert_true(false)
+  }
+  let network = DocsAdapterNetworkFailureClient::{ requests: [] }
+  let network_client = @google_core.GoogleClient::new(
+    fn() { "test-token" },
+    http=Some(network),
+  )
+  match
+    batch_update_document_with_revision(
+      network_client,
+      "doc-123",
+      "tab-7",
+      docs_adapter_revision_plan(),
+      "revision-9",
+    ) {
+    Err(Adapter(AdapterTransport("deterministic network failure"))) => ()
+    _ => assert_true(false)
+  }
+}
+
+///|
 async test "get document reads back the ID and unmodified Docs response body" {
   let response_body = "{\"documentId\":\"doc-123\",\"body\":{\"content\":[]}}"
   let fake = DocsAdapterFakeHttpClient::{
@@ -417,4 +547,41 @@ async test "get document reads back the ID and unmodified Docs response body" {
     fake.requests[0].url,
     content="https://docs.googleapis.com/v1/documents/doc-123?includeTabsContent=true",
   )
+}
+
+///|
+async test "suggestion-aware document reads retain the raw body" {
+  let response_body = "{\"documentId\":\"doc-123\",\"body\":{\"content\":[]}}"
+  let fake = DocsAdapterFakeHttpClient::{
+    requests: [],
+    responses: [@google_http.HttpResponse::new(200, {}, response_body)],
+  }
+  match get_remote_document_body(docs_adapter_client(fake), "doc-123") {
+    Ok(document) => {
+      inspect(document.document_id, content="doc-123")
+      inspect(document.body, content=response_body)
+    }
+    Err(_) => assert_true(false)
+  }
+  assert_eq(fake.requests.length(), 1)
+  assert_eq(fake.requests[0].method_, @google_http.HttpMethod::GET)
+  assert_true(fake.requests[0].url.contains("includeTabsContent=true"))
+  assert_true(
+    fake.requests[0].url.contains("suggestionsViewMode=SUGGESTIONS_INLINE"),
+  )
+}
+
+///|
+async test "suggestion-aware document reads reject an empty document ID" {
+  let fake = DocsAdapterFakeHttpClient::{
+    requests: [],
+    responses: [
+      @google_http.HttpResponse::new(200, {}, "{\"documentId\":\"\"}"),
+    ],
+  }
+  match get_remote_document_body(docs_adapter_client(fake), "doc-123") {
+    Err(AdapterDecode(message)) =>
+      assert_true(message.contains("empty documentId"))
+    _ => assert_true(false)
+  }
 }

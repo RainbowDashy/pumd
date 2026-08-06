@@ -9,6 +9,7 @@ pub(all) enum PublicationRemoteStage {
   DocumentCreation
   DocumentPopulation
   DocumentRead
+  DocumentUpdate
 } derive(Eq, @debug.Debug)
 
 ///|
@@ -71,6 +72,11 @@ pub(all) enum PublishError {
   BlockedPublication(source_path~ : String)
   Read(document_id~ : String, url~ : String, message~ : String)
   RemoteMissing(document_id~ : String, url~ : String)
+  PublicationConflict(message~ : String)
+  ReviewBarrier(unresolved~ : Int)
+  Concurrency(message~ : String)
+  AmbiguousUpdate(document_id~ : String, url~ : String)
+  UpdateFailed(document_id~ : String, url~ : String, message~ : String)
 } derive(@debug.Debug)
 
 ///|
@@ -93,6 +99,7 @@ fn remote_stage_name(stage : PublicationRemoteStage) -> String {
     DocumentCreation => "document creation"
     DocumentPopulation => "document population"
     DocumentRead => "document read"
+    DocumentUpdate => "document update"
   }
 }
 
@@ -274,6 +281,32 @@ pub fn PublishError::user_message(self : PublishError) -> String {
       ", " +
       url +
       "); pumd will not create a replacement; restore the document or forget the Publication explicitly."
+    PublicationConflict(message~) =>
+      "publish blocked: " +
+      message +
+      " pumd applied no partial updates; resolve the overlapping edits in Google Docs or revert the local change, then publish again."
+    ReviewBarrier(unresolved~) =>
+      "publish blocked: " +
+      unresolved.to_string() +
+      " unresolved review comment(s) remain in Google Docs. Resolve or delete them, then publish again; pumd never bypasses review feedback."
+    Concurrency(message~) =>
+      "publish was interrupted by a concurrent change: " +
+      message +
+      " Nothing was applied to the document or the local registry. Re-read the document and publish again."
+    AmbiguousUpdate(document_id~, url~) =>
+      "the update request had an ambiguous transport outcome (document ID " +
+      document_id +
+      ", " +
+      url +
+      "). pumd re-read the document and could not confirm whether the intended state landed; run publish again to reconcile. No local state was committed."
+    UpdateFailed(document_id~, url~, message~) =>
+      "document update failed (document ID " +
+      document_id +
+      ", " +
+      url +
+      "): " +
+      message +
+      generic_remote_recovery_guidance
   }
 }
 

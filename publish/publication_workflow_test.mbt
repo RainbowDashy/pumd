@@ -85,6 +85,152 @@ fn hello_document() -> @pumd.DesiredDocument {
 }
 
 ///|
+fn workflow_json_string(value : String, output : StringBuilder) -> Unit {
+  output.write_char('"')
+  for char in value {
+    match char {
+      '"' => output.write_string("\\\"")
+      '\\' => output.write_string("\\\\")
+      '\n' => output.write_string("\\n")
+      '\r' => output.write_string("\\r")
+      '\t' => output.write_string("\\t")
+      _ => output.write_char(char)
+    }
+  }
+  output.write_char('"')
+}
+
+///|
+fn workflow_named_style(style : @pumd.NamedStyle) -> String {
+  match style {
+    NormalText => "NORMAL_TEXT"
+    Heading1 => "HEADING_1"
+    Heading2 => "HEADING_2"
+    Heading3 => "HEADING_3"
+    Heading4 => "HEADING_4"
+    Heading5 => "HEADING_5"
+    Heading6 => "HEADING_6"
+  }
+}
+
+///|
+fn write_workflow_paragraph(
+  paragraph : @pumd.Paragraph,
+  start : Int,
+  output : StringBuilder,
+) -> Int {
+  let mut end = start
+  for run in paragraph.runs {
+    end = advance_google_docs_index(index=end, text=run.content)
+  }
+  let paragraph_end = advance_google_docs_index(index=end, text="\n")
+  output.write_string("{\"startIndex\":")
+  output.write_string(start.to_string())
+  output.write_string(",\"endIndex\":")
+  output.write_string(paragraph_end.to_string())
+  output.write_string(",\"paragraph\":{\"paragraphStyle\":{\"namedStyleType\":")
+  workflow_json_string(workflow_named_style(paragraph.style.named_style), output)
+  output.write_string(",\"lineSpacing\":")
+  output.write_string(paragraph.style.line_spacing_percent.to_string())
+  output.write_string(",\"spaceAbove\":{\"magnitude\":")
+  output.write_string(paragraph.style.space_above_points.to_string())
+  output.write_string(",\"unit\":\"PT\"},\"spaceBelow\":{\"magnitude\":")
+  output.write_string(paragraph.style.space_below_points.to_string())
+  output.write_string(",\"unit\":\"PT\"}},\"elements\":[")
+  let mut cursor = start
+  for index, run in paragraph.runs {
+    if index > 0 { output.write_char(',') }
+    let run_end = advance_google_docs_index(index=cursor, text=run.content)
+    output.write_string("{\"startIndex\":")
+    output.write_string(cursor.to_string())
+    output.write_string(",\"endIndex\":")
+    output.write_string(run_end.to_string())
+    output.write_string(",\"textRun\":{\"content\":")
+    workflow_json_string(run.content, output)
+    output.write_string(",\"textStyle\":{\"bold\":")
+    output.write_string(run.style.bold.to_string())
+    output.write_string(",\"italic\":")
+    output.write_string(run.style.italic.to_string())
+    output.write_string(",\"underline\":")
+    output.write_string(run.style.underline.to_string())
+    output.write_string(",\"weightedFontFamily\":{\"fontFamily\":")
+    workflow_json_string(run.style.font_family, output)
+    output.write_string("},\"fontSize\":{\"magnitude\":")
+    output.write_string(run.style.font_size_points.to_string())
+    output.write_string(",\"unit\":\"PT\"}")
+    match run.link {
+      Some(link) => {
+        output.write_string(",\"link\":{\"url\":")
+        workflow_json_string(link.url, output)
+        output.write_char('}')
+      }
+      None => ()
+    }
+    output.write_string("}}}")
+    cursor = run_end
+  }
+  output.write_string("]}}")
+  paragraph_end
+}
+
+///|
+fn docs_response_json(
+  document : @pumd.DesiredDocument,
+  document_id : String,
+  revision : String,
+  tab_id : String,
+) -> String {
+  let output = StringBuilder::new()
+  output.write_string("{\"documentId\":")
+  workflow_json_string(document_id, output)
+  output.write_string(",\"revisionId\":")
+  workflow_json_string(revision, output)
+  output.write_string(",\"title\":\"Reviewer title\",\"tabs\":[{\"tabProperties\":{\"tabId\":")
+  workflow_json_string(tab_id, output)
+  output.write_string("},\"documentTab\":{\"body\":{\"content\":[")
+  let mut cursor = 1
+  for index, element in document.content {
+    if index > 0 { output.write_char(',') }
+    match element {
+      @pumd.StructuralElement::Paragraph(paragraph) =>
+        cursor = write_workflow_paragraph(paragraph, cursor, output)
+      @pumd.StructuralElement::Table(_) =>
+        abort("workflow Docs fixture currently supports paragraph documents")
+    }
+  }
+  output.write_string("]}}}]}")
+  output.to_string()
+}
+
+///|
+fn docs_response(
+  document : @pumd.DesiredDocument,
+  document_id : String,
+  revision : String,
+  tab_id : String,
+) -> @google_http.HttpResponse {
+  @google_http.HttpResponse::new(
+    200,
+    {},
+    docs_response_json(document, document_id, revision, tab_id),
+  )
+}
+
+///|
+fn drive_comments_response(unresolved : Int) -> @google_http.HttpResponse {
+  let comments = StringBuilder::new()
+  comments.write_string("{\"comments\":[")
+  for index = 0; index < unresolved; index = index + 1 {
+    if index > 0 { comments.write_char(',') }
+    comments.write_string("{\"id\":\"c")
+    comments.write_string(index.to_string())
+    comments.write_string("\",\"resolved\":false}")
+  }
+  comments.write_string("]}")
+  @google_http.HttpResponse::new(200, {}, comments.to_string())
+}
+
+///|
 async fn seed_ready(
   directory : String,
   path : String,
@@ -108,6 +254,41 @@ async fn seed_ready(
     ),
     Ok(()),
   )
+}
+
+///|
+async fn seed_ready_with_baseline(
+  directory : String,
+  path : String,
+  id : String,
+  tab : String,
+  baseline : @pumd.DesiredDocument,
+) -> Unit {
+  let canonical = @registry.canonical_source_path(path)
+  assert_eq(
+    @registry.register_provisional_publication(
+      directory,
+      ready_entry(canonical, id, tab),
+    ),
+    Ok(()),
+  )
+  assert_eq(
+    @registry.commit_ready_publication(
+      directory,
+      canonical,
+      baseline,
+      "2026-08-05T12:00:00Z",
+    ),
+    Ok(()),
+  )
+}
+
+///|
+fn workflow_document(markdown : String) -> @pumd.DesiredDocument {
+  match @pumd.render_markdown(markdown) {
+    Ok(document) => document
+    Err(_) => abort("workflow fixture must render")
+  }
 }
 
 ///|
@@ -284,12 +465,15 @@ async test "ambiguous creation records blocked publication" {
 }
 
 ///|
-async test "ready publications short circuit before token and HTTP" {
+async test "ready publication with no local changes is a no-op" {
   let directory = workflow_directory("already")
   clean_workflow_directory(directory)
   seed_ready(directory, "already.md", "old-doc", "old-tab")
   let calls : Array[Unit] = []
-  let fake = WorkflowFakeHttpClient::{ requests: [], responses: [] }
+  let fake = WorkflowFakeHttpClient::{
+    requests: [],
+    responses: [docs_response(hello_document(), "old-doc", "rev-1", "old-tab")],
+  }
   guard publish_path_with_registry(
       "already.md",
       fn(_) { Ok("Hello") },
@@ -306,12 +490,299 @@ async test "ready publications short circuit before token and HTTP" {
       fake,
       false,
     )
-    is Ok(AlreadyPublished(success, "2026-08-05T12:00:00Z")) else {
-    fail("ready entry must short circuit")
+    is Ok(NoOp(success, "2026-08-05T12:00:00Z")) else {
+    fail("unchanged ready entry must be a no-op")
   }
   inspect(success.document_id, content="old-doc")
-  assert_eq(calls.length(), 0)
-  assert_eq(fake.requests.length(), 0)
+  assert_eq(calls.length(), 1)
+  assert_eq(fake.requests.length(), 1)
+  assert_true(fake.requests[0].url.contains("suggestionsViewMode=SUGGESTIONS_INLINE"))
+  clean_workflow_directory(directory)
+}
+
+///|
+async test "ready publication updates the baseline with a revision-checked batch" {
+  let directory = workflow_directory("update")
+  clean_workflow_directory(directory)
+  let baseline = workflow_document("Hello")
+  let desired = workflow_document("Updated")
+  seed_ready_with_baseline(directory, "update.md", "update-doc", "update-tab", baseline)
+  let fake = WorkflowFakeHttpClient::{
+    requests: [],
+    responses: [
+      docs_response(baseline, "update-doc", "rev-update", "update-tab"),
+      drive_comments_response(0),
+      success_response(),
+    ],
+  }
+  guard publish_path_with_registry(
+      "update.md",
+      fn(_) { Ok("Updated") },
+      directory,
+      Adc,
+      fn() { Ok("project") },
+      fn() { Ok("adc") },
+      fake,
+      false,
+    )
+    is Ok(Updated(success, timestamp)) else {
+    fail("local-only edit must update")
+  }
+  inspect(success.document_id, content="update-doc")
+  assert_true(timestamp != "2026-08-05T12:00:00Z")
+  assert_eq(fake.requests.length(), 3)
+  let batch = fake.requests[2].body.unwrap()
+  assert_true(batch.contains("\"writeControl\":{\"requiredRevisionId\":\"rev-update\"}"))
+  guard @registry.load_registry_document(directory) is Ok(document) else {
+    fail("registry must load")
+  }
+  guard document.entries[0].published_baseline is Some(saved) else {
+    fail("updated entry needs baseline")
+  }
+  assert_eq(@debug.to_string(saved), @debug.to_string(desired))
+  clean_workflow_directory(directory)
+}
+
+///|
+async test "conflicting ready changes do not write the document or registry" {
+  let directory = workflow_directory("conflict")
+  clean_workflow_directory(directory)
+  let baseline = workflow_document("Hello")
+  seed_ready_with_baseline(directory, "conflict.md", "conflict-doc", "conflict-tab", baseline)
+  let fake = WorkflowFakeHttpClient::{
+    requests: [],
+    responses: [
+      docs_response(
+        workflow_document("Reviewer edit"),
+        "conflict-doc",
+        "rev-conflict",
+        "conflict-tab",
+      ),
+    ],
+  }
+  guard publish_path_with_registry(
+      "conflict.md",
+      fn(_) { Ok("Local edit") },
+      directory,
+      Adc,
+      fn() { Ok("project") },
+      fn() { Ok("adc") },
+      fake,
+      false,
+    )
+    is Err(PublicationConflict(message~)) else {
+    fail("same paragraph edits must conflict")
+  }
+  assert_true(message.contains("paragraph 1"))
+  assert_eq(fake.requests.length(), 1)
+  guard @registry.load_registry_document(directory) is Ok(document) else {
+    fail("registry must load")
+  }
+  assert_eq(@debug.to_string(document.entries[0].published_baseline.unwrap()), @debug.to_string(baseline))
+  clean_workflow_directory(directory)
+}
+
+///|
+async test "unresolved comments block a planned ready update" {
+  let directory = workflow_directory("review")
+  clean_workflow_directory(directory)
+  let baseline = workflow_document("Hello")
+  seed_ready_with_baseline(directory, "review.md", "review-doc", "review-tab", baseline)
+  let fake = WorkflowFakeHttpClient::{
+    requests: [],
+    responses: [
+      docs_response(baseline, "review-doc", "rev-review", "review-tab"),
+      drive_comments_response(1),
+    ],
+  }
+  guard publish_path_with_registry(
+      "review.md",
+      fn(_) { Ok("Local edit") },
+      directory,
+      Adc,
+      fn() { Ok("project") },
+      fn() { Ok("adc") },
+      fake,
+      false,
+    )
+    is Err(ReviewBarrier(unresolved=1)) else {
+    fail("unresolved comment must block")
+  }
+  assert_eq(fake.requests.length(), 2)
+  clean_workflow_directory(directory)
+}
+
+///|
+async test "revision conflicts leave the ready baseline unchanged" {
+  let directory = workflow_directory("concurrency")
+  clean_workflow_directory(directory)
+  let baseline = workflow_document("Hello")
+  seed_ready_with_baseline(directory, "concurrency.md", "concurrency-doc", "concurrency-tab", baseline)
+  let fake = WorkflowFakeHttpClient::{
+    requests: [],
+    responses: [
+      docs_response(baseline, "concurrency-doc", "rev-old", "concurrency-tab"),
+      drive_comments_response(0),
+      @google_http.HttpResponse::new(400, {}, "{}"),
+    ],
+  }
+  guard publish_path_with_registry(
+      "concurrency.md",
+      fn(_) { Ok("Local edit") },
+      directory,
+      Adc,
+      fn() { Ok("project") },
+      fn() { Ok("adc") },
+      fake,
+      false,
+    )
+    is Err(Concurrency(message~)) else {
+    fail("revision conflict must surface concurrency")
+  }
+  assert_true(message.contains("nothing was applied"))
+  guard @registry.load_registry_document(directory) is Ok(document) else {
+    fail("registry must load")
+  }
+  assert_eq(@debug.to_string(document.entries[0].published_baseline.unwrap()), @debug.to_string(baseline))
+  clean_workflow_directory(directory)
+}
+
+///|
+priv struct WorkflowAmbiguousHttpClient {
+  requests : Array[@google_http.HttpRequest]
+  responses : Array[@google_http.HttpResponse]
+}
+
+///|
+impl @google_http.HttpClient for WorkflowAmbiguousHttpClient with fn request(
+  self,
+  request,
+) {
+  let index = self.requests.length()
+  self.requests.push(request)
+  if request.url.contains(":batchUpdate") {
+    raise @google_http.HttpError::NetworkError("ambiguous transport")
+  }
+  self.responses[index]
+}
+
+///|
+async test "ambiguous transport recovery commits when the re-read confirms the update landed" {
+  let directory = workflow_directory("ambiguous-landed")
+  clean_workflow_directory(directory)
+  let baseline = workflow_document("Hello")
+  let desired = workflow_document("Local edit")
+  seed_ready_with_baseline(directory, "ambiguous.md", "ambiguous-doc", "ambiguous-tab", baseline)
+  let fake = WorkflowAmbiguousHttpClient::{
+    requests: [],
+    responses: [
+      docs_response(baseline, "ambiguous-doc", "rev-1", "ambiguous-tab"),
+      drive_comments_response(0),
+      success_response(),
+      docs_response(desired, "ambiguous-doc", "rev-2", "ambiguous-tab"),
+    ],
+  }
+  guard publish_path_with_registry(
+      "ambiguous.md",
+      fn(_) { Ok("Local edit") },
+      directory,
+      Adc,
+      fn() { Ok("project") },
+      fn() { Ok("adc") },
+      fake,
+      false,
+    )
+    is Ok(Updated(_, _)) else {
+    fail("a confirmed ambiguous update must commit")
+  }
+  assert_eq(fake.requests.length(), 4)
+  guard @registry.load_registry_document(directory) is Ok(document) else {
+    fail("registry must load")
+  }
+  guard document.entries[0].published_baseline is Some(saved) else {
+    fail("updated entry needs baseline")
+  }
+  assert_eq(@debug.to_string(saved), @debug.to_string(desired))
+  clean_workflow_directory(directory)
+}
+
+///|
+async test "ambiguous transport recovery reports ambiguity when the intended state did not land" {
+  let directory = workflow_directory("ambiguous-lost")
+  clean_workflow_directory(directory)
+  let baseline = workflow_document("Hello")
+  seed_ready_with_baseline(directory, "ambiguous.md", "ambiguous-doc", "ambiguous-tab", baseline)
+  let fake = WorkflowAmbiguousHttpClient::{
+    requests: [],
+    responses: [
+      docs_response(baseline, "ambiguous-doc", "rev-1", "ambiguous-tab"),
+      drive_comments_response(0),
+      success_response(),
+      docs_response(baseline, "ambiguous-doc", "rev-1", "ambiguous-tab"),
+    ],
+  }
+  guard publish_path_with_registry(
+      "ambiguous.md",
+      fn(_) { Ok("Local edit") },
+      directory,
+      Adc,
+      fn() { Ok("project") },
+      fn() { Ok("adc") },
+      fake,
+      false,
+    )
+    is Err(AmbiguousUpdate(document_id~, ..)) else {
+    fail("an unconfirmed ambiguous update must stay ambiguous")
+  }
+  assert_eq(document_id, "ambiguous-doc")
+  assert_eq(fake.requests.length(), 4)
+  guard @registry.load_registry_document(directory) is Ok(document) else {
+    fail("registry must load")
+  }
+  assert_eq(@debug.to_string(document.entries[0].published_baseline.unwrap()), @debug.to_string(baseline))
+  clean_workflow_directory(directory)
+}
+
+///|
+async test "dry-run reports barriers without posting or changing a ready registry" {
+  let directory = workflow_directory("dry-update")
+  clean_workflow_directory(directory)
+  let baseline = workflow_document("Hello")
+  seed_ready_with_baseline(directory, "dry-update.md", "dry-doc", "dry-tab", baseline)
+  let fake = WorkflowFakeHttpClient::{
+    requests: [],
+    responses: [
+      docs_response(baseline, "dry-doc", "rev-dry-update", "dry-tab"),
+      drive_comments_response(1),
+    ],
+  }
+  guard publish_path_with_registry(
+      "dry-update.md",
+      fn(_) { Ok("Local edit") },
+      directory,
+      Adc,
+      fn() { Ok("project") },
+      fn() { Ok("adc") },
+      fake,
+      true,
+    )
+    is Ok(DryRunUpdate(report~)) else {
+    fail("dry run must inspect planned update and comments")
+  }
+  assert_eq(report.planned_units, 1)
+  assert_eq(report.planned, ["paragraph 1"])
+  assert_eq(report.conflicts, 0)
+  assert_eq(report.conflicted, [])
+  assert_eq(report.review_barriers, 1)
+  assert_true(!report.concurrency_sensitive)
+  assert_eq(fake.requests.length(), 2)
+  for request in fake.requests {
+    assert_true(!request.url.contains(":batchUpdate"))
+  }
+  guard @registry.load_registry_document(directory) is Ok(document) else {
+    fail("registry must load")
+  }
+  assert_eq(@debug.to_string(document.entries[0].published_baseline.unwrap()), @debug.to_string(baseline))
   clean_workflow_directory(directory)
 }
 
@@ -390,11 +861,8 @@ async test "dry run distinguishes unpublished provisional blocked and ready entr
   let docs = WorkflowFakeHttpClient::{
     requests: [],
     responses: [
-      @google_http.HttpResponse::new(
-        200,
-        {},
-        "{\"documentId\":\"ready-doc\",\"title\":\"Reviewer title\",\"tabs\":[{\"tabProperties\":{\"tabId\":\"ready-tab\"}}]}",
-      ),
+      docs_response(hello_document(), "ready-doc", "rev-dry", "ready-tab"),
+      drive_comments_response(0),
     ],
   }
   guard publish_path_with_registry(
@@ -407,12 +875,13 @@ async test "dry run distinguishes unpublished provisional blocked and ready entr
       docs,
       true,
     )
-    is Ok(DryRunInspection(inspection~)) else {
-    fail("ready dry run inspection")
+    is Ok(DryRunUpdate(report~)) else {
+    fail("ready dry run update")
   }
-  assert_eq(inspection.title, Some("Reviewer title"))
-  assert_true(inspection.managed_tab_present)
-  assert_eq(docs.requests.length(), 1)
+  assert_eq(report.title, Some("Reviewer title"))
+  assert_eq(report.planned_units, 0)
+  assert_eq(report.conflicts, 0)
+  assert_eq(docs.requests.length(), 2)
   assert_true(
     docs.requests[0].url.contains("ready-doc?includeTabsContent=true"),
   )
@@ -430,7 +899,7 @@ async test "dry run maps missing tabs permission and 404 without mutations" {
       @google_http.HttpResponse::new(
         200,
         {},
-        "{\"documentId\":\"doc\",\"tabs\":[]}",
+        "{\"documentId\":\"doc\",\"revisionId\":\"rev\",\"tabs\":[]}",
       ),
     ],
   }

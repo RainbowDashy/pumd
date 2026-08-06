@@ -290,3 +290,13 @@ test "planning rejects ordered-list starts Google Docs cannot write" {
     _ => fail("non-default ordered-list start must fail before HTTP")
   }
 }
+
+///|
+test "snapshots delete content ranges" {
+  let plan = match @pumd.render_markdown("Hello") {
+    Ok(document) => compile_docs_update_plan(document)
+    Err(_) => abort("fixture must render")
+  }
+  plan.append_delete_content_range(start_index=3, end_index=8)
+  assert_true(plan.to_snapshot().contains("delete-content-range 3..8\n"))
+}

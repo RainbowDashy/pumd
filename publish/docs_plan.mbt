@@ -56,11 +56,22 @@ pub enum DocsUpdateRequest {
     style~ : @pumd.TextStyle,
     link~ : @pumd.LinkIntent?
   )
+  DeleteContentRange(start_index~ : Int, end_index~ : Int)
 }
 
 ///|
 pub struct DocsUpdatePlan {
   requests : Array[DocsUpdateRequest]
+}
+
+///|
+/// Appends a deletion after the caller has computed the target body range.
+pub fn DocsUpdatePlan::append_delete_content_range(
+  self : DocsUpdatePlan,
+  start_index~ : Int,
+  end_index~ : Int,
+) -> Unit {
+  self.requests.push(DeleteContentRange(start_index~, end_index~))
 }
 
 ///|
@@ -615,6 +626,12 @@ pub fn DocsUpdatePlan::to_snapshot(self : DocsUpdatePlan) -> String {
         buffer.write_string("..")
         buffer.write_string(end_offset.to_string())
         write_plan_text_style(style, link, buffer)
+      }
+      DeleteContentRange(start_index~, end_index~) => {
+        buffer.write_string("delete-content-range ")
+        buffer.write_string(start_index.to_string())
+        buffer.write_string("..")
+        buffer.write_string(end_index.to_string())
       }
     }
     buffer.write_char('\n')

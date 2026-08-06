@@ -3,19 +3,26 @@
 pub(all) enum PublishOutcome {
   Completed(PublishSuccess)
   AlreadyPublished(PublishSuccess, String)
+  Updated(PublishSuccess, String)
+  NoOp(PublishSuccess, String)
   DryRunCreation(title~ : String)
-  DryRunInspection(inspection~ : DryRunInspection)
+  DryRunUpdate(report~ : DryRunUpdateReport)
   DryRunProvisional(PublishSuccess)
   DryRunBlocked(source_path~ : String)
 } derive(@debug.Debug)
 
 ///|
-/// The remote state reported by a dry-run of an existing Publication.
-pub(all) struct DryRunInspection {
+/// The reconciliation state reported by a dry-run of an existing Publication.
+pub(all) struct DryRunUpdateReport {
   document_id : String
   url : String
   title : String?
-  managed_tab_present : Bool
+  planned_units : Int
+  planned : Array[String]
+  conflicts : Int
+  conflicted : Array[String]
+  review_barriers : Int
+  concurrency_sensitive : Bool
 } derive(@debug.Debug)
 
 ///|
@@ -135,6 +142,145 @@ fn registry_error(error : @registry.RegistryError) -> PublishError {
 }
 
 ///|
+/// Commit a confirmed successful update to the Published Baseline under the
+/// already-held registry lock.
+async fn commit_updated_baseline(
+  document : @registry.RegistryDocument,
+  registry_directory : String,
+  canonical : String,
+  baseline : @pumd.DesiredDocument,
+  timestamp : String,
+  success : PublishSuccess,
+) -> Result[PublishOutcome, PublishError] {
+  let updated = match
+    @registry.document_with_updated_baseline(
+      document,
+      canonical,
+      baseline,
+      timestamp,
+    ) {
+    Ok(value) => value
+    Err(error) => return Err(registry_error(error))
+  }
+  match @registry.save_registry_document(registry_directory, updated) {
+    Ok(_) => Ok(Updated(success, timestamp))
+    Err(error) => Err(registry_error(error))
+  }
+}
+
+///|
+fn decoded_read_error(
+  success : PublishSuccess,
+  error : RemoteDecodeError,
+) -> PublishError {
+  match error {
+    MissingManagedTab(_) =>
+      RemoteMissing(document_id=success.document_id, url=success.url)
+    _ => Read(
+      document_id=success.document_id,
+      url=success.url,
+      message=error.user_message(),
+    )
+  }
+}
+
+///|
+fn reconciliation_error(error : ReconcileError) -> PublishError {
+  match error {
+    PlanningFailed(message) => Planning(message)
+    InvalidRemoteStructure(message) | AmbiguousAlignment(message) =>
+      PublicationConflict(
+        message="the Google Docs content cannot be aligned safely: " + message,
+      )
+  }
+}
+
+///|
+fn conflict_error(report : ReconciliationReport) -> PublishError {
+  let descriptions = StringBuilder::new()
+  for unit in report.units {
+    if unit.conflict {
+      if !descriptions.is_empty() { descriptions.write_string(", ") }
+      descriptions.write_string(unit.description)
+    }
+  }
+  PublicationConflict(
+    message="local and remote changes conflict in " + descriptions.to_string(),
+  )
+}
+
+///|
+fn comment_error(
+  authorization_mode : AuthorizationMode,
+  success : PublishSuccess,
+  error : CommentsError,
+) -> PublishError {
+  match error {
+    HttpStatus(status=404) =>
+      RemoteMissing(document_id=success.document_id, url=success.url)
+    HttpStatus(status=403) =>
+      Permission(
+        authorization_mode~,
+        stage=DocumentRead,
+        created_document=None,
+      )
+    HttpStatus(status=429) => Throttled(stage=DocumentRead, created_document=None)
+    HttpStatus(status=401) =>
+      Authentication(
+        authorization_mode~,
+        problem=CredentialsRejected,
+        created_document=None,
+      )
+    _ => Read(
+      document_id=success.document_id,
+      url=success.url,
+      message="comment inspection failed: " + error.user_message(),
+    )
+  }
+}
+
+///|
+fn update_error(
+  authorization_mode : AuthorizationMode,
+  success : PublishSuccess,
+  error : DocsAdapterError,
+) -> PublishError {
+  match error {
+    AdapterHttpStatus(status=404, ..) =>
+      RemoteMissing(document_id=success.document_id, url=success.url)
+    AdapterHttpStatus(kind=Some(PermissionDenied), ..) =>
+      Permission(
+        authorization_mode~,
+        stage=DocumentUpdate,
+        created_document=Some(success),
+      )
+    AdapterHttpStatus(kind=Some(Throttled), ..) =>
+      Throttled(stage=DocumentUpdate, created_document=Some(success))
+    AdapterHttpStatus(kind=Some(Unauthenticated), ..) =>
+      Authentication(
+        authorization_mode~,
+        problem=CredentialsRejected,
+        created_document=Some(success),
+      )
+    AdapterHttpStatus(status~, kind~) => UpdateFailed(
+      document_id=success.document_id,
+      url=success.url,
+      message=AdapterHttpStatus(status~, kind~).message(),
+    )
+    AdapterDecode(message) => UpdateFailed(
+      document_id=success.document_id,
+      url=success.url,
+      message~,
+    )
+    AdapterTransport(message) => UpdateFailed(
+      document_id=success.document_id,
+      url=success.url,
+      message="transport error: " + message,
+    )
+  }
+}
+
+///|
 /// Publish a Markdown source through the local Publication Registry.
 pub async fn publish_path_with_registry(
   path : String,
@@ -184,6 +330,14 @@ pub async fn publish_prepared_with_registry(
           Provisional => Ok(DryRunProvisional(success_from_entry(entry)))
           Ready => {
             let success = success_from_entry(entry)
+            let managed_tab_id = match entry.managed_tab_id {
+              Some(value) => value
+              None => abort("invalid ready registry entry")
+            }
+            let baseline = match entry.published_baseline {
+              Some(value) => value
+              None => abort("invalid ready registry entry")
+            }
             let token = match
               selected_token(
                 authorization_mode, get_project_token, get_adc_token,
@@ -196,31 +350,10 @@ pub async fn publish_prepared_with_registry(
               fn() { token },
               http=Some(http),
             )
-            match get_document_view(client, success.document_id) {
-              Ok(view) => {
-                let managed_tab_id = match entry.managed_tab_id {
-                  Some(value) => value
-                  None => abort("invalid ready registry entry")
-                }
-                if !view.tab_ids.contains(managed_tab_id) {
-                  return Err(
-                    RemoteMissing(
-                      document_id=success.document_id,
-                      url=success.url,
-                    ),
-                  )
-                }
-                Ok(
-                  DryRunInspection(inspection={
-                    document_id: success.document_id,
-                    url: success.url,
-                    title: view.title,
-                    managed_tab_present: true,
-                  }),
-                )
-              }
+            let retrieved = match get_remote_document_body(client, success.document_id) {
+              Ok(value) => value
               Err(error) =>
-                Err(
+                return Err(
                   read_error(
                     authorization_mode,
                     success.document_id,
@@ -229,6 +362,59 @@ pub async fn publish_prepared_with_registry(
                   ),
                 )
             }
+            let decoded = match decode_remote_document(
+              retrieved.body,
+              retrieved.document_id,
+            ) {
+              Ok(value) => value
+              Err(error) => return Err(decoded_read_error(success, error))
+            }
+            let managed_content = match remote_tab_content(decoded, managed_tab_id) {
+              Some(value) => value
+              None =>
+                return Err(
+                  RemoteMissing(document_id=success.document_id, url=success.url),
+                )
+            }
+            let outcome = match
+              reconcile_document(baseline, prepared.document, managed_content) {
+              Ok(value) => value
+              Err(error) => return Err(reconciliation_error(error))
+            }
+            let report = match outcome {
+              NoLocalChanges(report) => report
+              Planned(report, _) => report
+              Conflict(report) => report
+            }
+            let planned = []
+            let conflicted = []
+            for unit in report.units {
+              if unit.local_change && !unit.conflict {
+                planned.push(unit.description)
+              }
+              if unit.conflict {
+                conflicted.push(unit.description)
+              }
+            }
+            let comments = match inspect_comments(client, success.document_id) {
+              Ok(value) => value
+              Err(error) => return Err(comment_error(authorization_mode, success, error))
+            }
+            Ok(
+              DryRunUpdate(report={
+                document_id: success.document_id,
+                url: success.url,
+                title: decoded.title,
+                planned_units: report.local_changes,
+                planned,
+                conflicts: report.conflicts,
+                conflicted,
+                review_barriers: comments.unresolved,
+                concurrency_sensitive: report.local_changes > 0 &&
+                  report.conflicts == 0 &&
+                  comments.unresolved == 0,
+              }),
+            )
           }
         }
     }
@@ -246,11 +432,164 @@ pub async fn publish_prepared_with_registry(
       Some(entry) =>
         match entry.lifecycle {
           Ready => {
-            let timestamp = match entry.last_successful_publish {
+            let previous_timestamp = match entry.last_successful_publish {
               Some(value) => value
               None => abort("invalid ready registry entry")
             }
-            Ok(AlreadyPublished(success_from_entry(entry), timestamp))
+            let success = success_from_entry(entry)
+            let managed_tab_id = match entry.managed_tab_id {
+              Some(value) => value
+              None => abort("invalid ready registry entry")
+            }
+            let baseline = match entry.published_baseline {
+              Some(value) => value
+              None => abort("invalid ready registry entry")
+            }
+            let token = match
+              selected_token(
+                authorization_mode, get_project_token, get_adc_token,
+              ) {
+              Ok(token) => token
+              Err(problem) =>
+                return Err(authentication_error(authorization_mode, problem))
+            }
+            let client = @google_core.GoogleClient::new(
+              fn() { token },
+              http=Some(http),
+            )
+            let retrieved = match get_remote_document_body(client, success.document_id) {
+              Ok(value) => value
+              Err(error) =>
+                return Err(
+                  read_error(
+                    authorization_mode,
+                    success.document_id,
+                    success.url,
+                    error,
+                  ),
+                )
+            }
+            let decoded = match decode_remote_document(
+              retrieved.body,
+              retrieved.document_id,
+            ) {
+              Ok(value) => value
+              Err(error) => return Err(decoded_read_error(success, error))
+            }
+            let managed_content = match remote_tab_content(decoded, managed_tab_id) {
+              Some(value) => value
+              None =>
+                return Err(
+                  RemoteMissing(document_id=success.document_id, url=success.url),
+                )
+            }
+            let reconciliation = match
+              reconcile_document(baseline, prepared.document, managed_content) {
+              Ok(value) => value
+              Err(error) => return Err(reconciliation_error(error))
+            }
+            let (plan, reconcile_report) = match reconciliation {
+              NoLocalChanges(_) => return Ok(NoOp(success, previous_timestamp))
+              Conflict(report) => return Err(conflict_error(report))
+              Planned(report, plan) => (plan, report)
+            }
+            let comments = match inspect_comments(client, success.document_id) {
+              Ok(value) => value
+              Err(error) => return Err(comment_error(authorization_mode, success, error))
+            }
+            if comments.unresolved > 0 {
+              return Err(ReviewBarrier(unresolved=comments.unresolved))
+            }
+            match
+              batch_update_document_with_revision(
+                client,
+                success.document_id,
+                managed_tab_id,
+                plan,
+                remote_revision_id(decoded),
+              ) {
+              Ok(_) => {
+                let timestamp = format_unix_timestamp(current_unix_seconds())
+                commit_updated_baseline(
+                  document,
+                  registry_directory,
+                  canonical,
+                  prepared.document,
+                  timestamp,
+                  success,
+                )
+              }
+              Err(RevisionConflict) =>
+                Err(
+                  Concurrency(
+                    message="the Google Docs revision changed after the document was read; nothing was applied. Re-read and publish again.",
+                  ),
+                )
+              Err(Adapter(AdapterTransport(_))) => {
+                let reread = match
+                  get_remote_document_body(client, success.document_id) {
+                  Ok(value) => value
+                  Err(_) =>
+                    return Err(
+                      AmbiguousUpdate(
+                        document_id=success.document_id,
+                        url=success.url,
+                      ),
+                    )
+                }
+                let remote = match decode_remote_document(
+                  reread.body,
+                  reread.document_id,
+                ) {
+                  Ok(value) => value
+                  Err(_) =>
+                    return Err(
+                      AmbiguousUpdate(
+                        document_id=success.document_id,
+                        url=success.url,
+                      ),
+                    )
+                }
+                let content = match remote_tab_content(remote, managed_tab_id) {
+                  Some(value) => value
+                  None =>
+                    return Err(
+                      AmbiguousUpdate(
+                        document_id=success.document_id,
+                        url=success.url,
+                      ),
+                    )
+                }
+                // Confirm the intended remote state actually landed by checking
+                // the planned units specifically, not by re-reconciling
+                // (which is always a no-op against the desired document).
+                if
+                  update_intended_state_landed(
+                    baseline,
+                    prepared.document,
+                    content,
+                    reconcile_report,
+                  ) {
+                  let timestamp = format_unix_timestamp(current_unix_seconds())
+                  commit_updated_baseline(
+                    document,
+                    registry_directory,
+                    canonical,
+                    prepared.document,
+                    timestamp,
+                    success,
+                  )
+                } else {
+                  Err(
+                    AmbiguousUpdate(
+                      document_id=success.document_id,
+                      url=success.url,
+                    ),
+                  )
+                }
+              }
+              Err(Adapter(error)) => Err(update_error(authorization_mode, success, error))
+            }
           }
           Blocked => Err(BlockedPublication(source_path=canonical))
           Provisional => {
@@ -484,7 +823,7 @@ fn remote_error_status(error : DocsAdapterError) -> RemotePublicationStatus {
 }
 
 ///|
-/// Inspect a registered publication without mutating the registry or remote document.
+/// Inspect a registered publication without mutating the registry or the registered document.
 pub async fn inspect_registered_publication(
   token : String,
   http : &@google_http.HttpClient,
@@ -560,6 +899,7 @@ pub async fn inspect_registered_publication(
   }
 }
 
+///|
 fn write_optional_string(value : String?, output : StringBuilder) -> Unit {
   match value {
     Some(value) => write_json_string(value, output)
