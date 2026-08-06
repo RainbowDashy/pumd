@@ -20,7 +20,7 @@
     "node": ">=18"
   },
   "scripts": {
-    "test": "node --test test/npm-launcher.test.cjs test/npm-nightly-version.test.cjs"
+    "test": "node --test test/npm-launcher.test.cjs test/npm-nightly-version.test.cjs test/windows-powershell-workflow.test.cjs"
   },
   "publishConfig": {
     "access": "public"
