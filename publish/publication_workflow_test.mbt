@@ -643,11 +643,61 @@ async test "style migration updates a v2 plain-code baseline to v3 highlighted r
     fail("style migration must update")
   }
   assert_eq(fake.requests.length(), 3)
-  assert_true(fake.requests[2].body.unwrap().contains("foregroundColor"))
+  let batch = fake.requests[2].body.unwrap()
+  assert_true(batch.contains("\"updateTextStyle\""))
+  assert_true(batch.contains("foregroundColor"))
+  assert_true(batch.contains("\"fields\":\"foregroundColor\""))
+  assert_true(!batch.contains("weightedFontFamily"))
+  assert_true(!batch.contains("\"insertText\""))
+  assert_true(!batch.contains("\"deleteContentRange\""))
+  assert_true(batch.contains("\"writeControl\":{\"requiredRevisionId\":\"rev-migration\"}"))
   guard @registry.load_registry_document(directory) is Ok(document) else {
     fail("registry must load")
   }
   assert_eq(@debug.to_string(document.entries[0].published_baseline.unwrap()), @debug.to_string(desired))
+  clean_workflow_directory(directory)
+}
+
+///|
+async test "style migration preserves remote-only work outside migrated code" {
+  let directory = workflow_directory("style-migration-remote-only")
+  clean_workflow_directory(directory)
+  let markdown = "Original note\n\n```javascript\nconst answer = \"yes\"\n```"
+  let desired = workflow_document(markdown)
+  let baseline = version_two_code_baseline(desired)
+  let remote = version_two_code_baseline(workflow_document("Reviewer note\n\n```javascript\nconst answer = \"yes\"\n```"))
+  seed_ready_with_baseline(directory, "migration-remote.md", "migration-remote-doc", "migration-remote-tab", baseline)
+  let fake = WorkflowFakeHttpClient::{
+    requests: [],
+    responses: [
+      docs_response_with_implicit_final_newline(remote, "migration-remote-doc", "rev-migration-remote", "migration-remote-tab"),
+      drive_comments_response(0),
+      success_response(),
+    ],
+  }
+  guard publish_path_with_registry(
+      "migration-remote.md",
+      fn(_) { Ok(markdown) },
+      directory,
+      Adc,
+      fn() { Ok("project") },
+      fn() { Ok("adc") },
+      fake,
+      false,
+    )
+    is Ok(Updated(_, _)) else {
+    fail("remote-only prose must coexist with the code style migration")
+  }
+  assert_eq(fake.requests.length(), 3)
+  let batch = fake.requests[2].body.unwrap()
+  assert_true(batch.contains("\"updateTextStyle\""))
+  assert_true(batch.contains("foregroundColor"))
+  assert_true(!batch.contains("\"insertText\""))
+  assert_true(!batch.contains("\"deleteContentRange\""))
+  assert_true(batch.contains("\"startIndex\":15,"))
+  for index = 1; index < 15; index = index + 1 {
+    assert_true(!batch.contains("\"startIndex\":" + index.to_string() + ","))
+  }
   clean_workflow_directory(directory)
 }
 
@@ -712,7 +762,9 @@ async test "dry-run plans style migration without mutating the document or regis
     is Ok(DryRunUpdate(report~)) else {
     fail("dry run must expose the style migration plan")
   }
-  assert_true(report.planned_units > 0)
+  assert_eq(report.planned_units, 1)
+  assert_eq(report.planned, ["paragraph 1"])
+  assert_true(report.concurrency_sensitive)
   assert_eq(fake.requests.length(), 2)
   for request in fake.requests { assert_true(!request.url.contains(":batchUpdate")) }
   guard @registry.load_registry_document(directory) is Ok(document) else {
@@ -750,6 +802,85 @@ async test "unresolved comments remain a review barrier during style migration" 
     fail("comments must remain a review barrier during migration")
   }
   assert_eq(fake.requests.length(), 2)
+  guard @registry.load_registry_document(directory) is Ok(document) else {
+    fail("registry must load")
+  }
+  assert_eq(@debug.to_string(document.entries[0].published_baseline.unwrap()), @debug.to_string(baseline))
+  clean_workflow_directory(directory)
+}
+
+///|
+async test "style migration revision failure leaves the v2 baseline unchanged" {
+  let directory = workflow_directory("style-migration-concurrency")
+  clean_workflow_directory(directory)
+  let markdown = "```javascript\nconst answer = \"yes\"\n```"
+  let desired = workflow_document(markdown)
+  let baseline = version_two_code_baseline(desired)
+  seed_ready_with_baseline(directory, "migration-concurrency.md", "migration-concurrency-doc", "migration-concurrency-tab", baseline)
+  let fake = WorkflowFakeHttpClient::{
+    requests: [],
+    responses: [
+      docs_response_with_implicit_final_newline(baseline, "migration-concurrency-doc", "rev-migration-old", "migration-concurrency-tab"),
+      drive_comments_response(0),
+      @google_http.HttpResponse::new(400, {}, "{}"),
+    ],
+  }
+  guard publish_path_with_registry(
+      "migration-concurrency.md",
+      fn(_) { Ok(markdown) },
+      directory,
+      Adc,
+      fn() { Ok("project") },
+      fn() { Ok("adc") },
+      fake,
+      false,
+    )
+    is Err(Concurrency(_)) else {
+    fail("migration must surface a revision conflict")
+  }
+  assert_eq(fake.requests.length(), 3)
+  let batch = fake.requests[2].body.unwrap()
+  assert_true(batch.contains("foregroundColor"))
+  assert_true(batch.contains("\"writeControl\":{\"requiredRevisionId\":\"rev-migration-old\"}"))
+  guard @registry.load_registry_document(directory) is Ok(document) else {
+    fail("registry must load")
+  }
+  assert_eq(@debug.to_string(document.entries[0].published_baseline.unwrap()), @debug.to_string(baseline))
+  clean_workflow_directory(directory)
+}
+
+///|
+async test "failed style migration update leaves the v2 baseline unchanged" {
+  let directory = workflow_directory("style-migration-failed-update")
+  clean_workflow_directory(directory)
+  let markdown = "```javascript\nconst answer = \"yes\"\n```"
+  let desired = workflow_document(markdown)
+  let baseline = version_two_code_baseline(desired)
+  seed_ready_with_baseline(directory, "migration-failed.md", "migration-failed-doc", "migration-failed-tab", baseline)
+  let fake = WorkflowFakeHttpClient::{
+    requests: [],
+    responses: [
+      docs_response_with_implicit_final_newline(baseline, "migration-failed-doc", "rev-migration-failed", "migration-failed-tab"),
+      drive_comments_response(0),
+      @google_http.HttpResponse::new(500, {}, "{}"),
+    ],
+  }
+  guard publish_path_with_registry(
+      "migration-failed.md",
+      fn(_) { Ok(markdown) },
+      directory,
+      Adc,
+      fn() { Ok("project") },
+      fn() { Ok("adc") },
+      fake,
+      false,
+    )
+    is Err(UpdateFailed(document_id~, ..)) else {
+    fail("migration update rejection must be explicit")
+  }
+  assert_eq(document_id, "migration-failed-doc")
+  assert_eq(fake.requests.length(), 3)
+  assert_true(fake.requests[2].body.unwrap().contains("foregroundColor"))
   guard @registry.load_registry_document(directory) is Ok(document) else {
     fail("registry must load")
   }

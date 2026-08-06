@@ -194,7 +194,8 @@ async test "v2 plain code baseline reconciles to v3 token foreground styles" {
       assert_eq(report.local_changes, 1)
       assert_eq(report.remote_changes, 0)
       let snapshot = plan.to_snapshot()
-      assert_true(snapshot.contains("text-style"))
+      assert_true(snapshot.contains("text-foreground-color"))
+      assert_true(!snapshot.contains("text-style"))
       assert_true(snapshot.contains("color=#"))
     }
     _ => fail("style migration must plan native text-style updates")

@@ -25,6 +25,11 @@ pub enum DocsUpdateRequest {
     style~ : @pumd.TextStyle,
     link~ : @pumd.LinkIntent?
   )
+  UpdateTextForegroundColor(
+    start_index~ : Int,
+    end_index~ : Int,
+    color~ : String
+  )
   InsertTable(index~ : Int, rows~ : Int, columns~ : Int)
   InsertTableCellText(
     table_index~ : Int,
@@ -559,6 +564,14 @@ pub fn DocsUpdatePlan::to_snapshot(self : DocsUpdatePlan) -> String {
         buffer.write_string("..")
         buffer.write_string(end_index.to_string())
         write_plan_text_style(style, link, buffer)
+      }
+      UpdateTextForegroundColor(start_index~, end_index~, color~) => {
+        buffer.write_string("text-foreground-color ")
+        buffer.write_string(start_index.to_string())
+        buffer.write_string("..")
+        buffer.write_string(end_index.to_string())
+        buffer.write_string(" color=")
+        buffer.write_string(color)
       }
       InsertTable(index~, rows~, columns~) => {
         buffer.write_string("insert-table ")

@@ -302,6 +302,69 @@ fn append_paragraph_write(paragraph : @pumd.Paragraph, cursor : Int, include_new
 }
 
 ///|
+fn paragraph_text(paragraph : @pumd.Paragraph) -> String {
+  let output = StringBuilder::new()
+  for run in paragraph.runs { output.write_string(run.content) }
+  output.to_string()
+}
+
+///|
+fn text_style_matches_except_foreground(left : @pumd.TextStyle, right : @pumd.TextStyle) -> Bool {
+  left.font_family == right.font_family &&
+  left.font_size_points == right.font_size_points &&
+  left.bold == right.bold &&
+  left.italic == right.italic &&
+  left.underline == right.underline &&
+  left.background_color == right.background_color
+}
+
+///|
+/// A version-two code paragraph can receive version-three foreground colors
+/// in place when every other native property is unchanged. Keeping this test
+/// narrow avoids treating unrelated same-text edits (such as link removal or
+/// paragraph restyling) as a Style Migration.
+fn can_apply_foreground_style_migration_in_place(baseline : @pumd.Paragraph, desired : @pumd.Paragraph) -> Bool {
+  if baseline.style != desired.style ||
+    baseline.bullet is Some(_) ||
+    desired.bullet is Some(_) ||
+    baseline.runs.is_empty() ||
+    paragraph_text(baseline) != paragraph_text(desired) {
+    return false
+  }
+  let baseline_style = baseline.runs[0].style
+  for run in baseline.runs {
+    if run.link is Some(_) ||
+      run.style.foreground_color is Some(_) ||
+      !text_style_matches_except_foreground(run.style, baseline_style) {
+      return false
+    }
+  }
+  let mut adds_foreground = false
+  for run in desired.runs {
+    if run.link is Some(_) ||
+      !text_style_matches_except_foreground(run.style, baseline_style) {
+      return false
+    }
+    if run.style.foreground_color is Some(_) { adds_foreground = true }
+  }
+  adds_foreground
+}
+
+///|
+fn append_foreground_style_updates(paragraph : @pumd.Paragraph, cursor : Int, requests : Array[DocsUpdateRequest]) -> Unit {
+  let mut run_start = cursor
+  for run in paragraph.runs {
+    let run_end = advance_google_docs_index(index=run_start, text=run.content)
+    match run.style.foreground_color {
+      Some(color) if run_start != run_end =>
+        requests.push(UpdateTextForegroundColor(start_index=run_start, end_index=run_end, color~))
+      _ => ()
+    }
+    run_start = run_end
+  }
+}
+
+///|
 fn append_table_write(table : @pumd.Table, cursor : Int, requests : Array[DocsUpdateRequest]) -> Unit {
   let mut columns = 0; for row in table.rows { if row.cells.length() > columns { columns = row.cells.length() } }
   requests.push(InsertTable(index=cursor, rows=table.rows.length(), columns~))
@@ -443,11 +506,17 @@ fn paragraph_to_table_replacement_requests(old : RemoteEntry, remote : Array[Rem
 }
 
 ///|
-fn replacement_requests(old : RemoteEntry, remote : Array[RemoteEntry], entry_index : Int, has_trailing_container : Bool, unit : LocalUnit, delete_group : Array[DocsUpdateRequest], insert_group : Array[DocsUpdateRequest]) -> Unit {
+fn replacement_requests(old : RemoteEntry, remote : Array[RemoteEntry], entry_index : Int, has_trailing_container : Bool, baseline : LocalUnit, unit : LocalUnit, delete_group : Array[DocsUpdateRequest], insert_group : Array[DocsUpdateRequest]) -> Unit {
   match (old.kind, unit.kind) {
     (Paragraph, Paragraph) => {
-      delete_group.push(DeleteContentRange(start_index=old.start_index, end_index=old.end_index - 1))
-      paragraph_insert_requests(unit, old.start_index, false, insert_group)
+      match (baseline.paragraph, unit.paragraph) {
+        (Some(before), Some(after)) if can_apply_foreground_style_migration_in_place(before, after) =>
+          append_foreground_style_updates(after, old.start_index, insert_group)
+        _ => {
+          delete_group.push(DeleteContentRange(start_index=old.start_index, end_index=old.end_index - 1))
+          paragraph_insert_requests(unit, old.start_index, false, insert_group)
+        }
+      }
     }
     (Paragraph, Table) =>
       paragraph_to_table_replacement_requests(old, remote, entry_index, has_trailing_container, unit, delete_group, insert_group)
@@ -563,7 +632,7 @@ pub fn reconcile_document(baseline : @pumd.DesiredDocument, desired : @pumd.Desi
           claimed_base[desired_index] = true
           let delete_group : Array[DocsUpdateRequest] = []
           let insert_group : Array[DocsUpdateRequest] = []
-          replacement_requests(current[remote_index], current, remote_index, has_trailing_container, want[desired_index], delete_group, insert_group)
+          replacement_requests(current[remote_index], current, remote_index, has_trailing_container, base[desired_index], want[desired_index], delete_group, insert_group)
           order = order + 1
           groups.push({ anchor: current[remote_index].start_index, deletes: true, order, requests: delete_group })
           order = order + 1

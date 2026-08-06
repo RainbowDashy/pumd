@@ -705,6 +705,26 @@ fn write_update_text_request(
 }
 
 ///|
+fn write_update_foreground_color_request(
+  start_index : Int,
+  end_index : Int,
+  color : String,
+  tab_id : String?,
+  output : StringBuilder,
+  first : Bool,
+) -> Bool {
+  let color_json = StringBuilder::new()
+  if !write_rgb_color(color, color_json) { return first }
+  let next_first = begin_request(output, first)
+  output.write_string("{\"updateTextStyle\":{\"range\":")
+  write_range(start_index, end_index, tab_id, output)
+  output.write_string(",\"textStyle\":{\"foregroundColor\":")
+  output.write_string(color_json.to_string())
+  output.write_string("},\"fields\":\"foregroundColor\"}}")
+  next_first
+}
+
+///|
 fn write_update_cell_background_request(
   layout : TableLayout,
   row : Int,
@@ -771,6 +791,10 @@ fn lower_plan_for_tab(plan : DocsUpdatePlan, tab_id : String?) -> String {
       UpdateTextStyle(start_index~, end_index~, style~, link~) =>
         first = write_update_text_request(
           start_index, end_index, style, link, tab_id, output, first,
+        )
+      UpdateTextForegroundColor(start_index~, end_index~, color~) =>
+        first = write_update_foreground_color_request(
+          start_index, end_index, color, tab_id, output, first,
         )
       InsertTable(index~, rows~, columns~) => {
         let location = index
