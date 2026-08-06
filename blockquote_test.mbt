@@ -5,7 +5,7 @@ test "renders a quoted paragraph through the public seam" {
       inspect(
         document.to_snapshot(),
         content=(
-          #|profile pumd.default@2
+          #|profile pumd.default@3
           #|paragraph normal font=Arial size=11 line=1.15 before=0 after=6 indent-start=18 indent-first-line=18 border-left=#B7B7B7 width=1 padding=6
           #|  text "Quoted " font=Arial size=11
           #|  text "text" italic font=Arial size=11
@@ -32,7 +32,7 @@ test "composes nested quote depth with heading and fenced-code styles" {
       inspect(
         document.to_snapshot(),
         content=(
-          #|profile pumd.default@2
+          #|profile pumd.default@3
           #|paragraph heading-1 font=Arial size=24 line=1.15 before=20 after=8 indent-start=18 indent-first-line=18 border-left=#B7B7B7 width=1 padding=6
           #|  text "Quoted heading" font=Arial size=24
           #|paragraph normal font=Arial size=11 line=1.15 before=0 after=6 indent-start=36 indent-first-line=36 border-left=#B7B7B7 width=1 padding=6
@@ -62,7 +62,7 @@ test "keeps quoted list continuations non-bulleted and nested lists native" {
       inspect(
         document.to_snapshot(),
         content=(
-          #|profile pumd.default@2
+          #|profile pumd.default@3
           #|paragraph normal font=Arial size=11 line=1.15 before=0 after=6 list=bullet level=0
           #|  text "item" font=Arial size=11
           #|paragraph normal font=Arial size=11 line=1.15 before=0 after=6 indent-start=54 indent-first-line=54 border-left=#B7B7B7 width=1 padding=6
@@ -85,7 +85,7 @@ test "keeps the native bullet when a quote is the list item's only content" {
       inspect(
         document.to_snapshot(),
         content=(
-          #|profile pumd.default@2
+          #|profile pumd.default@3
           #|paragraph normal font=Arial size=11 line=1.15 before=0 after=6 indent-start=54 indent-first-line=36 border-left=#B7B7B7 width=1 padding=6 list=bullet level=0
           #|  text "quote" font=Arial size=11
           #|
@@ -105,7 +105,7 @@ test "uses deterministic quote offsets for level-zero and nested quoted lists" {
       inspect(
         document.to_snapshot(),
         content=(
-          #|profile pumd.default@2
+          #|profile pumd.default@3
           #|paragraph normal font=Arial size=11 line=1.15 before=0 after=6 indent-start=54 indent-first-line=36 border-left=#B7B7B7 width=1 padding=6 list=bullet level=0
           #|  text "top item" font=Arial size=11
           #|paragraph normal font=Arial size=11 line=1.15 before=0 after=6 indent-start=90 indent-first-line=72 border-left=#B7B7B7 width=1 padding=6 list=bullet level=1

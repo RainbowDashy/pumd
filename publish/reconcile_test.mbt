@@ -7,6 +7,37 @@ fn rendered(markdown : String) -> @pumd.DesiredDocument {
 }
 
 ///|
+/// Models the pre-syntax-highlighting baseline for an otherwise identical
+/// fenced-code rendering.  Version-two code blocks retained all code styling
+/// except per-token foreground colors.
+fn version_two_code_baseline(current : @pumd.DesiredDocument) -> @pumd.DesiredDocument {
+  let content : Array[@pumd.StructuralElement] = []
+  for element in current.content {
+    match element {
+      @pumd.StructuralElement::Paragraph(paragraph) => {
+        let runs : Array[@pumd.TextRun] = []
+        if !paragraph.runs.is_empty() {
+          let content = StringBuilder::new()
+          for run in paragraph.runs { content.write_string(run.content) }
+          let first = paragraph.runs[0]
+          runs.push({ ..first, content: content.to_string(), style: { ..first.style, foreground_color: None } })
+        }
+        content.push(@pumd.StructuralElement::Paragraph({ ..paragraph, runs }))
+      }
+      @pumd.StructuralElement::Table(_) => content.push(element)
+    }
+  }
+  {
+    ..current,
+    render_metadata: {
+      ..current.render_metadata,
+      style_profile_version: 2,
+    },
+    content,
+  }
+}
+
+///|
 fn remote_bullet(bullet : @pumd.BulletProperties?) -> RemoteBullet? {
   match bullet {
     Some(properties) => match properties.kind {
@@ -75,6 +106,29 @@ fn remote_from_document(document : @pumd.DesiredDocument) -> RemoteContent {
 }
 
 ///|
+/// Google Docs always exposes one implicit final newline container beyond the
+/// authored paragraphs. Keep this realism local to style-migration fixtures:
+/// fenced code intentionally has an authored empty trailing code paragraph.
+fn remote_from_style_migration_baseline(document : @pumd.DesiredDocument) -> RemoteContent {
+  let remote = remote_from_document(document)
+  let start_index = match remote.units[remote.units.length() - 1] {
+    RemoteUnit::Paragraph(paragraph) => paragraph.end_index
+    RemoteUnit::Table(table) => table.end_index
+    RemoteUnit::Opaque(item) => item.end_index
+  }
+  remote.units.push(RemoteUnit::Paragraph({
+    start_index,
+    end_index: start_index + 1,
+    runs: [],
+    style: @pumd.builtin_style_profile().body,
+    bullet: None,
+    suggestions: [],
+    normalization_warning: false,
+  }))
+  remote
+}
+
+///|
 fn changed_remote_paragraph(paragraph : RemoteParagraph, text : String) -> RemoteParagraph {
   let original = paragraph.runs[0]
   let end_index = advance_google_docs_index(index=original.start_index, text=text)
@@ -129,6 +183,96 @@ async test "local style replacement plans text style" {
   let baseline = rendered("Hello")
   let desired = rendered("**Hello**")
   match outcome(baseline, desired, remote_from_document(baseline)) { Planned(_, plan) => assert_true(plan.to_snapshot().contains("text-style 1..6 bold")); _ => fail("style edit must plan") }
+}
+
+///|
+async test "v2 plain code baseline reconciles to v3 token foreground styles" {
+  let desired = rendered("```javascript\nconst answer = \"yes\"\n```")
+  let baseline = version_two_code_baseline(desired)
+  match outcome(baseline, desired, remote_from_style_migration_baseline(baseline)) {
+    Planned(report, plan) => {
+      assert_eq(report.local_changes, 1)
+      assert_eq(report.remote_changes, 0)
+      let snapshot = plan.to_snapshot()
+      assert_true(snapshot.contains("text-style"))
+      assert_true(snapshot.contains("color=#"))
+    }
+    _ => fail("style migration must plan native text-style updates")
+  }
+}
+
+///|
+async test "color casing alone is not a remote change" {
+  let baseline = rendered("A")
+  match baseline.content[0] {
+    @pumd.StructuralElement::Paragraph(paragraph) => {
+      let run = paragraph.runs[0]
+      baseline.content[0] = @pumd.StructuralElement::Paragraph({
+        ..paragraph,
+        runs: [{
+          ..run,
+          style: {
+            ..run.style,
+            foreground_color: Some("#AABBCC"),
+            background_color: Some("#DDEEFF"),
+          },
+        }],
+      })
+    }
+    _ => fail("paragraph fixture")
+  }
+  let remote = remote_from_document(baseline)
+  match remote.units[0] {
+    RemoteUnit::Paragraph(paragraph) => {
+      let run = paragraph.runs[0]
+      remote.units[0] = RemoteUnit::Paragraph({
+        ..paragraph,
+        runs: [{
+          ..run,
+          style: {
+            ..run.style,
+            foreground_color: Some("#aabbcc"),
+            background_color: Some("#ddeeff"),
+          },
+        }],
+      })
+    }
+    _ => fail("paragraph fixture")
+  }
+  match outcome(baseline, baseline, remote) {
+    NoLocalChanges(report) => assert_eq(report.remote_changes, 0)
+    _ => fail("case-only colors must not count as a remote edit")
+  }
+}
+
+///|
+async test "different colors remain remote changes" {
+  let baseline = rendered("A")
+  match baseline.content[0] {
+    @pumd.StructuralElement::Paragraph(paragraph) => {
+      let run = paragraph.runs[0]
+      baseline.content[0] = @pumd.StructuralElement::Paragraph({
+        ..paragraph,
+        runs: [{ ..run, style: { ..run.style, foreground_color: Some("#AABBCC") } }],
+      })
+    }
+    _ => fail("paragraph fixture")
+  }
+  let remote = remote_from_document(baseline)
+  match remote.units[0] {
+    RemoteUnit::Paragraph(paragraph) => {
+      let run = paragraph.runs[0]
+      remote.units[0] = RemoteUnit::Paragraph({
+        ..paragraph,
+        runs: [{ ..run, style: { ..run.style, foreground_color: Some("#aabbcd") } }],
+      })
+    }
+    _ => fail("paragraph fixture")
+  }
+  match outcome(baseline, baseline, remote) {
+    NoLocalChanges(report) => assert_eq(report.remote_changes, 1)
+    _ => fail("different colors must count as a remote edit")
+  }
 }
 
 ///|

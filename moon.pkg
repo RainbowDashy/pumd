@@ -1,5 +1,33 @@
 import {
   "rainbowdashy/pumd/vendor/markdown",
+  "moonbitlang/core/encoding/utf8",
   "moonbitlang/core/debug",
   "moonbitlang/core/json",
 }
+
+import {
+  "moonbitlang/core/math",
+  "moonbitlang/core/string",
+} for "test"
+
+options(
+  "native-stub": [
+    "syntax_highlight_native.c",
+    "syntax_highlight_runtime.c",
+    "syntax_highlight_parser_bash.c",
+    "syntax_highlight_parser_css.c",
+    "syntax_highlight_parser_html.c",
+    "syntax_highlight_parser_http.c",
+    "syntax_highlight_parser_javascript.c",
+    "syntax_highlight_parser_json.c",
+    "syntax_highlight_parser_markdown.c",
+    "syntax_highlight_parser_powershell.c",
+    "syntax_highlight_parser_protobuf.c",
+    "syntax_highlight_parser_sql.c",
+    "syntax_highlight_parser_toml.c",
+    "syntax_highlight_parser_tsx.c",
+    "syntax_highlight_parser_typescript.c",
+    "syntax_highlight_parser_xml.c",
+    "syntax_highlight_parser_yaml.c",
+  ],
+)

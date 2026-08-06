@@ -69,6 +69,126 @@ fn text_run(
 }
 
 ///|
+fn code_style_for_token(
+  token : SemanticToken,
+  profile : StyleProfile,
+) -> TextStyle? {
+  let color = match token {
+    Comment => Some(profile.syntax_palette.comment)
+    Keyword => Some(profile.syntax_palette.keyword)
+    String => Some(profile.syntax_palette.string)
+    Literal => Some(profile.syntax_palette.literal)
+    Type | Tag => Some(profile.syntax_palette.type_tag)
+    Function => Some(profile.syntax_palette.function)
+    Property | Attribute => Some(profile.syntax_palette.property_attribute)
+    Operator | Punctuation => None
+  }
+  match color {
+    Some(foreground_color) => Some({ ..profile.code_text, foreground_color: Some(foreground_color) })
+    None => None
+  }
+}
+
+///|
+fn plain_code_runs(
+  line : String,
+  profile : StyleProfile,
+  span : @markdown.Span,
+) -> Array[TextRun] {
+  let runs : Array[TextRun] = []
+  if !line.is_empty() {
+    runs.push(text_run(line, profile.code_text, None, span))
+  }
+  runs
+}
+
+///|
+fn decode_code_fragment(
+  bytes : Bytes,
+  start : Int,
+  end : Int,
+) -> String? {
+  if start > end || start < 0 || end > bytes.length() {
+    return None
+  }
+  Some(@utf8.decode(bytes[start:end]) catch { _ => return None })
+}
+
+///|
+fn highlighted_code_runs(
+  line : String,
+  line_start_byte : Int,
+  spans : Array[HighlightSpan],
+  profile : StyleProfile,
+  span : @markdown.Span,
+) -> Array[TextRun]? {
+  let line_bytes = @utf8.encode(line)
+  let line_end_byte = line_start_byte + line_bytes.length()
+  let runs : Array[TextRun] = []
+  let mut cursor = line_start_byte
+  for highlight in spans {
+    if highlight.end_byte <= line_start_byte {
+      continue
+    }
+    if highlight.start_byte >= line_end_byte {
+      break
+    }
+    let style = match code_style_for_token(highlight.token, profile) {
+      Some(style) => style
+      None => continue
+    }
+    let start_byte = if highlight.start_byte < line_start_byte {
+      line_start_byte
+    } else {
+      highlight.start_byte
+    }
+    let end_byte = if highlight.end_byte > line_end_byte {
+      line_end_byte
+    } else {
+      highlight.end_byte
+    }
+    if start_byte < cursor || start_byte >= end_byte {
+      return None
+    }
+    let before = match decode_code_fragment(
+      line_bytes,
+      cursor - line_start_byte,
+      start_byte - line_start_byte,
+    ) {
+      Some(value) => value
+      None => return None
+    }
+    if !before.is_empty() {
+      runs.push(text_run(before, profile.code_text, None, span))
+    }
+    let content = match decode_code_fragment(
+      line_bytes,
+      start_byte - line_start_byte,
+      end_byte - line_start_byte,
+    ) {
+      Some(value) => value
+      None => return None
+    }
+    if !content.is_empty() {
+      runs.push(text_run(content, style, None, span))
+    }
+    cursor = end_byte
+  }
+  let trailing = match decode_code_fragment(
+    line_bytes,
+    cursor - line_start_byte,
+    line_bytes.length(),
+  ) {
+    Some(value) => value
+    None => return None
+  }
+  if !trailing.is_empty() {
+    runs.push(text_run(trailing, profile.code_text, None, span))
+  }
+  Some(canonicalize_runs(runs))
+}
+
+///|
 fn same_native_run(left : TextRun, right : TextRun) -> Bool {
   left.style == right.style && left.link == right.link
 }
@@ -493,15 +613,27 @@ fn render_block(
       true
     }
     @markdown.Block::BlankLines(..) => false
-    @markdown.Block::FencedCode(code~, span~, ..) => {
+    @markdown.Block::FencedCode(info~, code~, span~, ..) => {
       let lines = code.split("\n").collect()
+      let highlights = highlight_fenced_code(
+        @markdown.parse_code_block_info(info).lang,
+        code,
+      )
       let mut code_state = state
+      let mut line_start_byte = 0
       for line in lines {
-        let runs : Array[TextRun] = []
-        if !line.is_empty() {
-          runs.push(
-            text_run(line.to_owned(), context.profile.code_text, None, span),
-          )
+        let runs = match highlights {
+          Some(spans) => match highlighted_code_runs(
+            line.to_owned(),
+            line_start_byte,
+            spans,
+            context.profile,
+            span,
+          ) {
+            Some(runs) => runs
+            None => plain_code_runs(line.to_owned(), context.profile, span)
+          }
+          None => plain_code_runs(line.to_owned(), context.profile, span)
         }
         context.content.push(
           StructuralElement::Paragraph({
@@ -516,6 +648,7 @@ fn render_block(
           }),
         )
         code_state = { ..code_state, bullet: None }
+        line_start_byte = line_start_byte + @utf8.encode(line).length() + 1
       }
       true
     }

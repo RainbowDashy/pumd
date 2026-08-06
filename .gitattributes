@@ -1,0 +1,3 @@
+# Preserve pinned upstream assets byte-for-byte; project-owned sources still
+# use Git's normal whitespace checks.
+vendor/tree-sitter/** -whitespace

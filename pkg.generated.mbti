@@ -117,11 +117,22 @@ pub(all) struct StyleProfile {
   link_color : String
   code_text : TextStyle
   code_block : ParagraphStyle
+  syntax_palette : SyntaxPalette
   table_cell : ParagraphStyle
   table_header_text : TextStyle
   table_header_fill : String
   quote_indent_per_level_points : Int
   quote_border : ParagraphBorder
+} derive(Eq, @debug.Debug)
+
+pub(all) struct SyntaxPalette {
+  comment : String
+  keyword : String
+  string : String
+  literal : String
+  type_tag : String
+  function : String
+  property_attribute : String
 } derive(Eq, @debug.Debug)
 
 pub(all) struct Table {

@@ -70,6 +70,40 @@ async test "remote decoder normalizes text runs and paragraph styles" {
 }
 
 ///|
+async test "remote decoder preserves colored run boundaries and canonical hex" {
+  let document = decoded_remote_document(
+    (
+    #|{
+    #| "documentId":"doc","revisionId":"rev","body":{"content":[{
+    #| "startIndex":1,"endIndex":8,"paragraph":{"elements":[
+    #| {"startIndex":1,"endIndex":3,"textRun":{"content":"A界","textStyle":{"foregroundColor":{"color":{"rgbColor":{"red":1,"green":0,"blue":0}}}}}},
+    #| {"startIndex":3,"endIndex":5,"textRun":{"content":"é","textStyle":{"foregroundColor":{"color":{"rgbColor":{"red":0,"green":1,"blue":0}}}}}},
+    #| {"startIndex":5,"endIndex":7,"textRun":{"content":"🚀","textStyle":{"foregroundColor":{"color":{"rgbColor":{"red":0,"green":0,"blue":1}}}}}}
+    #| ]}}
+    #| ]}}
+    )
+  )
+  match document.tabs[0].content.units[0] {
+    Paragraph(paragraph) => {
+      assert_eq(paragraph.runs.length(), 3)
+      inspect(paragraph.runs[0].text, content="A界")
+      assert_eq(paragraph.runs[0].start_index, 1)
+      assert_eq(paragraph.runs[0].end_index, 3)
+      assert_eq(paragraph.runs[0].style.foreground_color, Some("#ff0000"))
+      inspect(paragraph.runs[1].text, content="é")
+      assert_eq(paragraph.runs[1].start_index, 3)
+      assert_eq(paragraph.runs[1].end_index, 5)
+      assert_eq(paragraph.runs[1].style.foreground_color, Some("#00ff00"))
+      inspect(paragraph.runs[2].text, content="🚀")
+      assert_eq(paragraph.runs[2].start_index, 5)
+      assert_eq(paragraph.runs[2].end_index, 7)
+      assert_eq(paragraph.runs[2].style.foreground_color, Some("#0000ff"))
+    }
+    _ => fail("expected paragraph")
+  }
+}
+
+///|
 async test "remote decoder maps all heading styles and bullets" {
   let document = decoded_remote_document(
     (

@@ -118,6 +118,7 @@ fn write_workflow_paragraph(
   paragraph : @pumd.Paragraph,
   start : Int,
   output : StringBuilder,
+  include_background : Bool,
 ) -> Int {
   let mut end = start
   for run in paragraph.runs {
@@ -136,7 +137,16 @@ fn write_workflow_paragraph(
   output.write_string(paragraph.style.space_above_points.to_string())
   output.write_string(",\"unit\":\"PT\"},\"spaceBelow\":{\"magnitude\":")
   output.write_string(paragraph.style.space_below_points.to_string())
-  output.write_string(",\"unit\":\"PT\"}},\"elements\":[")
+  output.write_string(",\"unit\":\"PT\"}")
+  if include_background {
+    match paragraph.style.background_color {
+      Some("#F1F3F4") =>
+        output.write_string(",\"shading\":{\"backgroundColor\":{\"color\":{\"rgbColor\":{\"red\":0.9450980392156862,\"green\":0.9529411764705882,\"blue\":0.9568627450980393}}}}")
+      Some(_) => abort("workflow fixture needs an RGB encoding for this paragraph background")
+      None => ()
+    }
+  }
+  output.write_string("},\"elements\":[")
   let mut cursor = start
   for index, run in paragraph.runs {
     if index > 0 { output.write_char(',') }
@@ -158,6 +168,15 @@ fn write_workflow_paragraph(
     output.write_string("},\"fontSize\":{\"magnitude\":")
     output.write_string(run.style.font_size_points.to_string())
     output.write_string(",\"unit\":\"PT\"}")
+    // The workflow fixture is a public Docs response: code backgrounds must
+    // round-trip, otherwise a v2 code baseline falsely appears remotely
+    // edited before reconciliation considers its foreground-only migration.
+    match run.style.background_color {
+      Some("#F1F3F4") =>
+        output.write_string(",\"backgroundColor\":{\"color\":{\"rgbColor\":{\"red\":0.9450980392156862,\"green\":0.9529411764705882,\"blue\":0.9568627450980393}}}")
+      Some(_) => abort("workflow fixture needs an RGB encoding for this background")
+      None => ()
+    }
     match run.link {
       Some(link) => {
         output.write_string(",\"link\":{\"url\":")
@@ -174,11 +193,12 @@ fn write_workflow_paragraph(
 }
 
 ///|
-fn docs_response_json(
+fn docs_response_json_with_implicit_final_newline(
   document : @pumd.DesiredDocument,
   document_id : String,
   revision : String,
   tab_id : String,
+  include_implicit_final_newline : Bool,
 ) -> String {
   let output = StringBuilder::new()
   output.write_string("{\"documentId\":")
@@ -193,13 +213,44 @@ fn docs_response_json(
     if index > 0 { output.write_char(',') }
     match element {
       @pumd.StructuralElement::Paragraph(paragraph) =>
-        cursor = write_workflow_paragraph(paragraph, cursor, output)
+        cursor = write_workflow_paragraph(
+          paragraph,
+          cursor,
+          output,
+          include_implicit_final_newline,
+        )
       @pumd.StructuralElement::Table(_) =>
         abort("workflow Docs fixture currently supports paragraph documents")
     }
   }
+  if include_implicit_final_newline {
+    if !document.content.is_empty() { output.write_char(',') }
+    let final_newline : @pumd.Paragraph = {
+      runs: [],
+      style: @pumd.builtin_style_profile().body,
+      bullet: None,
+      provenance: None,
+    }
+    let _ = write_workflow_paragraph(final_newline, cursor, output, true)
+  }
   output.write_string("]}}}]}")
   output.to_string()
+}
+
+///|
+fn docs_response_json(
+  document : @pumd.DesiredDocument,
+  document_id : String,
+  revision : String,
+  tab_id : String,
+) -> String {
+  docs_response_json_with_implicit_final_newline(
+    document,
+    document_id,
+    revision,
+    tab_id,
+    false,
+  )
 }
 
 ///|
@@ -213,6 +264,26 @@ fn docs_response(
     200,
     {},
     docs_response_json(document, document_id, revision, tab_id),
+  )
+}
+
+///|
+fn docs_response_with_implicit_final_newline(
+  document : @pumd.DesiredDocument,
+  document_id : String,
+  revision : String,
+  tab_id : String,
+) -> @google_http.HttpResponse {
+  @google_http.HttpResponse::new(
+    200,
+    {},
+    docs_response_json_with_implicit_final_newline(
+      document,
+      document_id,
+      revision,
+      tab_id,
+      true,
+    ),
   )
 }
 
@@ -540,6 +611,149 @@ async test "ready publication updates the baseline with a revision-checked batch
     fail("updated entry needs baseline")
   }
   assert_eq(@debug.to_string(saved), @debug.to_string(desired))
+  clean_workflow_directory(directory)
+}
+
+///|
+async test "style migration updates a v2 plain-code baseline to v3 highlighted runs" {
+  let directory = workflow_directory("style-migration-update")
+  clean_workflow_directory(directory)
+  let desired = workflow_document("```javascript\nconst answer = \"yes\"\n```")
+  let baseline = version_two_code_baseline(desired)
+  seed_ready_with_baseline(directory, "migration.md", "migration-doc", "migration-tab", baseline)
+  let fake = WorkflowFakeHttpClient::{
+    requests: [],
+    responses: [
+      docs_response_with_implicit_final_newline(baseline, "migration-doc", "rev-migration", "migration-tab"),
+      drive_comments_response(0),
+      success_response(),
+    ],
+  }
+  guard publish_path_with_registry(
+      "migration.md",
+      fn(_) { Ok("```javascript\nconst answer = \"yes\"\n```") },
+      directory,
+      Adc,
+      fn() { Ok("project") },
+      fn() { Ok("adc") },
+      fake,
+      false,
+    )
+    is Ok(Updated(_, _)) else {
+    fail("style migration must update")
+  }
+  assert_eq(fake.requests.length(), 3)
+  assert_true(fake.requests[2].body.unwrap().contains("foregroundColor"))
+  guard @registry.load_registry_document(directory) is Ok(document) else {
+    fail("registry must load")
+  }
+  assert_eq(@debug.to_string(document.entries[0].published_baseline.unwrap()), @debug.to_string(desired))
+  clean_workflow_directory(directory)
+}
+
+///|
+async test "remote code edit conflicts with a v2-to-v3 style migration" {
+  let directory = workflow_directory("style-migration-conflict")
+  clean_workflow_directory(directory)
+  let desired = workflow_document("```javascript\nconst answer = \"yes\"\n```")
+  let baseline = version_two_code_baseline(desired)
+  seed_ready_with_baseline(directory, "migration-conflict.md", "migration-conflict-doc", "migration-conflict-tab", baseline)
+  let fake = WorkflowFakeHttpClient::{
+    requests: [],
+    responses: [
+      docs_response_with_implicit_final_newline(version_two_code_baseline(workflow_document("```javascript\nconst answer = \"reviewed\"\n```")), "migration-conflict-doc", "rev-migration-conflict", "migration-conflict-tab"),
+    ],
+  }
+  guard publish_path_with_registry(
+      "migration-conflict.md",
+      fn(_) { Ok("```javascript\nconst answer = \"yes\"\n```") },
+      directory,
+      Adc,
+      fn() { Ok("project") },
+      fn() { Ok("adc") },
+      fake,
+      false,
+    )
+    is Err(PublicationConflict(_)) else {
+    fail("remote code edit must not be overwritten by style migration")
+  }
+  assert_eq(fake.requests.length(), 1)
+  guard @registry.load_registry_document(directory) is Ok(document) else {
+    fail("registry must load")
+  }
+  assert_eq(@debug.to_string(document.entries[0].published_baseline.unwrap()), @debug.to_string(baseline))
+  clean_workflow_directory(directory)
+}
+
+///|
+async test "dry-run plans style migration without mutating the document or registry" {
+  let directory = workflow_directory("style-migration-dry-run")
+  clean_workflow_directory(directory)
+  let desired = workflow_document("```javascript\nconst answer = \"yes\"\n```")
+  let baseline = version_two_code_baseline(desired)
+  seed_ready_with_baseline(directory, "migration-dry.md", "migration-dry-doc", "migration-dry-tab", baseline)
+  let fake = WorkflowFakeHttpClient::{
+    requests: [],
+    responses: [
+      docs_response_with_implicit_final_newline(baseline, "migration-dry-doc", "rev-migration-dry", "migration-dry-tab"),
+      drive_comments_response(0),
+    ],
+  }
+  guard publish_path_with_registry(
+      "migration-dry.md",
+      fn(_) { Ok("```javascript\nconst answer = \"yes\"\n```") },
+      directory,
+      Adc,
+      fn() { Ok("project") },
+      fn() { Ok("adc") },
+      fake,
+      true,
+    )
+    is Ok(DryRunUpdate(report~)) else {
+    fail("dry run must expose the style migration plan")
+  }
+  assert_true(report.planned_units > 0)
+  assert_eq(fake.requests.length(), 2)
+  for request in fake.requests { assert_true(!request.url.contains(":batchUpdate")) }
+  guard @registry.load_registry_document(directory) is Ok(document) else {
+    fail("registry must load")
+  }
+  assert_eq(@debug.to_string(document.entries[0].published_baseline.unwrap()), @debug.to_string(baseline))
+  clean_workflow_directory(directory)
+}
+
+///|
+async test "unresolved comments remain a review barrier during style migration" {
+  let directory = workflow_directory("style-migration-review")
+  clean_workflow_directory(directory)
+  let desired = workflow_document("```javascript\nconst answer = \"yes\"\n```")
+  let baseline = version_two_code_baseline(desired)
+  seed_ready_with_baseline(directory, "migration-review.md", "migration-review-doc", "migration-review-tab", baseline)
+  let fake = WorkflowFakeHttpClient::{
+    requests: [],
+    responses: [
+      docs_response_with_implicit_final_newline(baseline, "migration-review-doc", "rev-migration-review", "migration-review-tab"),
+      drive_comments_response(1),
+    ],
+  }
+  guard publish_path_with_registry(
+      "migration-review.md",
+      fn(_) { Ok("```javascript\nconst answer = \"yes\"\n```") },
+      directory,
+      Adc,
+      fn() { Ok("project") },
+      fn() { Ok("adc") },
+      fake,
+      false,
+    )
+    is Err(ReviewBarrier(unresolved=1)) else {
+    fail("comments must remain a review barrier during migration")
+  }
+  assert_eq(fake.requests.length(), 2)
+  guard @registry.load_registry_document(directory) is Ok(document) else {
+    fail("registry must load")
+  }
+  assert_eq(@debug.to_string(document.entries[0].published_baseline.unwrap()), @debug.to_string(baseline))
   clean_workflow_directory(directory)
 }
 

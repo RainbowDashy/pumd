@@ -1,4 +1,15 @@
 ///|
+pub(all) struct SyntaxPalette {
+  comment : String
+  keyword : String
+  string : String
+  literal : String
+  type_tag : String
+  function : String
+  property_attribute : String
+} derive(Eq, @debug.Debug)
+
+///|
 pub(all) struct StyleProfile {
   id : String
   version : Int
@@ -9,6 +20,7 @@ pub(all) struct StyleProfile {
   link_color : String
   code_text : TextStyle
   code_block : ParagraphStyle
+  syntax_palette : SyntaxPalette
   table_cell : ParagraphStyle
   table_header_text : TextStyle
   table_header_fill : String
@@ -51,7 +63,7 @@ fn make_paragraph_style(
 }
 
 ///|
-/// The sole version-two Style Profile.
+/// The sole version-three Style Profile.
 pub fn builtin_style_profile() -> StyleProfile {
   let heading_sizes = [24, 18, 14, 12, 11, 10]
   let heading_before = [20, 18, 16, 14, 12, 10]
@@ -79,7 +91,7 @@ pub fn builtin_style_profile() -> StyleProfile {
   }
   {
     id: "pumd.default",
-    version: 2,
+    version: 3,
     body: make_paragraph_style(NamedStyle::NormalText, 11, 0, 6),
     body_text: make_text_style("Arial", 11),
     headings,
@@ -105,6 +117,15 @@ pub fn builtin_style_profile() -> StyleProfile {
       indent_start_points: None,
       indent_first_line_points: None,
       border_left: None,
+    },
+    syntax_palette: {
+      comment: "#5F6368",
+      keyword: "#6A1B9A",
+      string: "#08783F",
+      literal: "#9B5200",
+      type_tag: "#0057B8",
+      function: "#0B57D0",
+      property_attribute: "#7A3E00",
     },
     table_cell: make_paragraph_style(NamedStyle::NormalText, 11, 0, 0),
     table_header_text: { ..make_text_style("Arial", 11), bold: true },

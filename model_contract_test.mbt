@@ -39,7 +39,7 @@ test "public seam applies all six heading roles and profile sizes" {
   match @pumd.render_markdown(markdown) {
     Ok(document) => {
       assert_eq(document.render_metadata.style_profile_id, "pumd.default")
-      assert_eq(document.render_metadata.style_profile_version, 2)
+      assert_eq(document.render_metadata.style_profile_version, 3)
       assert_eq(document.content.length(), 6)
       for i = 0; i < 6; i = i + 1 {
         match document.content[i] {

@@ -182,6 +182,42 @@ test "keeps combining marks at one UTF-16 unit each" {
 }
 
 ///|
+test "plans colored runs with UTF-16 ranges after CJK combining text and emoji" {
+  let profile = @pumd.builtin_style_profile()
+  let document : @pumd.DesiredDocument = {
+    metadata: { title: None, locale: None },
+    render_metadata: {
+      style_profile_id: profile.id,
+      style_profile_version: profile.version,
+    },
+    content: [
+      @pumd.StructuralElement::Paragraph({
+        runs: [
+          { content: "A界", style: { ..profile.code_text, foreground_color: Some("#ff0000") }, link: None, provenance: None },
+          { content: "é", style: { ..profile.code_text, foreground_color: Some("#00ff00") }, link: None, provenance: None },
+          { content: "🚀", style: { ..profile.code_text, foreground_color: Some("#0000ff") }, link: None, provenance: None },
+        ],
+        style: profile.code_block,
+        bullet: None,
+        provenance: None,
+      }),
+    ],
+    provenance: None,
+  }
+  inspect(
+    compile_docs_update_plan(document).to_snapshot(),
+    content=(
+      #|insert-text 1 "A界é🚀\n"
+      #|paragraph-style 1..8 normal font=Roboto Mono size=10 line=100 before=0 after=0
+      #|text-style 1..3 font=Roboto Mono size=10 color=#ff0000 background=#F1F3F4
+      #|text-style 3..5 font=Roboto Mono size=10 color=#00ff00 background=#F1F3F4
+      #|text-style 5..7 font=Roboto Mono size=10 color=#0000ff background=#F1F3F4
+      #|
+    ),
+  )
+}
+
+///|
 test "UTF-16 matrix covers every published text context" {
   let markdown =
     #|plain A界é🚀
@@ -263,7 +299,7 @@ test "planning rejects a table whose rows have no cells" {
     metadata: { title: None, locale: None },
     render_metadata: {
       style_profile_id: "pumd.default",
-      style_profile_version: 2,
+      style_profile_version: 3,
     },
     content: [
       @pumd.StructuralElement::Table({

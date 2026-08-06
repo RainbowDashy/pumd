@@ -189,6 +189,50 @@ async test "batch update preserves UTF-16 ranges, links, list presets, and color
 }
 
 ///|
+async test "batch update lowers colored runs at their UTF-16 ranges" {
+  let profile = @pumd.builtin_style_profile()
+  let document : @pumd.DesiredDocument = {
+    metadata: { title: None, locale: None },
+    render_metadata: {
+      style_profile_id: profile.id,
+      style_profile_version: profile.version,
+    },
+    content: [
+      @pumd.StructuralElement::Paragraph({
+        runs: [
+          { content: "A界", style: { ..profile.code_text, foreground_color: Some("#ff0000") }, link: None, provenance: None },
+          { content: "é", style: { ..profile.code_text, foreground_color: Some("#00ff00") }, link: None, provenance: None },
+          { content: "🚀", style: { ..profile.code_text, foreground_color: Some("#0000ff") }, link: None, provenance: None },
+        ],
+        style: profile.code_block,
+        bullet: None,
+        provenance: None,
+      }),
+    ],
+    provenance: None,
+  }
+  let fake = DocsAdapterFakeHttpClient::{
+    requests: [],
+    responses: [@google_http.HttpResponse::new(200, {}, "{}")],
+  }
+  match batch_update_document(docs_adapter_client(fake), "doc-123", compile_docs_update_plan(document)) {
+    Ok(_) => ()
+    Err(_) => assert_true(false)
+  }
+  let body = match fake.requests[0].body {
+    Some(body) => body
+    None => abort("batch update must have JSON")
+  }
+  assert_true(@json.valid(body))
+  assert_true(body.contains("\"range\":{\"startIndex\":1,\"endIndex\":3}"))
+  assert_true(body.contains("\"range\":{\"startIndex\":3,\"endIndex\":5}"))
+  assert_true(body.contains("\"range\":{\"startIndex\":5,\"endIndex\":7}"))
+  assert_true(body.contains("\"foregroundColor\":{\"color\":{\"rgbColor\":{\"red\":1"))
+  assert_true(body.contains("\"foregroundColor\":{\"color\":{\"rgbColor\":{\"red\":0,\"green\":1"))
+  assert_true(body.contains("\"foregroundColor\":{\"color\":{\"rgbColor\":{\"red\":0,\"green\":0,\"blue\":1"))
+}
+
+///|
 async test "batch update reapplies quoted list decoration after native bullets" {
   let profile = @pumd.builtin_style_profile()
   let document : @pumd.DesiredDocument = {

@@ -5,7 +5,7 @@ test "renders a mixed Unicode heading through the public seam" {
       inspect(
         document.to_snapshot(),
         content=(
-          #|profile pumd.default@2
+          #|profile pumd.default@3
           #|paragraph heading-1 font=Arial size=24 line=1.15 before=20 after=8
           #|  text "Hello " font=Arial size=24
           #|  text "世界" italic font=Arial size=24
@@ -25,7 +25,7 @@ test "composes linked emphasis and inline code in a heading" {
       inspect(
         document.to_snapshot(),
         content=(
-          #|profile pumd.default@2
+          #|profile pumd.default@3
           #|paragraph heading-1 font=Arial size=24 line=1.15 before=20 after=8
           #|  text "Build " font=Arial size=24
           #|  text "code" font=Roboto Mono size=10 background=#F1F3F4

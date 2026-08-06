@@ -75,14 +75,30 @@ fn optional_string(value : String?, output : StringBuilder) -> Unit {
 }
 
 ///|
+/// Google Docs normalizes decoded RGB hex to lowercase, while a Style Profile
+/// may retain its authored casing. Reconciliation compares semantic colors,
+/// so its signatures use one canonical key without changing stored styles.
+fn canonical_color_key(color : String) -> String {
+  color.to_lower()
+}
+
+///|
+fn optional_color_key(value : String?, output : StringBuilder) -> Unit {
+  match value {
+    Some(color) => output.write_string(canonical_color_key(color))
+    None => output.write_string("-")
+  }
+}
+
+///|
 fn text_signature(style : @pumd.TextStyle, link : String?, output : StringBuilder) -> Unit {
   output.write_string(style.font_family); output.write_char('|')
   output.write_string(style.font_size_points.to_string()); output.write_char('|')
   output.write_string(style.bold.to_string()); output.write_char('|')
   output.write_string(style.italic.to_string()); output.write_char('|')
   output.write_string(style.underline.to_string()); output.write_char('|')
-  optional_string(style.foreground_color, output); output.write_char('|')
-  optional_string(style.background_color, output); output.write_char('|')
+  optional_color_key(style.foreground_color, output); output.write_char('|')
+  optional_color_key(style.background_color, output); output.write_char('|')
   optional_string(link, output); output.write_char(';')
 }
 
@@ -92,11 +108,11 @@ fn paragraph_style_signature(style : @pumd.ParagraphStyle, output : StringBuilde
   output.write_string(style.line_spacing_percent.to_string()); output.write_char('|')
   output.write_string(style.space_above_points.to_string()); output.write_char('|')
   output.write_string(style.space_below_points.to_string()); output.write_char('|')
-  optional_string(style.background_color, output); output.write_char('|')
+  optional_color_key(style.background_color, output); output.write_char('|')
   match style.indent_start_points { Some(value) => output.write_string(value.to_string()); None => output.write_char('-') }; output.write_char('|')
   match style.indent_first_line_points { Some(value) => output.write_string(value.to_string()); None => output.write_char('-') }; output.write_char('|')
   match style.border_left {
-    Some(border) => { output.write_string(border.color); output.write_char('|'); output.write_string(border.width_points.to_string()); output.write_char('|'); output.write_string(border.padding_points.to_string()) }
+    Some(border) => { output.write_string(canonical_color_key(border.color)); output.write_char('|'); output.write_string(border.width_points.to_string()); output.write_char('|'); output.write_string(border.padding_points.to_string()) }
     None => output.write_char('-')
   }
 }
@@ -145,7 +161,7 @@ fn desired_table_signature(table : @pumd.Table) -> String {
       output.write_string(cell_alignment_key(cell.alignment))
       output.write_char('|')
       match cell.background_color {
-        Some(color) => output.write_string(color)
+        Some(color) => output.write_string(canonical_color_key(color))
         None => output.write_char('-')
       }
       output.write_char('|')
@@ -166,7 +182,7 @@ fn remote_table_signature(table : RemoteTable) -> String {
       output.write_string(cell_alignment_key(cell.alignment))
       output.write_char('|')
       match cell.background_color {
-        Some(color) => output.write_string(color)
+        Some(color) => output.write_string(canonical_color_key(color))
         None => output.write_char('-')
       }
       output.write_char('|')

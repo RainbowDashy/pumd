@@ -37,7 +37,7 @@ test "parser syntax variants render as a stable canonical contract" {
   inspect(
     document.to_snapshot(),
     content=(
-      #|profile pumd.default@2
+      #|profile pumd.default@3
       #|paragraph heading-1 font=Arial size=24 line=1.15 before=20 after=8
       #|  text "ATX heading" font=Arial size=24
       #|paragraph heading-2 font=Arial size=18 line=1.15 before=18 after=6
