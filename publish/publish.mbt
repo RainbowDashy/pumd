@@ -120,13 +120,13 @@ fn response_decode_recovery_guidance(
     Some(_) => "Google Drive and the created document"
     None => "Google Drive"
   }
-  " A remote mutation may have succeeded; inspect " +
+  "A remote mutation may have succeeded; inspect " +
   inspection_target +
   " before retrying. pumd will not retry automatically."
 }
 
 ///|
-let generic_remote_recovery_guidance = " Check the reported HTTP status: for a 5xx response, wait and retry later; otherwise report the status to the pumd maintainer before retrying."
+let generic_remote_recovery_guidance = "Check the reported HTTP status: for a 5xx response, wait and retry later; otherwise report the status to the pumd maintainer before retrying."
 
 ///|
 fn classified_google_error(
@@ -152,6 +152,10 @@ fn classified_google_error(
 }
 
 ///|
+/// A user-facing publish failure message. Paragraphs are separated by blank
+/// lines: a short summary first, then what happened and how to recover. The
+/// CLI renders each paragraph wrapped and indented; embedded messages stay
+/// single-line so they compose cleanly into these paragraphs.
 pub fn PublishError::user_message(self : PublishError) -> String {
   match self {
     SourceAccess(path~) =>
@@ -171,69 +175,101 @@ pub fn PublishError::user_message(self : PublishError) -> String {
     }
     Planning(message) => "Desired Document planning failed: " + message
     Authentication(authorization_mode~, problem~, created_document~) => {
-      let guidance = match (authorization_mode, problem) {
+      let (explanation, hint) = match (authorization_mode, problem) {
         (Project, CredentialsNotConfigured) =>
-          "Project Authorization is not configured. " + project_setup_hint
+          ("Project Authorization is not configured.", project_setup_hint)
         (Project, CredentialVaultDenied) =>
-          "The native credential vault is locked or denied access. Unlock it and allow pumd, then retry; no file fallback was used."
+          (
+            "The native credential vault is locked or denied access. Unlock it and allow pumd, then retry; no file fallback was used.",
+            "",
+          )
         (Project, UnsupportedPlatform) =>
-          "Project Authorization has no supported native credential vault on this platform. Select `--credential-store=file` explicitly only if its reduced protection is acceptable."
+          (
+            "Project Authorization has no supported native credential vault on this platform.",
+            "Select `--credential-store=file` explicitly only if its reduced protection is acceptable.",
+          )
         (Project, CredentialsUnavailable) =>
-          "Project Authorization credentials are unavailable. " +
-          project_setup_hint
+          (
+            "Project Authorization credentials are unavailable.",
+            project_setup_hint,
+          )
         (Project, CredentialsInvalid) =>
-          "Project Authorization credentials are invalid. Recreate them before retrying. " +
-          project_setup_hint
+          (
+            "Project Authorization credentials are invalid. Recreate them before retrying.",
+            project_setup_hint,
+          )
         (Project, CredentialsRefreshFailed) =>
-          "Project Authorization credentials are expired or could not be refreshed. Recreate them before retrying. " +
-          project_setup_hint
+          (
+            "Project Authorization credentials are expired or could not be refreshed. Recreate them before retrying.",
+            project_setup_hint,
+          )
         (Project, CredentialsRejected) =>
-          "Google rejected the Project Authorization credentials; set them up again before retrying. " +
-          project_setup_hint
-        (Adc, CredentialsUnavailable) =>
-          "Application Default Credentials are unavailable. " + adc_setup_hint
+          (
+            "Google rejected the Project Authorization credentials; set them up again before retrying.",
+            project_setup_hint,
+          )
+        (Adc, CredentialsUnavailable) | (Adc, CredentialsNotConfigured) =>
+          ("Application Default Credentials are unavailable.", adc_setup_hint)
         (Adc, CredentialsInvalid) =>
-          "Application Default Credentials are invalid. Recreate them before retrying. " +
-          adc_setup_hint
+          (
+            "Application Default Credentials are invalid. Recreate them before retrying.",
+            adc_setup_hint,
+          )
         (Adc, CredentialsRefreshFailed) =>
-          "Application Default Credentials are expired or could not be refreshed. Recreate them before retrying. " +
-          adc_setup_hint
+          (
+            "Application Default Credentials are expired or could not be refreshed. Recreate them before retrying.",
+            adc_setup_hint,
+          )
         (Adc, CredentialsRejected) =>
-          "Google rejected the Application Default Credentials; refresh ADC before retrying. " +
-          adc_setup_hint
-        (Adc, CredentialsNotConfigured) =>
-          "Application Default Credentials are unavailable. " + adc_setup_hint
+          (
+            "Google rejected the Application Default Credentials; refresh ADC before retrying.",
+            adc_setup_hint,
+          )
         (Adc, CredentialVaultDenied) | (Adc, UnsupportedPlatform) =>
-          "Application Default Credentials are unavailable. " + adc_setup_hint
+          ("Application Default Credentials are unavailable.", adc_setup_hint)
         (Ephemeral, CredentialsNotConfigured)
         | (Ephemeral, CredentialsUnavailable) =>
-          "An ephemeral access token was not supplied. " + ephemeral_setup_hint
+          (
+            "An ephemeral access token was not supplied.",
+            ephemeral_setup_hint,
+          )
         (Ephemeral, CredentialsInvalid)
         | (Ephemeral, CredentialsRefreshFailed)
         | (Ephemeral, CredentialsRejected) =>
-          "The ephemeral access token is invalid or was rejected. " +
-          ephemeral_setup_hint
+          (
+            "The ephemeral access token is invalid or was rejected.",
+            ephemeral_setup_hint,
+          )
         (Ephemeral, CredentialVaultDenied) | (Ephemeral, UnsupportedPlatform) =>
-          "An ephemeral access token was not supplied. " + ephemeral_setup_hint
+          (
+            "An ephemeral access token was not supplied.",
+            ephemeral_setup_hint,
+          )
       }
+      let suffix = if hint.is_empty() { "" } else { "\n\n" + hint }
       "authentication failed" +
       format_document_identity(created_document) +
-      ": " +
-      guidance
+      "\n\n" +
+      explanation +
+      suffix
     }
     Creation(message) =>
-      "document creation failed: " + message + generic_remote_recovery_guidance
+      "document creation failed: " +
+      message +
+      "\n\n" +
+      generic_remote_recovery_guidance
     AmbiguousCreation =>
-      "document creation had an ambiguous transport outcome. pumd will not retry automatically; inspect Google Drive before retrying."
+      "document creation had an ambiguous transport outcome.\n\npumd will not retry automatically; inspect Google Drive before retrying."
     AmbiguousPopulation(created_document) =>
       "document population had an ambiguous transport outcome after creation" +
       format_document_identity(Some(created_document)) +
-      ". pumd will not retry automatically; inspect Google Drive before retrying."
+      ".\n\npumd will not retry automatically; inspect Google Drive before retrying."
     Population(created_document~, message~) =>
       "document population failed after creation" +
       format_document_identity(Some(created_document)) +
       ": " +
       message +
+      "\n\n" +
       generic_remote_recovery_guidance
     Permission(authorization_mode~, stage~, created_document~) => {
       let guidance = match authorization_mode {
@@ -247,32 +283,33 @@ pub fn PublishError::user_message(self : PublishError) -> String {
       remote_stage_name(stage) +
       " permission failed" +
       format_document_identity(created_document) +
-      ": Google denied permission. " +
+      "\n\nGoogle denied permission.\n\n" +
       guidance
     }
     Throttled(stage~, created_document~) =>
       remote_stage_name(stage) +
       " was throttled" +
       format_document_identity(created_document) +
-      ": Google Docs limited the request; wait and retry later."
+      "\n\nGoogle Docs limited the request; wait and retry later."
     ResponseDecode(stage~, message~, created_document~) =>
       remote_stage_name(stage) +
       " response decoding failed" +
       format_document_identity(created_document) +
       ": " +
       message +
+      "\n\n" +
       response_decode_recovery_guidance(created_document)
     Registry(message) => "publication registry failed: " + message
     BlockedPublication(source_path~) =>
       "publication is blocked for `" +
       source_path +
-      "`; inspect Google Drive and explicitly `pumd forget <path>` before retrying."
+      "`.\n\nInspect Google Drive and explicitly `pumd forget <path>` before retrying."
     Read(document_id~, url~, message~) =>
       "registered document readback failed (document ID " +
       document_id +
       ", " +
       url +
-      "): " +
+      ").\n\n" +
       message
     RemoteMissing(document_id~, url~) =>
       "the registered document or its Managed Tab is no longer available " +
@@ -280,25 +317,25 @@ pub fn PublishError::user_message(self : PublishError) -> String {
       document_id +
       ", " +
       url +
-      "); pumd will not create a replacement; restore the document or forget the Publication explicitly."
+      ").\n\npumd will not create a replacement; restore the document or forget the Publication explicitly."
     PublicationConflict(message~) =>
-      "publish blocked: " +
+      "publish blocked.\n\n" +
       message +
-      " pumd applied no partial updates; resolve the overlapping edits in Google Docs or revert the local change, then publish again."
+      "\n\npumd applied no partial updates; resolve the overlapping edits in Google Docs or revert the local change, then publish again."
     ReviewBarrier(unresolved~) =>
-      "publish blocked: " +
+      "publish blocked.\n\n" +
       unresolved.to_string() +
-      " unresolved review comment(s) remain in Google Docs. Resolve or delete them, then publish again; pumd never bypasses review feedback."
+      " unresolved review comment(s) remain in Google Docs.\n\nResolve or delete them, then publish again; pumd never bypasses review feedback."
     Concurrency(message~) =>
-      "publish was interrupted by a concurrent change: " +
+      "publish was interrupted by a concurrent change.\n\n" +
       message +
-      " Nothing was applied to the document or the local registry. Re-read the document and publish again."
+      "\n\nNothing was applied to the document or the local registry. Re-read the document and publish again."
     AmbiguousUpdate(document_id~, url~) =>
       "the update request had an ambiguous transport outcome (document ID " +
       document_id +
       ", " +
       url +
-      "). pumd re-read the document and could not confirm whether the intended state landed; run publish again to reconcile. No local state was committed."
+      ").\n\npumd re-read the document and could not confirm whether the intended state landed; run publish again to reconcile. No local state was committed."
     UpdateFailed(document_id~, url~, message~) =>
       "document update failed (document ID " +
       document_id +
@@ -306,6 +343,7 @@ pub fn PublishError::user_message(self : PublishError) -> String {
       url +
       "): " +
       message +
+      "\n\n" +
       generic_remote_recovery_guidance
   }
 }

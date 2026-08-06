@@ -1,6 +1,6 @@
 ///|
 async fn report_failure(message : String) -> Unit {
-  @stdio.stderr.write("pumd: " + message + "\n")
+  @stdio.stderr.write(format_error_message(message) + "\n")
   @sys.exit(1)
 }
 
@@ -490,7 +490,7 @@ async fn project_access_token_with_onboarding(
             project_access_token(http, request)
           }
           Err(error) => {
-            @stdio.stderr.write("pumd: " + error.user_message() + "\n")
+            @stdio.stderr.write(format_error_message(error.user_message()) + "\n")
             Err(project_authentication_problem(error))
           }
         }
@@ -1084,7 +1084,9 @@ async fn prepared_setup_store(
   }
   if selection is @args.CredentialStore::File {
     @stdio.stderr.write(
-      "pumd: warning: file credential storage is an explicit reduced-protection choice; no OS vault fallback is active.\n",
+      format_error_message(
+        "warning: file credential storage is an explicit reduced-protection choice; no OS vault fallback is active.",
+      ) + "\n",
     )
   }
   Ok(store)
