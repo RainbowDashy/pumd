@@ -160,7 +160,7 @@ static const PumdVendorSpec pumd_vendor_specs[PUMD_VENDOR_SPEC_COUNT] = {
     {"xml", "5000ae8f22d11fbe93939b05c1e37cf21117162d", "MIT",
      tree_sitter_xml, pumd_query_xml, (uint32_t)sizeof(pumd_query_xml), NULL, 0,
      0},
-    {"sql", "c2e1e08db1ea20dc23bdb8d228a81a8756e9c450", "MIT",
+    {"sql", "64d6707541898bf17a306033050b1932524e215f", "MIT",
      tree_sitter_sql, pumd_query_sql, (uint32_t)sizeof(pumd_query_sql), NULL, 0,
      0},
     {"markdown", "a0a00f817d02412bd92c54d316f164d827b57b5c", "MIT",

@@ -30,4 +30,10 @@ options(
     "syntax_highlight_parser_xml.c",
     "syntax_highlight_parser_yaml.c",
   ],
+  link: {
+    "native": {
+      "stub-cc-flags": "-flto",
+      "cc-link-flags": "-flto",
+    },
+  },
 )

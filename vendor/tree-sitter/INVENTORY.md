@@ -7,7 +7,7 @@ strings in `generated/highlight_queries.h` are generated from the checked-in
 query files with `npm run generate:highlight-queries`; consumers derive each
 byte length with `sizeof` rather than generated length objects. The generated
 header has SHA-256
-`79b4f47636c4f61b704bfe0a57b9b746d3be0e044117c131cf987627e142f974`.
+`2235ee049fed0b4b26239651c32213ecc3b42f8508a33d9bb22f7d0eb1d92ade`.
 
 ## Runtime
 
@@ -47,13 +47,20 @@ in parentheses.
 | html | — | https://github.com/tree-sitter/tree-sitter-html `73a3947324f6efddf9e17c0ea58d454843590cc0` (14) | parser `65768172733b3bbe461cbdc14ea928f00fbfcc51d8ac68f0a5c72071c6a0bbf1`; scanner `5c0a0567e010277b81fe63be0acd04f6b44c3ef3063ac01429b910c1d22f0dca` | `1ebb3811a8cdc054385b847a3aac6fbf7079faefd5b3dfab5bbad256cd5afdcf` |
 | css | — | https://github.com/tree-sitter/tree-sitter-css `dda5cfc5722c429eaba1c910ca32c2c0c5bb1a3f` (15) | parser `2e5150071220012ee635ac9e2119f4f3a93e0b51a7a3b69ab0cd87c18cf5e51e`; scanner `18dae8c8c4f515f28a3dc7ffb5bda259b06013a752921dc411a2fad8ecf78988` | `23f7948a3817a0d06d7120158c3bee4ec5b58daa77e524985a4738b364db17b2` |
 | xml | — | https://github.com/tree-sitter-grammars/tree-sitter-xml `5000ae8f22d11fbe93939b05c1e37cf21117162d` (14) | parser `e00f74ae7edcfc5e0cf9dc551a41a02e88a86dad9d6d13820e292bde794cdd94`; scanner `4b0f66625c8bd23ec5cde906206083a3cc39e9fedf6a71fb0747bfca6ca19c26` | `aa4a561c846928c3a4d885acbe690a60689661a45684babe16cf8b7a1509b610` |
-| sql | — | https://github.com/DerekStride/tree-sitter-sql `c2e1e08db1ea20dc23bdb8d228a81a8756e9c450` (15) | parser `36ffce6999124e9762054f9bfe2cd3778db05288feb33a4e150dc17df2e73026`; scanner `de17b5cffc3c86f56cf6630abb969330c3c839a81ece0b901bdac0ecee93c403` | `25b2a7b5e60f04012c28a5cf2a224311bdb213361ba2c6439bd50ea3fafb0c64` |
+| sql | — | https://github.com/DerekStride/tree-sitter-sql `v0.3.9` / `64d6707541898bf17a306033050b1932524e215f` (15) | parser `e10b56aa2caaa369d085f7a5e43ec14adfad309c2a7a3a64e70bceef533dfeb7`; scanner `de17b5cffc3c86f56cf6630abb969330c3c839a81ece0b901bdac0ecee93c403` | `80e726903b67fbe471bf1272a447ab6a6758e95654f9e9c8f5c2e4af729af8de` |
 | markdown | `md` | https://github.com/tree-sitter-grammars/tree-sitter-markdown `a0a00f817d02412bd92c54d316f164d827b57b5c` (15) | parser `0f51c93b5d79d08bc74088d91a9aafb7e40ad7e2f169164865c01d392277bb07`; scanner `02834bcbaf0cf51178e74450d487cc0231b9a52541cd374527ee35cfaf17fd4a` | `2eb06e766ccd672d49599d14f398f07f4f5f7f2208262993d3cd9207c1078e2f` |
 | http | — | https://github.com/rest-nvim/tree-sitter-http `db8b4398de90b6d0b6c780aba96aaa2cd8e9202c` (14) | parser `7f42901a31e547bbf473a174a154e4bc452441c979bae1fc689afa2f58bda62e` | `9763d89ca17a4101ac94d9cc8002ff423c2e2c0548644af883247b64bce162ad` |
 | protobuf | `proto` | https://github.com/mitchellh/tree-sitter-proto `42d82fa18f8afe59b5fc0b16c207ee4f84cb185f` (13) | parser `0029c486379508543e4822d6c7842df15058fe560377a19a51992eeb527013b6` | `6d5c47bdfeccf1f3c2c815151987674703c5b69a2fe6575650ac8c8939ea3b55` |
 
-The SQL upstream revision intentionally has no `src/parser.c`. It was generated
-once with `tree-sitter-cli@0.26.3`, then checked in; normal builds do not run a
+The SQL parser is pinned to upstream `v0.3.9` (64d6707) rather than a later
+release because the generated tables grew from 17,329 states / ~2.4 MiB at
+v0.3.9 to 30,622 states / ~10.5 MiB on current `main` (v0.3.11-era) without
+new dialect coverage relevant to `pumd`. The v0.3.9 release includes the
+TSQL additions (`@param` identifiers, `N'...'` strings, `OBJECT_ID`) plus the
+existing PostgreSQL, MySQL, and Oracle best-effort keyword coverage; dialect-
+specific syntax outside the grammar still degrades safely to plain code. The
+upstream revision intentionally has no `src/parser.c`; it was generated once
+with `tree-sitter-cli@0.26.3`, then checked in; normal builds do not run a
 generator. The Protobuf include spelling and the TypeScript/TSX/XML external
 scanner include paths are normalized only to make isolated, no-include-path C
 translation units work. Their checksums above identify the exact committed
@@ -86,7 +93,12 @@ Clang 16, using a clean
 | --- | ---: | ---: |
 | Baseline `02a0bc5` | 12.13 s | 2,893,736 bytes |
 | Bundled Syntax Highlighting | 16.75 s | 20,976,040 bytes |
+| SQL `v0.3.9` pin + size flags | 14.68 s | 11,958,536 bytes |
 
-The bundled parsers add 18,082,304 bytes (17.24 MiB, a 624.9% increase) to
-this release binary. The one-sample clean build increased by 4.62 seconds
-(38.1%); timing is machine-local evidence rather than a performance budget.
+The bundled parsers originally added 18,082,304 bytes (17.24 MiB, a 624.9%
+increase). Pinning the SQL grammar to `v0.3.9` removes ~8.1 MiB of generated
+parse tables, and the size flags (`-Os -flto -ffunction-sections
+-fdata-sections` for native-stub compilation plus `-flto` at link time, wired
+through `options(link: ...)` in `moon.pkg`) remove a further ~0.6 MiB. The
+optimized bundle adds 9,064,800 bytes (8.64 MiB, a 313.2% increase) to the
+baseline. Timing is machine-local evidence rather than a performance budget.
