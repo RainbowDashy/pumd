@@ -163,6 +163,13 @@ fn required_string(fields : Map[String, Json], name : String) -> Result[String, 
 fn optional_string(fields : Map[String, Json], name : String) -> Result[String?, RegistryError] {
   match fields.get(name) { Some(String(value)) => Ok(Some(value)); Some(Null) => Ok(None); _ => Err(Malformed("invalid \{name}")) }
 }
+fn add_missing_inline_images(json : Json) -> Unit {
+  match json {
+    Object(fields) => { match fields.get("runs") { Some(Array(_)) => if !fields.contains("inline_images") { fields.set("inline_images", Json::array([])) }; _ => () }; for _, value in fields { add_missing_inline_images(value) } }
+    Array(values) => for value in values { add_missing_inline_images(value) }
+    _ => ()
+  }
+}
 
 fn parse_entry(json : Json) -> Result[PublicationEntry, RegistryError] {
   let fields = match json { Object(fields) => fields; _ => return Err(Malformed("publication must be an object")) }
@@ -171,7 +178,7 @@ fn parse_entry(json : Json) -> Result[PublicationEntry, RegistryError] {
   }
   let baseline = match fields.get("published_baseline") {
     Some(Null) => None
-    Some(value) => { let decoded : @pumd.DesiredDocument = @json.from_json(value) catch { _ => return Err(Malformed("invalid published_baseline")) }; Some(decoded) }
+    Some(value) => { add_missing_inline_images(value); let decoded : @pumd.DesiredDocument = @json.from_json(value) catch { _ => return Err(Malformed("invalid published_baseline")) }; Some(decoded) }
     None => return Err(Malformed("invalid published_baseline"))
   }
   let source_path = match required_string(fields, "source_path") { Ok(value) => value; Err(error) => return Err(error) }

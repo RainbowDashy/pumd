@@ -155,6 +155,11 @@ fn write_paragraph(
     }
     buffer.write_char('\n')
   }
+  for image in paragraph.inline_images {
+    buffer.write_string(indent); buffer.write_string("  image offset="); buffer.write_string(image.text_offset.to_string()); buffer.write_string(" source="); write_escaped(image.source_url, buffer); buffer.write_string(" alt="); write_escaped(image.alt_text, buffer)
+    match image.title { Some(title) => { buffer.write_string(" title="); write_escaped(title, buffer) }; None => () }
+    buffer.write_char('\n')
+  }
 }
 
 ///|

@@ -214,7 +214,7 @@ async test "MoonBit smoke runner drives the native CLI before network access" {
     fail("unsupported Markdown must fail in the native CLI")
   }
   assert_true(message.contains("rendering failed"))
-  assert_true(message.contains("image:"))
+  assert_true(message.contains("image-source:"))
 }
 
 ///|

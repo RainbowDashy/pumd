@@ -204,6 +204,7 @@ async test "batch update lowers colored runs at their UTF-16 ranges" {
           { content: "é", style: { ..profile.code_text, foreground_color: Some("#00ff00") }, link: None, provenance: None },
           { content: "🚀", style: { ..profile.code_text, foreground_color: Some("#0000ff") }, link: None, provenance: None },
         ],
+        inline_images: [],
         style: profile.code_block,
         bullet: None,
         provenance: None,
@@ -232,6 +233,13 @@ async test "batch update lowers colored runs at their UTF-16 ranges" {
   assert_true(body.contains("\"foregroundColor\":{\"color\":{\"rgbColor\":{\"red\":0,\"green\":0,\"blue\":1"))
 }
 
+async test "batch update lowers HTTPS images to native inline image requests" {
+  let document = match @pumd.render_markdown("Before ![diagram](https://example.test/diagram.png) after") { Ok(document) => document; Err(_) => abort("HTTPS image fixture must render") }
+  let fake = DocsAdapterFakeHttpClient::{ requests: [], responses: [@google_http.HttpResponse::new(200, {}, "{}")], }
+  match batch_update_document(docs_adapter_client(fake), "doc-123", compile_docs_update_plan(document)) { Ok(_) => (); Err(_) => fail("image batch update must lower") }
+  let body = fake.requests[0].body.unwrap_or(""); assert_true(@json.valid(body)); assert_true(body.contains("\"insertInlineImage\":{\"uri\":\"https://example.test/diagram.png\",\"location\":{\"index\":8}")); assert_true(!body.contains("objectSize"))
+}
+
 ///|
 async test "batch update reapplies quoted list decoration after native bullets" {
   let profile = @pumd.builtin_style_profile()
@@ -251,6 +259,7 @@ async test "batch update reapplies quoted list decoration after native bullets" 
             provenance: None,
           },
         ],
+        inline_images: [],
         style: {
           ..profile.body,
           indent_start_points: Some(54),
@@ -269,6 +278,7 @@ async test "batch update reapplies quoted list decoration after native bullets" 
             provenance: None,
           },
         ],
+        inline_images: [],
         style: {
           ..profile.body,
           indent_start_points: Some(90),
@@ -287,6 +297,7 @@ async test "batch update reapplies quoted list decoration after native bullets" 
             provenance: None,
           },
         ],
+        inline_images: [],
         style: {
           ..profile.body,
           indent_start_points: Some(126),

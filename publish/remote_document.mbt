@@ -29,11 +29,15 @@ pub(all) struct RemoteParagraph {
   start_index : Int
   end_index : Int
   runs : Array[RemoteRun]
+  inline_images : Array[RemoteInlineImage]
   style : @pumd.ParagraphStyle
   bullet : RemoteBullet?
   suggestions : Array[RemoteSuggestion]
   normalization_warning : Bool
 } derive(Eq, @debug.Debug)
+
+///|
+pub(all) struct RemoteInlineImage { start_index : Int; end_index : Int; source_url : String; text_offset : Int } derive(Eq, @debug.Debug)
 
 ///|
 pub(all) struct RemoteRun {
@@ -119,6 +123,7 @@ priv struct RemoteDocumentEnvelope {
   revisionId : String?
   tabs : Array[Json]?
   body : Json?
+  inlineObjects : Json?
 } derive(@json.FromJson)
 
 ///|
@@ -487,13 +492,25 @@ fn append_style_suggestions(
 }
 
 ///|
-fn decode_paragraph(element : Json, paragraph : Json) -> RemoteParagraph {
+fn inline_image_source(inline_objects : Json, object_id : String) -> String? {
+  let object = match field(inline_objects, object_id) { Some(value) => value; None => return None }
+  let properties = match field(object, "inlineObjectProperties") { Some(value) => value; None => return None }
+  let embedded = match field(properties, "embeddedObject") { Some(value) => value; None => return None }
+  let image = match field(embedded, "imageProperties") { Some(value) => value; None => return None }
+  string_field(image, "sourceUri")
+}
+
+fn docs_text_width(text : String) -> Int { let mut length = 0; for char in text { let width = if char.to_int() > 0xFFFF { 2 } else { 1 }; length = length + width }; length }
+
+fn decode_paragraph(element : Json, paragraph : Json, inline_objects : Json) -> RemoteParagraph {
   let start_index = index_field(element, "startIndex")
   let end_index = index_field(element, "endIndex")
   let runs : Array[RemoteRun] = []
+  let inline_images : Array[RemoteInlineImage] = []
   let (suggestions, suggestion_warning) = collect_suggestions(element, start_index, end_index, "")
   let (paragraph_insertions, paragraph_insertion_warning) = strings(element, "suggestedInsertionIds")
   let mut warning = suggestion_warning || paragraph_insertion_warning || !paragraph_insertions.is_empty()
+  let mut text_offset = 0
   match array_field(paragraph, "elements") {
     Some(elements) => for item in elements {
       match field(item, "textRun") {
@@ -515,6 +532,7 @@ fn decode_paragraph(element : Json, paragraph : Json) -> RemoteParagraph {
           warning = warning || style_warning || inserted_warning || deleted_warning
           if inserted.is_empty() {
             runs.push({ start_index: run_start, end_index: run_end, text, style: run_style, link })
+            text_offset = text_offset + docs_text_width(text)
           }
           for suggestion_id in inserted {
             suggestions.push(InsertedText(start_index=run_start, end_index=run_end, text=text, suggestion_id=suggestion_id))
@@ -524,7 +542,15 @@ fn decode_paragraph(element : Json, paragraph : Json) -> RemoteParagraph {
           }
           warning = warning || append_style_suggestions(text_run, run_start, run_end, suggestions)
         }
-        None => warning = true
+        None => match field(item, "inlineObjectElement") {
+          Some(inline_object) => {
+            let object_id = string_field(inline_object, "inlineObjectId").unwrap_or("")
+            let (inserted, inserted_warning) = strings(inline_object, "suggestedInsertionIds"); let (deleted, deleted_warning) = strings(inline_object, "suggestedDeletionIds")
+            warning = warning || inserted_warning || deleted_warning || !inserted.is_empty() || !deleted.is_empty()
+            match inline_image_source(inline_objects, object_id) { Some(source_url) if !source_url.is_empty() => inline_images.push({ start_index: index_field(item, "startIndex"), end_index: index_field(item, "endIndex"), source_url, text_offset }); _ => warning = true }
+          }
+          None => warning = true
+        }
       }
     }
     None => warning = true
@@ -540,6 +566,7 @@ fn decode_paragraph(element : Json, paragraph : Json) -> RemoteParagraph {
     start_index,
     end_index,
     runs,
+    inline_images,
     style,
     bullet,
     suggestions,
@@ -548,7 +575,7 @@ fn decode_paragraph(element : Json, paragraph : Json) -> RemoteParagraph {
 }
 
 ///|
-fn decode_cell(value : Json) -> RemoteTableCell {
+fn decode_cell(value : Json, inline_objects : Json) -> RemoteTableCell {
   let start_index = index_field(value, "startIndex")
   let end_index = index_field(value, "endIndex")
   let paragraphs : Array[RemoteParagraph] = []
@@ -576,7 +603,7 @@ fn decode_cell(value : Json) -> RemoteTableCell {
     Some(content) => for item in content {
       match field(item, "paragraph") {
         Some(paragraph) => {
-          let decoded = decode_paragraph(item, paragraph)
+          let decoded = decode_paragraph(item, paragraph, inline_objects)
           warning = warning || decoded.normalization_warning
           suggestions.push_iter(decoded.suggestions.iter())
           paragraphs.push(decoded)
@@ -593,7 +620,7 @@ fn decode_cell(value : Json) -> RemoteTableCell {
 }
 
 ///|
-fn decode_table(element : Json, table : Json) -> RemoteTable? {
+fn decode_table(element : Json, table : Json, inline_objects : Json) -> RemoteTable? {
   let start_index = index_field(element, "startIndex")
   let end_index = index_field(element, "endIndex")
   let rows = match array_field(table, "tableRows") {
@@ -612,7 +639,7 @@ fn decode_table(element : Json, table : Json) -> RemoteTable? {
     }
     let decoded_cells : Array[RemoteTableCell] = []
     for cell in cells {
-      let decoded = decode_cell(cell)
+      let decoded = decode_cell(cell, inline_objects)
       warning = warning || decoded.normalization_warning || !decoded.opaque_units.is_empty()
       result_suggestions.push_iter(decoded.suggestions.iter())
       decoded_cells.push(decoded)
@@ -623,16 +650,16 @@ fn decode_table(element : Json, table : Json) -> RemoteTable? {
 }
 
 ///|
-fn decode_content(items : Array[Json]) -> RemoteContent {
+fn decode_content(items : Array[Json], inline_objects : Json) -> RemoteContent {
   let units : Array[RemoteUnit] = []
   for item in items {
     match field(item, "paragraph") {
       Some(paragraph) =>
-        units.push(Paragraph(decode_paragraph(item, paragraph)))
+        units.push(Paragraph(decode_paragraph(item, paragraph, inline_objects)))
       None =>
         match field(item, "table") {
           Some(table) =>
-            match decode_table(item, table) {
+            match decode_table(item, table, inline_objects) {
               Some(decoded) => units.push(Table(decoded))
               None => units.push(Opaque(remote_opaque(item, kind="table")))
             }
@@ -672,14 +699,15 @@ pub fn decode_remote_document(body : String, document_id : String) -> Result[Rem
         }
         None => []
       }
-      tabs.push({ tab_id, content: decode_content(content) })
+      let inline_objects = match field(tab, "documentTab") { Some(document_tab) => field(document_tab, "inlineObjects").unwrap_or(Json::empty_object()); None => Json::empty_object() }
+      tabs.push({ tab_id, content: decode_content(content, inline_objects) })
     }
     _ => {
       let content = match envelope.body {
         Some(body) => array_field(body, "content").unwrap_or([])
         None => []
       }
-      tabs.push({ tab_id: "", content: decode_content(content) })
+      tabs.push({ tab_id: "", content: decode_content(content, envelope.inlineObjects.unwrap_or(Json::empty_object())) })
     }
   }
   Ok({ document_id: response_document_id, title: envelope.title, revision_id, tabs })

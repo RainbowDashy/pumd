@@ -122,18 +122,18 @@ test "golden diagnostics cover every directly exposed unsupported construct" {
   assert_render_failure(
     "![alt](image.png)",
     @pumd.DiagnosticKind::UnsupportedConstruct,
-    "image",
+    "image-source",
     0,
     17,
-    "Replace the image with a text link.",
+    "Use a publicly accessible HTTPS image URL; local and non-HTTPS images cannot yet be uploaded safely.",
   )
   assert_render_failure(
     "![alt][image]",
-    @pumd.DiagnosticKind::UnsupportedConstruct,
+    @pumd.DiagnosticKind::MissingDefinition,
     "reference-image",
     0,
     13,
-    "Replace the reference image with a text link.",
+    "Add an image definition for label: image.",
   )
   assert_render_failure(
     "~~deleted~~",
@@ -186,10 +186,10 @@ test "containers collect nested diagnostics in preorder" {
       assert_diagnostic(
         diagnostics[0],
         @pumd.DiagnosticKind::UnsupportedConstruct,
-        "image",
+        "image-source",
         2,
         19,
-        "Replace the image with a text link.",
+        "Use a publicly accessible HTTPS image URL; local and non-HTTPS images cannot yet be uploaded safely.",
       )
     }
   }
@@ -208,10 +208,10 @@ test "containers collect nested diagnostics in preorder" {
       assert_diagnostic(
         diagnostics[1],
         @pumd.DiagnosticKind::UnsupportedConstruct,
-        "image",
+        "image-source",
         0,
         17,
-        "Replace the image with a text link.",
+        "Use a publicly accessible HTTPS image URL; local and non-HTTPS images cannot yet be uploaded safely.",
       )
     }
   }
@@ -230,10 +230,10 @@ test "containers collect nested diagnostics in preorder" {
       assert_diagnostic(
         diagnostics[1],
         @pumd.DiagnosticKind::UnsupportedConstruct,
-        "image",
+        "image-source",
         0,
         17,
-        "Replace the image with a text link.",
+        "Use a publicly accessible HTTPS image URL; local and non-HTTPS images cannot yet be uploaded safely.",
       )
     }
   }
@@ -248,10 +248,10 @@ test "multiple unsupported constructs have a stable diagnostic order" {
       assert_diagnostic(
         diagnostics[0],
         @pumd.DiagnosticKind::UnsupportedConstruct,
-        "image",
+        "image-source",
         0,
         7,
-        "Replace the image with a text link.",
+        "Use a publicly accessible HTTPS image URL; local and non-HTTPS images cannot yet be uploaded safely.",
       )
       assert_diagnostic(
         diagnostics[1],

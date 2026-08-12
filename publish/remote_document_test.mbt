@@ -299,6 +299,23 @@ async test "remote decoder preserves opaque content tabs warnings and legacy bod
   inspect(legacy.tabs[0].tab_id, content="")
 }
 
+async test "remote decoder restores native inline images inside paragraphs" {
+  let document = decoded_remote_document((#|{
+#| "documentId":"doc","revisionId":"rev","tabs":[{
+#|  "tabProperties":{"tabId":"tab"},"documentTab":{
+#|   "inlineObjects":{"image-1":{"inlineObjectProperties":{"embeddedObject":{"imageProperties":{"sourceUri":"https://example.test/diagram.png"}}}}},
+#|   "body":{"content":[{"startIndex":1,"endIndex":10,"paragraph":{
+#|    "paragraphStyle":{"namedStyleType":"NORMAL_TEXT"},"elements":[
+#|     {"startIndex":1,"endIndex":8,"textRun":{"content":"Before ","textStyle":{}}},
+#|     {"startIndex":8,"endIndex":9,"inlineObjectElement":{"inlineObjectId":"image-1"}},
+#|     {"startIndex":9,"endIndex":10,"textRun":{"content":"\n","textStyle":{}}}
+#|    ]}}]}
+#|  }
+#| }]}
+))
+  match document.tabs[0].content.units[0] { Paragraph(paragraph) => { assert_eq(paragraph.inline_images.length(), 1); assert_eq(paragraph.inline_images[0].source_url, "https://example.test/diagram.png"); assert_eq(paragraph.inline_images[0].text_offset, 7); assert_eq(paragraph.normalization_warning, false) }; _ => fail("expected paragraph") }
+}
+
 ///|
 async test "remote decoder makes structural root failures explicit" {
   match decode_remote_document("not-json", "expected") {

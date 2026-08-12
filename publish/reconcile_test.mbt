@@ -57,7 +57,7 @@ fn remote_paragraph_from_desired(paragraph : @pumd.Paragraph, start : Int) -> Re
     runs.push({ start_index: cursor, end_index, text: run.content, style: run.style, link: match run.link { Some(link) => Some(link.url); None => None } })
     cursor = end_index
   }
-  { start_index: start, end_index: advance_google_docs_index(index=cursor, text="\n"), runs, style: paragraph.style, bullet: remote_bullet(paragraph.bullet), suggestions: [], normalization_warning: false }
+  { start_index: start, end_index: advance_google_docs_index(index=cursor, text="\n") + paragraph.inline_images.length(), runs, inline_images: paragraph.inline_images.map(fn(image) { { start_index: start + image.text_offset, end_index: start + image.text_offset + 1, source_url: image.source_url, text_offset: image.text_offset } }), style: paragraph.style, bullet: remote_bullet(paragraph.bullet), suggestions: [], normalization_warning: false }
 }
 
 ///|
@@ -120,12 +120,33 @@ fn remote_from_style_migration_baseline(document : @pumd.DesiredDocument) -> Rem
     start_index,
     end_index: start_index + 1,
     runs: [],
+    inline_images: [],
     style: @pumd.builtin_style_profile().body,
     bullet: None,
     suggestions: [],
     normalization_warning: false,
   }))
   remote
+}
+
+test "unchanged HTTPS image reconciles without a remote edit" {
+  let document = rendered("Before ![diagram](https://example.test/diagram.png) after")
+  match reconcile_document(document, document, remote_from_document(document)) { Ok(NoLocalChanges(report)) => { assert_eq(report.local_changes, 0); assert_eq(report.remote_changes, 0) }; _ => fail("unchanged image must reconcile as native content") }
+}
+
+test "changing an HTTPS image plans a native image replacement" {
+  let baseline = rendered("![old](https://example.test/old.png)")
+  let desired = rendered("![new](https://example.test/new.png)")
+  match reconcile_document(baseline, desired, remote_from_document(baseline)) {
+    Ok(Planned(report, plan)) => {
+      assert_eq(report.local_changes, 1)
+      let snapshot = plan.to_snapshot()
+      assert_true(snapshot.contains("delete-content-range 1..2"))
+      assert_true(snapshot.contains("insert-inline-image 1 source=\"https://example.test/new.png\""))
+      assert_true(snapshot.contains("paragraph-style 1..2"))
+    }
+    _ => fail("changed image must produce a native replacement plan")
+  }
 }
 
 ///|
@@ -387,7 +408,7 @@ async test "normalization warning conflicts with a local paragraph edit" {
 async test "trailing final newline container is ignored" {
   let document = rendered("A\n\nB")
   let remote = remote_from_document(document)
-  remote.units.push(RemoteUnit::Paragraph({ start_index: 5, end_index: 6, runs: [], style: @pumd.builtin_style_profile().body, bullet: None, suggestions: [], normalization_warning: false }))
+  remote.units.push(RemoteUnit::Paragraph({ start_index: 5, end_index: 6, runs: [], inline_images: [], style: @pumd.builtin_style_profile().body, bullet: None, suggestions: [], normalization_warning: false }))
   match outcome(document, document, remote) { NoLocalChanges(report) => assert_eq(report.remote_changes, 0); _ => fail("final newline container must be ignored") }
 }
 
@@ -396,7 +417,7 @@ async test "trailing final newline container does not move local indexes" {
   let baseline = rendered("A")
   let desired = rendered("B")
   let remote = remote_from_document(baseline)
-  remote.units.push(RemoteUnit::Paragraph({ start_index: 2, end_index: 3, runs: [], style: @pumd.builtin_style_profile().body, bullet: None, suggestions: [], normalization_warning: false }))
+  remote.units.push(RemoteUnit::Paragraph({ start_index: 2, end_index: 3, runs: [], inline_images: [], style: @pumd.builtin_style_profile().body, bullet: None, suggestions: [], normalization_warning: false }))
   match outcome(baseline, desired, remote) { Planned(_, plan) => assert_true(plan.to_snapshot().contains("delete-content-range 1..2")); _ => fail("trailing container must not change local indexes") }
 }
 

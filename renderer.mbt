@@ -204,12 +204,26 @@ fn merge_ranges(left : SourceRange?, right : SourceRange?) -> SourceRange? {
 }
 
 ///|
-fn canonicalize_runs(runs : Array[TextRun]) -> Array[TextRun] {
+fn has_image_at_offset(images : Array[InlineImage], offset : Int) -> Bool {
+  for image in images { if image.text_offset == offset { return true } }
+  false
+}
+
+///|
+fn rendered_text_length(runs : Array[TextRun]) -> Int {
+  let mut length = 0
+  for run in runs { for char in run.content { let width = if char.to_int() > 0xFFFF { 2 } else { 1 }; length = length + width } }
+  length
+}
+
+///|
+fn canonicalize_runs(runs : Array[TextRun], images? : Array[InlineImage] = []) -> Array[TextRun] {
   let canonical : Array[TextRun] = []
+  let mut text_offset = 0
   for run in runs {
     if !run.content.is_empty() {
       let last_index = canonical.length() - 1
-      if last_index >= 0 && same_native_run(canonical[last_index], run) {
+      if last_index >= 0 && !has_image_at_offset(images, text_offset) && same_native_run(canonical[last_index], run) {
         let previous = canonical[last_index]
         canonical[last_index] = {
           content: previous.content + run.content,
@@ -220,6 +234,7 @@ fn canonicalize_runs(runs : Array[TextRun]) -> Array[TextRun] {
       } else {
         canonical.push(run)
       }
+      text_offset = text_offset + rendered_text_length([run])
     }
   }
   canonical
@@ -265,12 +280,25 @@ fn find_definition(
 }
 
 ///|
+priv struct RenderedInlines { runs : Array[TextRun]; images : Array[InlineImage] }
+
+///|
+fn append_image(source_url : String, alt_text : String, title : String, span : @markdown.Span, context : RenderContext, runs : Array[TextRun], images : Array[InlineImage]) -> Unit {
+  if source_url.has_prefix("https://") {
+    images.push({ source_url, alt_text: unescape_text(alt_text), title: if title.is_empty() { None } else { Some(title) }, text_offset: rendered_text_length(runs), provenance: Some(source_range(span)) })
+  } else {
+    context.diagnostics.push(unsupported("image-source", span, "Use a publicly accessible HTTPS image URL; local and non-HTTPS images cannot yet be uploaded safely."))
+  }
+}
+
+///|
 fn append_inline_runs(
   inlines : Array[@markdown.Inline],
   style : TextStyle,
   link : LinkIntent?,
   context : RenderContext,
   runs : Array[TextRun],
+  images : Array[InlineImage],
 ) -> Unit {
   for inline in inlines {
     match inline {
@@ -281,9 +309,9 @@ fn append_inline_runs(
       @markdown.Inline::HardBreak(span~, ..) =>
         runs.push(text_run("\n", style, link, span))
       @markdown.Inline::Emphasis(children~, ..) =>
-        append_inline_runs(children, with_italic(style), link, context, runs)
+        append_inline_runs(children, with_italic(style), link, context, runs, images)
       @markdown.Inline::Strong(children~, ..) =>
-        append_inline_runs(children, with_bold(style), link, context, runs)
+        append_inline_runs(children, with_bold(style), link, context, runs, images)
       @markdown.Inline::Code(content~, span~, ..) =>
         runs.push(
           text_run(content, with_code_style(style, context.profile), link, span),
@@ -296,6 +324,7 @@ fn append_inline_runs(
           Some({ url, title: title_intent }),
           context,
           runs,
+          images,
         )
       }
       @markdown.Inline::RefLink(children~, label~, span~) =>
@@ -312,6 +341,7 @@ fn append_inline_runs(
               Some({ url: definition.url, title }),
               context,
               runs,
+              images,
             )
           }
           None => {
@@ -321,7 +351,7 @@ fn append_inline_runs(
               provenance: Some(source_range(span)),
               message: "Add a link definition for label: " + label + ".",
             })
-            append_inline_runs(children, style, link, context, runs)
+            append_inline_runs(children, style, link, context, runs, images)
           }
         }
       @markdown.Inline::Autolink(url~, is_email~, span~) => {
@@ -335,23 +365,18 @@ fn append_inline_runs(
           ),
         )
       }
-      @markdown.Inline::Image(span~, ..) =>
-        context.diagnostics.push(
-          unsupported("image", span, "Replace the image with a text link."),
-        )
-      @markdown.Inline::RefImage(span~, ..) =>
-        context.diagnostics.push(
-          unsupported(
-            "reference-image", span, "Replace the reference image with a text link.",
-          ),
-        )
+      @markdown.Inline::Image(alt~, url~, title~, span~) => append_image(url, alt, title, span, context, runs, images)
+      @markdown.Inline::RefImage(alt~, label~, span~) => match find_definition(context.definitions, label) {
+        Some(definition) => append_image(definition.url, alt, definition.title, span, context, runs, images)
+        None => context.diagnostics.push({ kind: DiagnosticKind::MissingDefinition, node_kind: "reference-image", provenance: Some(source_range(span)), message: "Add an image definition for label: " + label + "." })
+      }
       @markdown.Inline::Strikethrough(children~, span~) => {
         context.diagnostics.push(
           unsupported(
             "strikethrough", span, "Remove the strikethrough markers or use plain text.",
           ),
         )
-        append_inline_runs(children, style, link, context, runs)
+        append_inline_runs(children, style, link, context, runs, images)
       }
       @markdown.Inline::HtmlInline(span~, ..) =>
         context.diagnostics.push(
@@ -380,10 +405,11 @@ fn render_inlines(
   inlines : Array[@markdown.Inline],
   style : TextStyle,
   context : RenderContext,
-) -> Array[TextRun] {
+) -> RenderedInlines {
   let runs : Array[TextRun] = []
-  append_inline_runs(inlines, style, None, context, runs)
-  canonicalize_runs(runs)
+  let images : Array[InlineImage] = []
+  append_inline_runs(inlines, style, None, context, runs, images)
+  { runs: canonicalize_runs(runs, images~), images }
 }
 
 ///|
@@ -427,10 +453,13 @@ fn render_table_cell(
   } else {
     context.profile.body_text
   }
+  let inlines = render_inlines(cell.children, text_style, context)
+  if !inlines.images.is_empty() { context.diagnostics.push(unsupported("image-in-table", cell.span, "Move the image outside the table; images in table cells are not supported yet.")) }
   {
     content: [
       {
-        runs: render_inlines(cell.children, text_style, context),
+        runs: inlines.runs,
+        inline_images: [],
         style: context.profile.table_cell,
         bullet: None,
         provenance: Some(source_range(cell.span)),
@@ -572,12 +601,10 @@ fn render_block(
   match block {
     @markdown.Block::Heading(level~, children~, span~, ..) => {
       let index = heading_index(level)
+      let inlines = render_inlines(children, context.profile.heading_text[index], context)
       let paragraph = {
-        runs: render_inlines(
-          children,
-          context.profile.heading_text[index],
-          context,
-        ),
+        runs: inlines.runs,
+        inline_images: inlines.images,
         style: paragraph_style_for(
           context.profile.headings[index],
           state,
@@ -590,8 +617,10 @@ fn render_block(
       true
     }
     @markdown.Block::Paragraph(children~, span~, ..) => {
+      let inlines = render_inlines(children, context.profile.body_text, context)
       let paragraph = {
-        runs: render_inlines(children, context.profile.body_text, context),
+        runs: inlines.runs,
+        inline_images: inlines.images,
         style: paragraph_style_for(context.profile.body, state, context),
         bullet: state.bullet,
         provenance: Some(source_range(span)),
@@ -638,6 +667,7 @@ fn render_block(
         context.content.push(
           StructuralElement::Paragraph({
             runs,
+            inline_images: [],
             style: paragraph_style_for(
               context.profile.code_block,
               code_state,

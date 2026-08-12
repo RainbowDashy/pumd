@@ -30,6 +30,7 @@ pub enum DocsUpdateRequest {
     end_index~ : Int,
     color~ : String
   )
+  InsertInlineImage(index~ : Int, image~ : @pumd.InlineImage)
   InsertTable(index~ : Int, rows~ : Int, columns~ : Int)
   InsertTableCellText(
     table_index~ : Int,
@@ -152,6 +153,8 @@ fn append_paragraph(
     }
     run_start = run_end
   }
+  let mut image_index = paragraph.inline_images.length()
+  while image_index > 0 { image_index = image_index - 1; let image = paragraph.inline_images[image_index]; requests.push(InsertInlineImage(index=indent_end_index + image.text_offset, image~)) }
   match paragraph.bullet {
     Some(bullet) => {
       // Adapter contract: emit this operation in plan order and map the list
@@ -162,7 +165,7 @@ fn append_paragraph(
       requests.push(
         CreateParagraphBullets(
           start_index=cursor,
-          end_index=insert_end_index,
+          end_index=insert_end_index + paragraph.inline_images.length(),
           bullet~,
         ),
       )
@@ -181,7 +184,7 @@ fn append_paragraph(
     }
     None => ()
   }
-  end_index
+  end_index + paragraph.inline_images.length()
 }
 
 ///|
@@ -572,6 +575,10 @@ pub fn DocsUpdatePlan::to_snapshot(self : DocsUpdatePlan) -> String {
         buffer.write_string(end_index.to_string())
         buffer.write_string(" color=")
         buffer.write_string(color)
+      }
+      InsertInlineImage(index~, image~) => {
+        buffer.write_string("insert-inline-image "); buffer.write_string(index.to_string()); buffer.write_string(" source="); write_plan_escaped(image.source_url, buffer); buffer.write_string(" alt="); write_plan_escaped(image.alt_text, buffer)
+        match image.title { Some(title) => { buffer.write_string(" title="); write_plan_escaped(title, buffer) }; None => () }
       }
       InsertTable(index~, rows~, columns~) => {
         buffer.write_string("insert-table ")

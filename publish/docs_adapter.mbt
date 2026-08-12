@@ -796,6 +796,9 @@ fn lower_plan_for_tab(plan : DocsUpdatePlan, tab_id : String?) -> String {
         first = write_update_foreground_color_request(
           start_index, end_index, color, tab_id, output, first,
         )
+      InsertInlineImage(index~, image~) => {
+        first = begin_request(output, first); output.write_string("{\"insertInlineImage\":{\"uri\":"); write_json_string(image.source_url, output); output.write_string(",\"location\":"); write_location(index, tab_id, output); output.write_string("}}")
+      }
       InsertTable(index~, rows~, columns~) => {
         let location = index
         layouts.push({ logical_index: index, location, columns })

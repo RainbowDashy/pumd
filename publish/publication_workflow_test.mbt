@@ -227,6 +227,7 @@ fn docs_response_json_with_implicit_final_newline(
     if !document.content.is_empty() { output.write_char(',') }
     let final_newline : @pumd.Paragraph = {
       runs: [],
+      inline_images: [],
       style: @pumd.builtin_style_profile().body,
       bullet: None,
       provenance: None,

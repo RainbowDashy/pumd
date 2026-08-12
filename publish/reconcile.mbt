@@ -122,6 +122,7 @@ fn desired_paragraph_signature(paragraph : @pumd.Paragraph) -> String {
   let output = StringBuilder::new()
   output.write_string("p:")
   for run in paragraph.runs { output.write_string(run.content); output.write_char('|'); text_signature(run.style, match run.link { Some(link) => Some(link.url); None => None }, output) }
+  for image in paragraph.inline_images { output.write_string("image|"); output.write_string(image.text_offset.to_string()); output.write_char('|'); output.write_string(image.source_url); output.write_char(';') }
   output.write_char('#'); paragraph_style_signature(paragraph.style, output); output.write_char('#')
   match paragraph.bullet {
     Some(bullet) => { match bullet.kind { @pumd.ListKind::Bullet => output.write_char('b'); @pumd.ListKind::Numbered(..) => output.write_char('n') }; output.write_string(bullet.nesting_level.to_string()) }
@@ -135,6 +136,7 @@ fn remote_paragraph_signature(paragraph : RemoteParagraph) -> String {
   let output = StringBuilder::new()
   output.write_string("p:")
   for run in paragraph.runs { output.write_string(run.text); output.write_char('|'); text_signature(run.style, run.link, output) }
+  for image in paragraph.inline_images { output.write_string("image|"); output.write_string(image.text_offset.to_string()); output.write_char('|'); output.write_string(image.source_url); output.write_char(';') }
   output.write_char('#'); paragraph_style_signature(paragraph.style, output); output.write_char('#')
   match paragraph.bullet { Some(bullet) => { if bullet.numeric { output.write_char('n') } else { output.write_char('b') }; output.write_string(bullet.nesting_level.to_string()) }; None => output.write_char('-') }
   output.to_string()
@@ -295,10 +297,13 @@ fn append_paragraph_write(paragraph : @pumd.Paragraph, cursor : Int, include_new
   let text = contents.to_string(); let inserted = if include_newline { text + "\n" } else { text }
   requests.push(InsertText(index=cursor, text=inserted))
   let style_end = advance_google_docs_index(index=cursor, text=text)
-  requests.push(UpdateParagraphStyle(start_index=cursor, end_index=style_end, style=paragraph.style))
+  let paragraph_style_end = if text.is_empty() && !paragraph.inline_images.is_empty() { cursor + 1 } else { style_end }
+  requests.push(UpdateParagraphStyle(start_index=cursor, end_index=paragraph_style_end, style=paragraph.style))
   let mut run_start = advance_google_docs_index(index=cursor, text=indent)
   for run in paragraph.runs { let run_end = advance_google_docs_index(index=run_start, text=run.content); if run_start != run_end { requests.push(UpdateTextStyle(start_index=run_start, end_index=run_end, style=run.style, link=run.link)) }; run_start = run_end }
-  match paragraph.bullet { Some(bullet) => { requests.push(CreateParagraphBullets(start_index=cursor, end_index=style_end, bullet~)); if has_decoration(paragraph.style) { requests.push(UpdateParagraphDecoration(start_index=cursor, end_index=style_end, style=paragraph.style)) } }; None => () }
+  let mut image_index = paragraph.inline_images.length(); while image_index > 0 { image_index = image_index - 1; let image = paragraph.inline_images[image_index]; requests.push(InsertInlineImage(index=advance_google_docs_index(index=cursor, text=indent) + image.text_offset, image~)) }
+  let image_end = style_end + paragraph.inline_images.length()
+  match paragraph.bullet { Some(bullet) => { requests.push(CreateParagraphBullets(start_index=cursor, end_index=image_end, bullet~)); if has_decoration(paragraph.style) { requests.push(UpdateParagraphDecoration(start_index=cursor, end_index=image_end, style=paragraph.style)) } }; None => () }
 }
 
 ///|

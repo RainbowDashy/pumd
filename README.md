@@ -383,12 +383,19 @@ document ID: 1AbCdEfGhIjKlMnOpQrStUvWxYz
 edit URL: https://docs.google.com/document/d/1AbCdEfGhIjKlMnOpQrStUvWxYz/edit
 ```
 
-Images are not supported yet. Both direct images such as
-`![diagram](diagram.png)` and reference images produce a source-located
-unsupported diagnostic. Source reading and decoding, rendering (including this
-image check), and Desired Document planning all finish before authorization is
-requested or any HTTP request is sent, so an image blocks publication before
-credentials are read and before any remote document can be created or changed.
+Direct and reference-style Markdown images publish as native inline Google Docs
+images when their destination is a publicly accessible HTTPS URL, for example
+`![diagram](https://example.com/diagram.png)`. Google Docs fetches the URL once
+and stores a copy in the document. The image must be PNG, JPEG, or GIF; under
+50 MB and 25 megapixels; with a source URL no longer than 2 KB. Markdown alt
+text and title remain in pumd's Desired Document metadata, but the Docs
+insert-image API cannot write them as image properties.
+
+Local and relative images such as `![diagram](diagram.png)` remain unsupported
+until pumd has a safe upload and lifecycle strategy. They fail during local
+preflight, before credentials are read or a remote document is changed, with
+an actionable diagnostic asking for a public HTTPS URL. Images inside table
+cells are also rejected during rendering for now.
 
 Ordered lists publish as native Google Docs lists when they start at `1`, with
 either a period or parenthesis delimiter. Google Docs' create-bullets request
@@ -533,16 +540,15 @@ Google-Docs-native `DesiredDocument`. It includes explicit, source-located
 errors for parsed constructs without a rendering rule and golden tests for the
 desired native structure.
 
-The supported rendering set is headings, paragraphs, emphasis, links, lists,
+The supported rendering set is headings, paragraphs, emphasis, links, HTTPS images, lists,
 tables, inline code, fenced code blocks, and blockquotes. Blockquote rendering
 supports `>` syntax, nesting, lazy continuation, and paragraphs, headings,
 lists, and fenced code blocks inside a blockquote, including quote/list
 composition. Tables remain supported generally, but a table inside a blockquote
 is unsupported. Parser-supported constructs outside that set do not gain
 implicit behavior; they produce an unsupported-construct error until an
-explicit native rendering rule is added. Image rendering is deferred: direct
-images and reference images currently yield source-located unsupported
-diagnostics.
+explicit native rendering rule is added. Local images and images in table cells
+still yield source-located unsupported diagnostics.
 
 Rendering applies one versioned, built-in style profile with opinionated defaults
 for body text and every supported document element. Configurable themes and

@@ -81,6 +81,28 @@ test "mixed supported Markdown has a canonical native golden document" {
   )
 }
 
+test "HTTPS images render as native inline images with source metadata" {
+  let document = render_or_fail("Before ![architecture](https://example.test/diagram.png \"System diagram\") after.")
+  inspect(document.to_snapshot(), content=(#|profile pumd.default@3
+#|paragraph normal font=Arial size=11 line=1.15 before=0 after=6
+#|  text "Before " font=Arial size=11
+#|  text " after." font=Arial size=11
+#|  image offset=7 source="https://example.test/diagram.png" alt="architecture" title="System diagram"
+#|
+))
+  match document.content[0] { @pumd.StructuralElement::Paragraph(paragraph) => { assert_eq(paragraph.inline_images.length(), 1); let image = paragraph.inline_images[0]; assert_eq(image.text_offset, 7); assert_eq(image.alt_text, "architecture"); assert_eq(image.source_url, "https://example.test/diagram.png"); assert_eq(image.title, Some("System diagram")); assert_source_range(image.provenance, 7, 73) }; _ => fail("expected paragraph") }
+}
+
+test "reference images resolve definitions and retain placement" {
+  let document = render_or_fail("![diagram][architecture]\n\n[architecture]: https://example.test/diagram.png \"System\"")
+  match document.content[0] { @pumd.StructuralElement::Paragraph(paragraph) => { assert_true(paragraph.runs.is_empty()); assert_eq(paragraph.inline_images.length(), 1); assert_eq(paragraph.inline_images[0].text_offset, 0); assert_eq(paragraph.inline_images[0].source_url, "https://example.test/diagram.png"); assert_eq(paragraph.inline_images[0].title, Some("System")) }; _ => fail("expected image paragraph") }
+}
+
+test "adjacent images retain Markdown order at one text offset" {
+  let document = render_or_fail("![one](https://example.test/one.png)![two](https://example.test/two.png)")
+  match document.content[0] { @pumd.StructuralElement::Paragraph(paragraph) => { assert_eq(paragraph.inline_images.length(), 2); assert_eq(paragraph.inline_images[0].text_offset, 0); assert_eq(paragraph.inline_images[1].text_offset, 0); assert_eq(paragraph.inline_images[0].alt_text, "one"); assert_eq(paragraph.inline_images[1].alt_text, "two") }; _ => fail("expected image paragraph") }
+}
+
 ///|
 test "repeated identical Markdown renders to equal content and identical golden output" {
   let source = mixed_feature_markdown()

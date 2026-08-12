@@ -119,6 +119,7 @@ fn test_baseline() -> @pumd.DesiredDocument {
             provenance: Some({ start: 0, end: 5 }),
           },
         ],
+        inline_images: [],
         style: {
           named_style: @pumd.NamedStyle::Heading1,
           font_family: "Georgia",
@@ -140,7 +141,7 @@ fn test_baseline() -> @pumd.DesiredDocument {
             cells: [
               {
                 content: [
-                  { runs: [test_run("Cell A")], style: test_paragraph_style(), bullet: None, provenance: None },
+                  { runs: [test_run("Cell A")], inline_images: [], style: test_paragraph_style(), bullet: None, provenance: None },
                 ],
                 alignment: @pumd.TableAlignment::Center,
                 background_color: Some("#ffffff"),
@@ -368,6 +369,15 @@ async test "registry directory and file are owner-only on non-Windows" {
   assert_eq(registry_file_mode(directory), 0o700)
   assert_eq(registry_file_mode(registry_file_path(directory)), 0o600)
   clean_directory(directory)
+}
+
+async test "version-one baselines without image fields remain readable" {
+  let directory = test_directory("legacy-baseline"); clean_directory(directory); @async_fs.mkdir(directory, permission=0o700, recursive=true)
+  let baseline = Json::Json(test_baseline()).stringify(); let legacy = baseline.replace_all(old=",\"inline_images\":[]", new="")
+  let registry = "{\"version\":1,\"publications\":[{\"source_path\":\"notes/legacy.md\",\"document_id\":\"doc\",\"url\":\"u\",\"managed_tab_id\":\"tab\",\"lifecycle\":\"ready\",\"last_successful_publish\":\"now\",\"published_baseline\":" + legacy + "}]}"
+  @async_fs.write_file(registry_file_path(directory), registry, create_mode=@async_fs.CreateNew)
+  guard load_registry_document(directory) is Ok(document) else { fail("legacy baseline must load") }; guard document.entries[0].published_baseline is Some(baseline) else { fail("legacy baseline must be restored") }
+  match baseline.content[0] { @pumd.StructuralElement::Paragraph(paragraph) => assert_true(paragraph.inline_images.is_empty()); _ => fail("expected paragraph") }; clean_directory(directory)
 }
 
 ///|

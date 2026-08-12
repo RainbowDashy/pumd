@@ -197,6 +197,7 @@ test "plans colored runs with UTF-16 ranges after CJK combining text and emoji" 
           { content: "é", style: { ..profile.code_text, foreground_color: Some("#00ff00") }, link: None, provenance: None },
           { content: "🚀", style: { ..profile.code_text, foreground_color: Some("#0000ff") }, link: None, provenance: None },
         ],
+        inline_images: [],
         style: profile.code_block,
         bullet: None,
         provenance: None,
@@ -215,6 +216,37 @@ test "plans colored runs with UTF-16 ranges after CJK combining text and emoji" 
       #|
     ),
   )
+}
+
+test "plans HTTPS inline images at their rendered text offsets" {
+  let document = match @pumd.render_markdown("Before ![diagram](https://example.test/diagram.png \"Architecture\") after") { Ok(document) => document; Err(_) => abort("HTTPS image fixture must render") }
+  inspect(compile_docs_update_plan(document).to_snapshot(), content=(#|insert-text 1 "Before  after\n"
+#|paragraph-style 1..15 normal font=Arial size=11 line=115 before=0 after=6
+#|text-style 1..8 font=Arial size=11
+#|text-style 8..14 font=Arial size=11
+#|insert-inline-image 8 source="https://example.test/diagram.png" alt="diagram" title="Architecture"
+#|
+))
+}
+
+test "inline image width advances the following paragraph index" {
+  let document = match @pumd.render_markdown("![diagram](https://example.test/diagram.png)\n\nAfter") { Ok(document) => document; Err(_) => abort("HTTPS image fixture must render") }
+  let snapshot = compile_docs_update_plan(document).to_snapshot(); assert_true(snapshot.contains("insert-inline-image 1")); assert_true(snapshot.contains("insert-text 3 \"After\\n\""))
+}
+
+test "adjacent images are inserted in reverse request order at one anchor" {
+  let document = match @pumd.render_markdown("![one](https://example.test/one.png)![two](https://example.test/two.png)") { Ok(document) => document; Err(_) => abort("HTTPS image fixture must render") }
+  inspect(compile_docs_update_plan(document).to_snapshot(), content=(#|insert-text 1 "\n"
+#|paragraph-style 1..2 normal font=Arial size=11 line=115 before=0 after=6
+#|insert-inline-image 1 source="https://example.test/two.png" alt="two"
+#|insert-inline-image 1 source="https://example.test/one.png" alt="one"
+#|
+))
+}
+
+test "image placement uses Google Docs UTF-16 indexes" {
+  let document = match @pumd.render_markdown("🚀![diagram](https://example.test/diagram.png)") { Ok(document) => document; Err(_) => abort("Unicode image fixture must render") }
+  assert_true(compile_docs_update_plan(document).to_snapshot().contains("insert-inline-image 3"))
 }
 
 ///|

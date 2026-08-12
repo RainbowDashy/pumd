@@ -90,8 +90,18 @@ pub(all) struct TextRun {
 } derive(@debug.Debug, ToJson, @json.FromJson)
 
 ///|
+pub(all) struct InlineImage {
+  source_url : String
+  alt_text : String
+  title : String?
+  text_offset : Int
+  provenance : SourceRange?
+} derive(Eq, @debug.Debug, ToJson, @json.FromJson)
+
+///|
 pub(all) struct Paragraph {
   runs : Array[TextRun]
+  inline_images : Array[InlineImage]
   style : ParagraphStyle
   bullet : BulletProperties?
   provenance : SourceRange?
