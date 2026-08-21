@@ -26,6 +26,22 @@ pub(all) struct DryRunUpdateReport {
 } derive(@debug.Debug)
 
 ///|
+pub(all) struct PullReport {
+  document_id : String
+  url : String
+  title : String?
+  plan : PullPlan
+} derive(@debug.Debug)
+
+///|
+pub(all) enum PullOutcome {
+  Pulled(PullReport)
+  PullNoOp(PullReport)
+  PullDryRun(PullReport)
+  PullConflicted(PullReport)
+} derive(@debug.Debug)
+
+///|
 /// The state of a registered document observed through Drive and Docs.
 pub(all) enum RemotePublicationStatus {
   Ready
@@ -189,7 +205,7 @@ fn reconciliation_error(error : ReconcileError) -> PublishError {
   match error {
     PlanningFailed(message) => Planning(message)
     InvalidRemoteStructure(message) | AmbiguousAlignment(message) =>
-      PublicationConflict(
+      MergeConflict(
         message="the Google Docs content cannot be aligned safely: " + message,
       )
   }
@@ -204,7 +220,7 @@ fn conflict_error(report : ReconciliationReport) -> PublishError {
       descriptions.write_string(unit.description)
     }
   }
-  PublicationConflict(
+  MergeConflict(
     message="local and remote changes conflict in " + descriptions.to_string(),
   )
 }
@@ -1039,4 +1055,195 @@ pub fn publication_refresh_json(
   }
   output.write_string("]}")
   output.to_string()
+}
+
+///|
+fn pull_reconciliation_error(error : PullReconcileError) -> PublishError {
+  match error {
+    AmbiguousAlignment(message) => MergeConflict(message~)
+    InvalidLocalSource(message) | CanonicalSerialization(message) =>
+      Planning(message)
+  }
+}
+
+///|
+async fn pull_loaded_publication(
+  source : String,
+  prepared : PreparedPublication,
+  canonical : String,
+  document : @registry.RegistryDocument,
+  registry_directory : String,
+  authorization_mode : AuthorizationMode,
+  get_project_token : async () -> Result[String, AuthenticationProblem],
+  get_adc_token : async () -> Result[String, AuthenticationProblem],
+  http : &@google_http.HttpClient,
+  replace_source : async (String, String) -> Result[Unit, String],
+  dry_run : Bool,
+) -> Result[PullOutcome, PublishError] {
+  let entry = match @registry.publication_for_source(document, canonical) {
+    Some(entry) => entry
+    None =>
+      return Err(
+        Registry("no Publication is registered for `" + canonical + "`"),
+      )
+  }
+  match entry.lifecycle {
+    Blocked => return Err(BlockedPublication(source_path=canonical))
+    Provisional => return Err(Registry("Publication is not ready for pull"))
+    Ready => ()
+  }
+  let success = success_from_entry(entry)
+  let managed_tab_id = match entry.managed_tab_id {
+    Some(value) => value
+    None => abort("invalid ready registry entry")
+  }
+  let baseline = match entry.published_baseline {
+    Some(value) => value
+    None => abort("invalid ready registry entry")
+  }
+  let previous_timestamp = match entry.last_successful_publish {
+    Some(value) => value
+    None => abort("invalid ready registry entry")
+  }
+  let token = match
+    selected_token(authorization_mode, get_project_token, get_adc_token) {
+    Ok(token) => token
+    Err(problem) =>
+      return Err(authentication_error(authorization_mode, problem))
+  }
+  let client = @google_core.GoogleClient::new(fn() { token }, http=Some(http))
+  let retrieved = match
+    get_remote_document_body(client, success.document_id) {
+    Ok(value) => value
+    Err(error) =>
+      return Err(
+        read_error(
+          authorization_mode,
+          success.document_id,
+          success.url,
+          error,
+        ),
+      )
+  }
+  let decoded = match
+    decode_remote_document(retrieved.body, retrieved.document_id) {
+    Ok(value) => value
+    Err(error) => return Err(decoded_read_error(success, error))
+  }
+  let managed_content = match remote_tab_content(decoded, managed_tab_id) {
+    Some(value) => value
+    None =>
+      return Err(
+        RemoteMissing(document_id=success.document_id, url=success.url),
+      )
+  }
+  let plan = match
+    plan_pull(source, baseline, prepared.document, managed_content) {
+    Ok(value) => value
+    Err(error) => return Err(pull_reconciliation_error(error))
+  }
+  let report = {
+    document_id: success.document_id,
+    url: success.url,
+    title: decoded.title,
+    plan,
+  }
+  if plan.conflicted > 0 { return Ok(PullConflicted(report)) }
+  if dry_run { return Ok(PullDryRun(report)) }
+  let source_changed = plan.source != source
+  let baseline_changed = plan.incoming > 0 || plan.converged > 0
+  if source_changed {
+    match replace_source(canonical, plan.source) {
+      Ok(_) => ()
+      Err(message) => return Err(SourceWrite(path=canonical, message~))
+    }
+  }
+  if baseline_changed {
+    let updated = match
+      @registry.document_with_updated_baseline(
+        document,
+        canonical,
+        plan.baseline,
+        previous_timestamp,
+      ) {
+      Ok(value) => value
+      Err(error) => return Err(registry_error(error))
+    }
+    match @registry.save_registry_document(registry_directory, updated) {
+      Ok(_) => ()
+      Err(error) => return Err(registry_error(error))
+    }
+  }
+  if source_changed || baseline_changed {
+    Ok(Pulled(report))
+  } else {
+    Ok(PullNoOp(report))
+  }
+}
+
+///|
+/// Pull committed Source Semantics from a ready Publication. The injected
+/// replacement seam lets workflow tests observe source-first persistence.
+pub async fn pull_path_with_registry(
+  path : String,
+  read_source : async (String) -> Result[String, String],
+  replace_source : async (String, String) -> Result[Unit, String],
+  registry_directory : String,
+  authorization_mode : AuthorizationMode,
+  get_project_token : async () -> Result[String, AuthenticationProblem],
+  get_adc_token : async () -> Result[String, AuthenticationProblem],
+  http : &@google_http.HttpClient,
+  dry_run : Bool,
+) -> Result[PullOutcome, PublishError] {
+  let source = match read_source(path) {
+    Ok(value) => value
+    Err(_) => return Err(SourceAccess(path~))
+  }
+  let prepared = match
+    prepare_publication_markdown(source, publication_title_from_path(path)) {
+    Ok(value) => value
+    Err(error) => return Err(error)
+  }
+  let canonical = @registry.canonical_source_path(path)
+  if dry_run {
+    let document = match @registry.load_registry_document(registry_directory) {
+      Ok(value) => value
+      Err(error) => return Err(registry_error(error))
+    }
+    return pull_loaded_publication(
+      source,
+      prepared,
+      canonical,
+      document,
+      registry_directory,
+      authorization_mode,
+      get_project_token,
+      get_adc_token,
+      http,
+      replace_source,
+      true,
+    )
+  }
+  let lock = match @registry.acquire_registry_lock(registry_directory) {
+    Ok(value) => value
+    Err(error) => return Err(registry_error(error))
+  }
+  defer lock.release()
+  let document = match @registry.load_registry_document(registry_directory) {
+    Ok(value) => value
+    Err(error) => return Err(registry_error(error))
+  }
+  pull_loaded_publication(
+    source,
+    prepared,
+    canonical,
+    document,
+    registry_directory,
+    authorization_mode,
+    get_project_token,
+    get_adc_token,
+    http,
+    replace_source,
+    false,
+  )
 }

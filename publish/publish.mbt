@@ -43,6 +43,7 @@ pub(all) struct PreparedPublication {
 ///|
 pub(all) enum PublishError {
   SourceAccess(path~ : String)
+  SourceWrite(path~ : String, message~ : String)
   Rendering(Array[@pumd.RenderingDiagnostic])
   Planning(String)
   Authentication(
@@ -162,6 +163,8 @@ pub fn PublishError::user_message(self : PublishError) -> String {
       "source access failed: could not read or decode Markdown file `" +
       path +
       "`"
+    SourceWrite(path~, message~) =>
+      "source replacement failed for `" + path + "`: " + message
     Rendering(diagnostics) => {
       let message = StringBuilder::new()
       message.write_string("rendering failed")

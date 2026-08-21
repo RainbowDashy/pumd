@@ -1494,6 +1494,272 @@ async test "inspection maps Drive and Docs states" {
 }
 
 ///|
+async test "pull writes source before advancing baseline and never writes Google Docs" {
+  let directory = workflow_directory("pull-clean")
+  clean_workflow_directory(directory)
+  let baseline = workflow_document("Original")
+  let remote = workflow_document("Reviewer wording")
+  seed_ready_with_baseline(directory, "pull-clean.md", "pull-doc", "pull-tab", baseline)
+  let source = ["Original"]
+  let replacement_observed_old_baseline = [false]
+  let registry_before =
+    (@async_fs.read_file(@registry.registry_file_path(directory))).text()
+  let docs = WorkflowFakeHttpClient::{
+    requests: [],
+    responses: [docs_response(remote, "pull-doc", "rev-pull", "pull-tab")],
+  }
+  guard pull_path_with_registry(
+      "pull-clean.md",
+      fn(_) { Ok(source[0]) },
+      async fn(_, replacement) {
+        replacement_observed_old_baseline[0] =
+          (@async_fs.read_file(@registry.registry_file_path(directory))).text() ==
+          registry_before
+        source[0] = replacement
+        Ok(())
+      },
+      directory,
+      Adc,
+      fn() { Ok("project") },
+      fn() { Ok("adc") },
+      docs,
+      false,
+    ) is Ok(Pulled(report)) else {
+    fail("clean pull must complete")
+  }
+  assert_eq(source[0], "Reviewer wording")
+  assert_true(replacement_observed_old_baseline[0])
+  assert_eq(report.plan.incoming, 1)
+  assert_eq(docs.requests.length(), 1)
+  assert_true(docs.requests[0].url.contains("pull-doc?includeTabsContent=true"))
+  let updated = @registry.registry_snapshot(directory).unwrap().entries[0]
+  assert_eq(
+    @debug.to_string(updated.published_baseline),
+    @debug.to_string(Some(report.plan.baseline)),
+  )
+  assert_eq(updated.last_successful_publish, Some("2026-08-05T12:00:00Z"))
+  clean_workflow_directory(directory)
+}
+
+///|
+async test "pull dry run performs the full read and plan without local mutation" {
+  let directory = workflow_directory("pull-dry-run")
+  clean_workflow_directory(directory)
+  let baseline = workflow_document("Original")
+  seed_ready_with_baseline(directory, "pull-dry.md", "pull-dry-doc", "pull-dry-tab", baseline)
+  let before = (@async_fs.read_file(@registry.registry_file_path(directory))).text()
+  let writes : Array[String] = []
+  let docs = WorkflowFakeHttpClient::{
+    requests: [],
+    responses: [docs_response(workflow_document("Incoming"), "pull-dry-doc", "rev-dry", "pull-dry-tab")],
+  }
+  guard pull_path_with_registry(
+      "pull-dry.md",
+      fn(_) { Ok("Original") },
+      fn(_, replacement) { writes.push(replacement); Ok(()) },
+      directory,
+      Adc,
+      fn() { Ok("project") },
+      fn() { Ok("adc") },
+      docs,
+      true,
+    ) is Ok(PullDryRun(report)) else {
+    fail("dry-run pull must return its plan")
+  }
+  assert_eq(report.plan.incoming, 1)
+  assert_eq(writes.length(), 0)
+  assert_eq(docs.requests.length(), 1)
+  assert_eq((@async_fs.read_file(@registry.registry_file_path(directory))).text(), before)
+  clean_workflow_directory(directory)
+}
+
+///|
+async test "pull preserves disjoint local changes and reports overlap without mutation" {
+  let directory = workflow_directory("pull-three-way")
+  clean_workflow_directory(directory)
+  let baseline = workflow_document("Base\n\nKeep")
+  seed_ready_with_baseline(directory, "pull-merge.md", "pull-merge-doc", "pull-merge-tab", baseline)
+  let source = ["Local\n\nKeep"]
+  let writes : Array[String] = []
+  let disjoint = WorkflowFakeHttpClient::{
+    requests: [],
+    responses: [docs_response(workflow_document("Base\n\nRemote"), "pull-merge-doc", "rev-merge", "pull-merge-tab")],
+  }
+  guard pull_path_with_registry(
+      "pull-merge.md",
+      fn(_) { Ok(source[0]) },
+      fn(_, replacement) { source[0] = replacement; writes.push(replacement); Ok(()) },
+      directory,
+      Adc,
+      fn() { Ok("project") },
+      fn() { Ok("adc") },
+      disjoint,
+      false,
+    ) is Ok(Pulled(report)) else {
+    fail("disjoint pull must merge")
+  }
+  assert_eq(source[0], "Local\n\nRemote")
+  assert_eq(report.plan.incoming, 1)
+  assert_eq(report.plan.preserved_local, 1)
+
+  let registry_before_conflict = (@async_fs.read_file(@registry.registry_file_path(directory))).text()
+  let conflicting = WorkflowFakeHttpClient::{
+    requests: [],
+    responses: [docs_response(workflow_document("Reviewer\n\nRemote"), "pull-merge-doc", "rev-conflict", "pull-merge-tab")],
+  }
+  guard pull_path_with_registry(
+      "pull-merge.md",
+      fn(_) { Ok("Author\n\nRemote") },
+      fn(_, replacement) { writes.push(replacement); Ok(()) },
+      directory,
+      Adc,
+      fn() { Ok("project") },
+      fn() { Ok("adc") },
+      conflicting,
+      false,
+    ) is Ok(PullConflicted(conflict_report)) else {
+    fail("overlap must be reported")
+  }
+  assert_eq(conflict_report.plan.conflicted, 1)
+  assert_eq(writes.length(), 1)
+  assert_eq((@async_fs.read_file(@registry.registry_file_path(directory))).text(), registry_before_conflict)
+  clean_workflow_directory(directory)
+}
+
+///|
+async test "pull retry after interrupted baseline persistence converges without rewriting source" {
+  let directory = workflow_directory("pull-retry")
+  clean_workflow_directory(directory)
+  seed_ready_with_baseline(
+    directory,
+    "pull-retry.md",
+    "pull-retry-doc",
+    "pull-retry-tab",
+    workflow_document("Old"),
+  )
+  let writes : Array[String] = []
+  let docs = WorkflowFakeHttpClient::{
+    requests: [],
+    responses: [docs_response(workflow_document("Landed"), "pull-retry-doc", "rev-retry", "pull-retry-tab")],
+  }
+  guard pull_path_with_registry(
+      "pull-retry.md",
+      fn(_) { Ok("Landed") },
+      fn(_, replacement) { writes.push(replacement); Ok(()) },
+      directory,
+      Adc,
+      fn() { Ok("project") },
+      fn() { Ok("adc") },
+      docs,
+      false,
+    ) is Ok(Pulled(report)) else {
+    fail("converged retry must finish baseline persistence")
+  }
+  assert_eq(report.plan.converged, 1)
+  assert_eq(writes.length(), 0)
+  let entry = @registry.registry_snapshot(directory).unwrap().entries[0]
+  assert_eq(
+    @debug.to_string(entry.published_baseline),
+    @debug.to_string(Some(report.plan.baseline)),
+  )
+  clean_workflow_directory(directory)
+}
+
+///|
+async test "pull suggestions stay remote-only and do not inspect comments" {
+  let directory = workflow_directory("pull-suggestion")
+  clean_workflow_directory(directory)
+  let baseline = workflow_document("Original")
+  seed_ready_with_baseline(
+    directory,
+    "pull-suggestion.md",
+    "pull-suggestion-doc",
+    "pull-suggestion-tab",
+    baseline,
+  )
+  let body = docs_response_json(
+    baseline,
+    "pull-suggestion-doc",
+    "rev-suggestion",
+    "pull-suggestion-tab",
+  ).replace_all(
+    old="\"textRun\":{\"content\":\"Original\"",
+    new="\"textRun\":{\"content\":\"Original\",\"suggestedDeletionIds\":[\"s-1\"]",
+  )
+  let docs = WorkflowFakeHttpClient::{
+    requests: [],
+    responses: [@google_http.HttpResponse::new(200, {}, body)],
+  }
+  let writes : Array[String] = []
+  guard pull_path_with_registry(
+      "pull-suggestion.md",
+      fn(_) { Ok("Original") },
+      fn(_, replacement) { writes.push(replacement); Ok(()) },
+      directory,
+      Adc,
+      fn() { Ok("project") },
+      fn() { Ok("adc") },
+      docs,
+      false,
+    ) is Ok(PullNoOp(report)) else {
+    fail("a suggested unit must be skipped without blocking pure pull")
+  }
+  assert_eq(report.plan.skipped, 1)
+  assert_eq(report.plan.units[0].category, SkippedSuggestion)
+  assert_eq(writes.length(), 0)
+  assert_eq(docs.requests.length(), 1)
+  clean_workflow_directory(directory)
+}
+
+///|
+async test "pull keeps missing documents and Managed Tabs fail closed" {
+  let directory = workflow_directory("pull-missing")
+  clean_workflow_directory(directory)
+  seed_ready(directory, "pull-missing.md", "pull-missing-doc", "pull-missing-tab")
+  let writes : Array[String] = []
+  let missing_document = WorkflowFakeHttpClient::{
+    requests: [],
+    responses: [@google_http.HttpResponse::new(404, {}, "{}")],
+  }
+  guard pull_path_with_registry(
+      "pull-missing.md",
+      fn(_) { Ok("Hello") },
+      fn(_, replacement) { writes.push(replacement); Ok(()) },
+      directory,
+      Adc,
+      fn() { Ok("project") },
+      fn() { Ok("adc") },
+      missing_document,
+      false,
+    ) is Err(RemoteMissing(..)) else {
+    fail("missing document must fail closed")
+  }
+  let missing_tab = WorkflowFakeHttpClient::{
+    requests: [],
+    responses: [@google_http.HttpResponse::new(
+      200,
+      {},
+      "{\"documentId\":\"pull-missing-doc\",\"revisionId\":\"rev\",\"tabs\":[]}",
+    )],
+  }
+  guard pull_path_with_registry(
+      "pull-missing.md",
+      fn(_) { Ok("Hello") },
+      fn(_, replacement) { writes.push(replacement); Ok(()) },
+      directory,
+      Adc,
+      fn() { Ok("project") },
+      fn() { Ok("adc") },
+      missing_tab,
+      false,
+    ) is Err(RemoteMissing(..)) else {
+    fail("missing Managed Tab must fail closed")
+  }
+  assert_eq(writes.length(), 0)
+  clean_workflow_directory(directory)
+}
+
+///|
 async test "listing JSON is deterministic and refresh adds matching inspection" {
   let blocked : @registry.PublicationEntry = {
     source_path: "z.md",
