@@ -1,3 +1,7 @@
+---
+status: superseded by ADR-0015
+---
+
 # Reconcile Publications three ways
 
 Every update will compare the current Desired Document and current Google Doc with the Publication's Published Baseline. `pumd` preserves remote-only changes, applies local-only changes, merges changes that do not overlap, and blocks the complete publish when they do overlap; it never imports Google Docs edits into Markdown automatically. Version one reconciles body paragraphs independently and treats each complete table as one unit; text and formatting both participate, so changes on both sides within the same unit conflict even when they touch different words or cells. There is no force bypass: conflicts must be resolved, or the Publication must be explicitly forgotten before creating a new document. This keeps Markdown authoritative for intentional local changes without erasing unrelated reviewer work, choosing conservative and explainable conflicts over clever inline merging.
