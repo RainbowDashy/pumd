@@ -256,6 +256,21 @@ test "pull generated units use CRLF without touching surrounding bytes" {
 }
 
 ///|
+test "pull patches Unicode code-point provenance without shifting untouched bytes" {
+  let source = "🚀 界\n\nBase\n"
+  let baseline = pull_rendered(source)
+  match plan_pull(
+    source,
+    baseline,
+    baseline,
+    pull_two_paragraphs("🚀 界", "Remote"),
+  ) {
+    Ok(plan) => inspect(plan.source, content="🚀 界\n\nRemote\n")
+    Err(error) => abort(error.user_message())
+  }
+}
+
+///|
 test "pull treats a complete table as one reconciliation unit" {
   let baseline_source = "| Key | Value |\n| --- | --- |\n| A | Base |\n"
   let local_source = "| Key | Value |\n| --- | --- |\n| A | Local |\n"

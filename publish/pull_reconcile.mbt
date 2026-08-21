@@ -54,6 +54,13 @@ fn pull_newline(source : String) -> String {
 }
 
 ///|
+fn pull_codepoint_length(source : String) -> Int {
+  let mut length = 0
+  for _ in source { length = length + 1 }
+  length
+}
+
+///|
 fn pull_slice(source : String, start : Int, end : Int) -> String {
   let output = StringBuilder::new()
   let mut index = 0
@@ -70,7 +77,11 @@ fn pull_trailing_newlines(source : String, newline : String) -> String {
   let mut count = 0
   while remaining.has_suffix(newline) {
     count = count + 1
-    remaining = pull_slice(remaining, 0, remaining.length() - newline.length())
+    remaining = pull_slice(
+      remaining,
+      0,
+      pull_codepoint_length(remaining) - pull_codepoint_length(newline),
+    )
   }
   let output = StringBuilder::new()
   for index = 0; index < count; index = index + 1 {
@@ -85,7 +96,7 @@ fn apply_pull_patches(source : String, patches : Array[PullSourcePatch]) -> Stri
   let mut result = source
   for patch in patches {
     result = pull_slice(result, 0, patch.start) + patch.replacement +
-      pull_slice(result, patch.end, result.length())
+      pull_slice(result, patch.end, pull_codepoint_length(result))
   }
   result
 }
@@ -190,7 +201,7 @@ fn pull_insertion(
   let markdown = serialize_source_semantic_unit(unit, newline~)
   if anchor == 0 {
     markdown + newline + newline
-  } else if anchor == source.length() {
+  } else if anchor == pull_codepoint_length(source) {
     (if source.has_suffix(newline) { newline } else { newline + newline }) +
       markdown + newline
   } else {
@@ -333,7 +344,7 @@ pub fn plan_pull(
           )
           continue
         }
-        let mut anchor = source.length()
+        let mut anchor = pull_codepoint_length(source)
         for next = remote_index + 1; next < remote_to_base.length(); next = next + 1 {
           match remote_to_base[next] {
             Some(base_index) => {
