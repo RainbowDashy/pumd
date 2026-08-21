@@ -80,7 +80,23 @@ fn serialize_semantic_paragraph(
     }
     None => ()
   }
-  prefix.to_string() + serialize_semantic_inline(paragraph, table_cell)
+  let mut inline = serialize_semantic_inline(paragraph, table_cell)
+  if paragraph.list is None && paragraph.heading == 0 && paragraph.quote_depth == 0 {
+    let block_marker = inline.has_prefix("# ") || inline.has_prefix("> ") ||
+      inline.has_prefix("- ") || inline.has_prefix("+ ")
+    let mut ordered_marker = false
+    let mut saw_digit = false
+    for char in inline {
+      if char >= '0' && char <= '9' {
+        saw_digit = true
+      } else {
+        ordered_marker = saw_digit && (char == '.' || char == ')')
+        break
+      }
+    }
+    if block_marker || ordered_marker { inline = "\\" + inline }
+  }
+  prefix.to_string() + inline
 }
 
 ///|

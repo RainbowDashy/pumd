@@ -419,3 +419,129 @@ test "unchanged table has no incoming Source Semantics" {
     Err(error) => abort(error.user_message())
   }
 }
+
+///|
+test "canonical plain paragraphs escape block-leading Markdown markers" {
+  let markers = ["# heading", "> quote", "- item", "+ item", "12. item"]
+  for marker in markers {
+    let unit = SourceSemanticUnit::Paragraph({
+      runs: [{ text: marker, bold: false, italic: false, code: false, link: None }],
+      images: [],
+      heading: 0,
+      list: None,
+      nesting_level: 0,
+      quote_depth: 0,
+      code_block: false,
+    })
+    let markdown = serialize_source_semantic_unit(unit)
+    assert_true(markdown.has_prefix("\\"))
+    guard @pumd.render_markdown(markdown) is Ok(document) else {
+      fail("escaped paragraph must render")
+    }
+    match document.content[0] {
+      @pumd.StructuralElement::Paragraph(paragraph) =>
+        assert_eq(paragraph.style.named_style, @pumd.NamedStyle::NormalText)
+      _ => fail("escaped plain text must stay a paragraph")
+    }
+  }
+}
+
+///|
+test "pull conflicts instead of erasing Markdown-only metadata or fenced code" {
+  let metadata_source = "[label](https://example.test \"title\")\n"
+  let metadata = pull_rendered(metadata_source)
+  match plan_pull(
+    metadata_source,
+    metadata,
+    metadata,
+    { units: [RemoteUnit::Paragraph(pull_remote_paragraph("changed", 1))] },
+  ) {
+    Ok(plan) => {
+      assert_eq(plan.conflicted, 1)
+      inspect(plan.source, content=metadata_source)
+    }
+    Err(error) => abort(error.user_message())
+  }
+  let code_source = "```js\nconst a = 1\nconst b = 2\n```\n"
+  let code = pull_rendered(code_source)
+  let remote = remote_from_document(code)
+  match remote.units[0] {
+    RemoteUnit::Paragraph(paragraph) =>
+      remote.units[0] = RemoteUnit::Paragraph(changed_remote_paragraph(paragraph, "changed"))
+    _ => fail("code fixture")
+  }
+  match plan_pull(code_source, code, code, remote) {
+    Ok(plan) => {
+      assert_true(plan.conflicted > 0)
+      inspect(plan.source, content=code_source)
+    }
+    Err(error) => abort(error.user_message())
+  }
+}
+
+///|
+test "pull merges local structural changes with disjoint remote edits" {
+  let baseline = pull_rendered("A\n\nB\n")
+  let inserted_source = "A\n\nLocal\n\nB\n"
+  match plan_pull(
+    inserted_source,
+    baseline,
+    pull_rendered(inserted_source),
+    pull_two_paragraphs("A", "Remote B"),
+  ) {
+    Ok(plan) => {
+      inspect(plan.source, content="A\n\nLocal\n\nRemote B\n")
+      assert_eq(plan.preserved_local, 1)
+      assert_eq(plan.incoming, 1)
+      assert_eq(plan.conflicted, 0)
+    }
+    Err(error) => abort(error.user_message())
+  }
+  let deleted_source = "A\n"
+  match plan_pull(
+    deleted_source,
+    baseline,
+    pull_rendered(deleted_source),
+    pull_two_paragraphs("Remote A", "B"),
+  ) {
+    Ok(plan) => {
+      inspect(plan.source, content="Remote A\n")
+      assert_eq(plan.preserved_local, 1)
+      assert_eq(plan.incoming, 1)
+    }
+    Err(error) => abort(error.user_message())
+  }
+}
+
+///|
+test "pull merges remote structural changes with disjoint local edits" {
+  let baseline = pull_rendered("A\n\nB\n")
+  let local_source = "Local A\n\nB\n"
+  let remote_inserted : RemoteContent = {
+    units: [
+      RemoteUnit::Paragraph(pull_remote_paragraph("A", 1)),
+      RemoteUnit::Paragraph(pull_remote_paragraph("X", 3)),
+      RemoteUnit::Paragraph(pull_remote_paragraph("B", 5)),
+    ],
+  }
+  match plan_pull(local_source, baseline, pull_rendered(local_source), remote_inserted) {
+    Ok(plan) => {
+      inspect(plan.source, content="Local A\n\nX\n\nB\n")
+      assert_eq(plan.preserved_local, 1)
+      assert_eq(plan.incoming, 1)
+      assert_eq(plan.conflicted, 0)
+    }
+    Err(error) => abort(error.user_message())
+  }
+  let remote_deleted : RemoteContent = {
+    units: [RemoteUnit::Paragraph(pull_remote_paragraph("A", 1))],
+  }
+  match plan_pull(local_source, baseline, pull_rendered(local_source), remote_deleted) {
+    Ok(plan) => {
+      inspect(plan.source, content="Local A\n\n")
+      assert_eq(plan.preserved_local, 1)
+      assert_eq(plan.incoming, 1)
+    }
+    Err(error) => abort(error.user_message())
+  }
+}

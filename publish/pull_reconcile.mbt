@@ -216,8 +216,7 @@ fn pull_baseline(
   base : Array[LocalSemanticUnit],
   newline : String,
 ) -> Result[@pumd.DesiredDocument, PullReconcileError] {
-  let output = StringBuilder::new()
-  let mut first = true
+  let units : Array[SourceSemanticUnit] = []
   let mut base_index = 0
   for entry in entries {
     match entry.semantic {
@@ -227,17 +226,35 @@ fn pull_baseline(
         } else {
           remote_unit
         }
-        if !first { output.write_string(newline + newline) }
-        first = false
-        output.write_string(serialize_source_semantic_unit(unit, newline~))
+        units.push(unit)
         base_index = base_index + 1
       }
       _ => ()
     }
   }
-  if first { return Ok(fallback) }
+  pull_baseline_units(units, fallback, newline)
+}
+
+///|
+fn pull_baseline_units(
+  units : Array[SourceSemanticUnit],
+  fallback : @pumd.DesiredDocument,
+  newline : String,
+) -> Result[@pumd.DesiredDocument, PullReconcileError] {
+  if units.is_empty() { return Ok(fallback) }
+  let output = StringBuilder::new()
+  for index, unit in units {
+    if index > 0 { output.write_string(newline + newline) }
+    output.write_string(serialize_source_semantic_unit(unit, newline~))
+  }
   match @pumd.render_markdown(output.to_string()) {
-    Ok(document) => Ok(document)
+    Ok(document) => {
+      if !semantic_sequence_eq(local_sequence(local_semantic_units(document)), units) {
+        Err(CanonicalSerialization("generated Markdown changed Source Semantics"))
+      } else {
+        Ok(document)
+      }
+    }
     Err(_) => Err(CanonicalSerialization("generated Markdown was rejected by the renderer"))
   }
 }
@@ -269,17 +286,69 @@ pub fn plan_pull(
   let local_structure_changed = want.length() != base.length()
   let remote_structure_changed = supported.length() != base.length()
   if local_structure_changed {
-    if !semantic_sequence_eq(remote_sequence, base_sequence) {
-      return Err(AmbiguousAlignment("local and remote structural changes do not have unique common anchors"))
+    if remote_structure_changed {
+      return Err(AmbiguousAlignment("simultaneous local and remote structural insertions or deletions lack unique anchors"))
     }
-    let changed = if want.length() > base.length() {
-      want.length() - base.length()
-    } else {
-      base.length() - want.length()
+    if semantic_has_duplicates(base_sequence) || semantic_has_duplicates(desired_sequence) {
+      return Err(AmbiguousAlignment("duplicate local structural units do not provide unique anchors"))
     }
-    preserved_local = changed
-    for index = 0; index < changed; index = index + 1 {
-      add_pull_report(reports, PreservedLocal, "local structural unit")
+    let local_matches = semantic_lcs(base_sequence, desired_sequence)
+    let base_to_desired : Array[Int?] = []
+    let desired_to_base : Array[Int?] = []
+    for index = 0; index < base.length(); index = index + 1 { base_to_desired.push(None) }
+    for index = 0; index < want.length(); index = index + 1 { desired_to_base.push(None) }
+    for pair in local_matches {
+      base_to_desired[pair.base] = Some(pair.changed)
+      desired_to_base[pair.changed] = Some(pair.base)
+    }
+    for desired_index = 0; desired_index < want.length(); desired_index = desired_index + 1 {
+      if desired_to_base[desired_index] is None {
+        preserved_local = preserved_local + 1
+        add_pull_report(reports, PreservedLocal, "local inserted structural unit")
+      }
+    }
+    for base_index = 0; base_index < base.length(); base_index = base_index + 1 {
+      let entry = supported[base_index]
+      guard entry.semantic is Some(remote_unit) else { abort("supported remote unit") }
+      let remote_changed = remote_unit != base[base_index].semantic
+      match base_to_desired[base_index] {
+        None => {
+          preserved_local = preserved_local + 1
+          add_pull_report(reports, PreservedLocal, "local deleted structural unit")
+          if remote_changed {
+            conflicted = conflicted + 1
+            add_pull_report(reports, Conflicted, entry.description)
+          }
+        }
+        Some(_) if entry.suggestions || entry.unsupported => {
+          skipped = skipped + 1
+          add_pull_report(
+            reports,
+            if entry.suggestions { SkippedSuggestion } else { SkippedUnsupported },
+            entry.description,
+          )
+        }
+        Some(desired_index) if remote_changed => {
+          if want[desired_index].remote_rewrite_lossy {
+            conflicted = conflicted + 1
+            add_pull_report(reports, Conflicted, entry.description)
+          } else {
+            let range = match want[desired_index].provenance {
+              Some(range) => range
+              None => return Err(InvalidLocalSource("remote edit anchor has no parser provenance"))
+            }
+            patches.push({
+              start: range.start,
+              end: range.end,
+              replacement: serialize_source_semantic_unit(remote_unit, newline~) +
+                pull_trailing_newlines(pull_slice(source, range.start, range.end), newline),
+            })
+            incoming = incoming + 1
+            add_pull_report(reports, Incoming, entry.description)
+          }
+        }
+        Some(_) => ()
+      }
     }
     for entry in current {
       if entry.semantic is None {
@@ -287,25 +356,24 @@ pub fn plan_pull(
         add_pull_report(reports, SkippedUnsupported, entry.description)
       }
     }
-    let baseline_after_pull = match pull_baseline(current, baseline, base, newline) {
-      Ok(document) => document
-      Err(error) => return Err(error)
+    let baseline_after_pull = if conflicted > 0 { baseline } else {
+      match pull_baseline(current, baseline, base, newline) {
+        Ok(document) => document
+        Err(error) => return Err(error)
+      }
     }
     return Ok({
-      source,
+      source: if conflicted > 0 { source } else { apply_pull_patches(source, patches) },
       baseline: baseline_after_pull,
       units: reports,
-      incoming: 0,
+      incoming,
       preserved_local,
       converged: 0,
-      conflicted: 0,
+      conflicted,
       skipped,
     })
   }
   if remote_structure_changed {
-    if !semantic_sequence_eq(desired_sequence, base_sequence) {
-      return Err(AmbiguousAlignment("local edits overlap a remote structural insertion or deletion"))
-    }
     if current.any(fn(entry) { entry.semantic is None }) {
       return Err(AmbiguousAlignment("unsupported remote structure prevents unique insertion or deletion alignment"))
     }
@@ -322,14 +390,23 @@ pub fn plan_pull(
       remote_to_base[pair.changed] = Some(pair.base)
     }
     for base_index = 0; base_index < base.length(); base_index = base_index + 1 {
+      let local_changed = want[base_index].semantic != base[base_index].semantic
       if base_to_remote[base_index] is None {
-        let range = match want[base_index].provenance {
-          Some(range) => range
-          None => return Err(InvalidLocalSource("deleted unit has no parser provenance"))
+        if local_changed {
+          conflicted = conflicted + 1
+          add_pull_report(reports, Conflicted, "remotely deleted structural unit")
+        } else {
+          let range = match want[base_index].provenance {
+            Some(range) => range
+            None => return Err(InvalidLocalSource("deleted unit has no parser provenance"))
+          }
+          patches.push({ start: range.start, end: range.end, replacement: "" })
+          incoming = incoming + 1
+          add_pull_report(reports, Incoming, "deleted structural unit")
         }
-        patches.push({ start: range.start, end: range.end, replacement: "" })
-        incoming = incoming + 1
-        add_pull_report(reports, Incoming, "deleted structural unit")
+      } else if local_changed {
+        preserved_local = preserved_local + 1
+        add_pull_report(reports, PreservedLocal, "locally edited structural unit")
       }
     }
     for remote_index = 0; remote_index < supported.length(); remote_index = remote_index + 1 {
@@ -367,18 +444,31 @@ pub fn plan_pull(
         add_pull_report(reports, Incoming, entry.description)
       }
     }
-    let baseline_after_pull = match pull_baseline(current, baseline, base, newline) {
-      Ok(document) => document
-      Err(error) => return Err(error)
+    let baseline_units : Array[SourceSemanticUnit] = []
+    for remote_index, entry in supported {
+      guard entry.semantic is Some(remote_unit) else { continue }
+      match remote_to_base[remote_index] {
+        Some(base_index) if entry.suggestions || entry.unsupported =>
+          baseline_units.push(base[base_index].semantic)
+        Some(_) => baseline_units.push(remote_unit)
+        None if entry.suggestions || entry.unsupported => ()
+        None => baseline_units.push(remote_unit)
+      }
+    }
+    let baseline_after_pull = if conflicted > 0 { baseline } else {
+      match pull_baseline_units(baseline_units, baseline, newline) {
+        Ok(document) => document
+        Err(error) => return Err(error)
+      }
     }
     return Ok({
-      source: apply_pull_patches(source, patches),
+      source: if conflicted > 0 { source } else { apply_pull_patches(source, patches) },
       baseline: baseline_after_pull,
       units: reports,
       incoming,
-      preserved_local: 0,
+      preserved_local,
       converged: 0,
-      conflicted: 0,
+      conflicted,
       skipped,
     })
   }
@@ -421,6 +511,11 @@ pub fn plan_pull(
       preserved_local = preserved_local + 1
       add_pull_report(reports, PreservedLocal, entry.description)
     } else if remote_changed {
+      if want[index].remote_rewrite_lossy {
+        conflicted = conflicted + 1
+        add_pull_report(reports, Conflicted, entry.description)
+        continue
+      }
       let range = match want[index].provenance {
         Some(range) => range
         None => return Err(InvalidLocalSource(entry.description + " has no parser provenance"))

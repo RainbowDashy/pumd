@@ -47,6 +47,7 @@ pub(all) enum SourceSemanticUnit {
 priv struct LocalSemanticUnit {
   semantic : SourceSemanticUnit
   provenance : @pumd.SourceRange?
+  remote_rewrite_lossy : Bool
 }
 
 ///|
@@ -160,6 +161,34 @@ fn desired_table_semantics(table : @pumd.Table) -> SourceSemanticTable {
 }
 
 ///|
+fn paragraph_remote_rewrite_lossy(paragraph : @pumd.Paragraph) -> Bool {
+  if semantic_code_block(paragraph.style) { return true }
+  for run in paragraph.runs {
+    match run.link { Some(link) if link.title is Some(_) => return true; _ => () }
+  }
+  for image in paragraph.inline_images {
+    if !image.alt_text.is_empty() || image.title is Some(_) { return true }
+  }
+  match paragraph.bullet {
+    Some({ kind: @pumd.ListKind::Numbered(start~, delimiter~), .. }) =>
+      start != 1 || delimiter != "."
+    _ => false
+  }
+}
+
+///|
+fn table_remote_rewrite_lossy(table : @pumd.Table) -> Bool {
+  for row in table.rows {
+    for cell in row.cells {
+      for paragraph in cell.content {
+        if paragraph_remote_rewrite_lossy(paragraph) { return true }
+      }
+    }
+  }
+  false
+}
+
+///|
 fn local_semantic_units(document : @pumd.DesiredDocument) -> Array[LocalSemanticUnit] {
   let result : Array[LocalSemanticUnit] = []
   for element in document.content {
@@ -167,10 +196,12 @@ fn local_semantic_units(document : @pumd.DesiredDocument) -> Array[LocalSemantic
       @pumd.StructuralElement::Paragraph(paragraph) => result.push({
         semantic: Paragraph(desired_paragraph_semantics(paragraph)),
         provenance: paragraph.provenance,
+        remote_rewrite_lossy: paragraph_remote_rewrite_lossy(paragraph),
       })
       @pumd.StructuralElement::Table(table) => result.push({
         semantic: Table(desired_table_semantics(table)),
         provenance: table.provenance,
+        remote_rewrite_lossy: table_remote_rewrite_lossy(table),
       })
     }
   }
@@ -268,7 +299,8 @@ fn remote_semantic_entries(content : RemoteContent) -> Array[RemoteSemanticEntry
     match unit {
       RemoteUnit::Paragraph(paragraph) => {
         let implicit_final = index == content.units.length() - 1 &&
-          paragraph.runs.is_empty() && paragraph.end_index == paragraph.start_index + 1
+          paragraph.runs.is_empty() && paragraph.end_index == paragraph.start_index + 1 &&
+          !semantic_code_block(paragraph.style)
         if !implicit_final {
           result.push({
             semantic: Some(Paragraph(remote_paragraph_semantics(paragraph))),
