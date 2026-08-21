@@ -25,15 +25,48 @@ fn markdown_escape(text : String, table_cell : Bool) -> String {
 }
 
 ///|
+fn markdown_code_delimiter(text : String) -> String {
+  let mut longest_run = 0
+  let mut current_run = 0
+  for char in text {
+    if char == '`' {
+      current_run = current_run + 1
+      if current_run > longest_run { longest_run = current_run }
+    } else {
+      current_run = 0
+    }
+  }
+  markdown_repeat("`", longest_run + 1)
+}
+
+///|
+fn markdown_link_destination(url : String) -> String {
+  for char in url {
+    if char == ' ' || char == '\t' || char == '(' || char == ')' || char == '\\' {
+      return "<" + url + ">"
+    }
+  }
+  url
+}
+
+///|
 fn serialize_semantic_run(run : SourceSemanticRun, table_cell : Bool) -> String {
   let mut text = markdown_escape(run.text, table_cell)
   if run.code {
-    let fence = if run.text.contains("`") { "``" } else { "`" }
-    text = fence + run.text + fence
+    let fence = markdown_code_delimiter(run.text)
+    let padding = if run.text.has_prefix("`") || run.text.has_suffix("`") {
+      " "
+    } else {
+      ""
+    }
+    text = fence + padding + run.text + padding + fence
   }
   if run.bold { text = "**" + text + "**" }
   if run.italic { text = "*" + text + "*" }
-  match run.link { Some(url) => text = "[" + text + "](" + url + ")"; None => () }
+  match run.link {
+    Some(url) => text = "[" + text + "](" + markdown_link_destination(url) + ")"
+    None => ()
+  }
   text
 }
 
