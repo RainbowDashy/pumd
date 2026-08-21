@@ -15,6 +15,11 @@ replacing the entire document.
 > ambiguous remote alignment, and concurrent edits block safely; there is no
 > force bypass or legacy-document discovery. `--dry-run` performs the same
 > checks without remote or Publication Registry writes.
+>
+> `pumd pull <path>` explicitly brings committed, Markdown-representable changes
+> from the Managed Tab back into the registered Markdown source. It preserves
+> local-only work and untouched source bytes, never writes Google Docs, and
+> reports overlapping edits as Merge Conflicts without changing local state.
 
 ## Nightly binaries
 
@@ -287,7 +292,7 @@ Reconciliation works on body paragraphs and whole tables, with text and
 formatting both included. A local-only change is applied; a remote-only change
 stays in Google Docs and is not imported into Markdown. Changes in separate
 units can merge. If both sides changed the same unit, pumd stops with a
-**Publication Conflict** instead of choosing a side. There is no force bypass.
+**Merge Conflict** instead of choosing a side. There is no force bypass.
 Unsupported remote structures, such as images, section breaks, and footnotes,
 are preserved as opaque remote-only content; pumd blocks rather than risking a
 write when their alignment is ambiguous.
@@ -297,7 +302,7 @@ content-changing publish. Resolve the comments, then publish again. Resolved
 comments do not block, and a publish with no content changes remains allowed.
 Google Docs suggestions, including inserted/deleted text and style changes,
 count as remote changes: disjoint suggestions survive, while an overlapping
-local change becomes a Publication Conflict.
+local change becomes a Merge Conflict.
 
 Before writing, pumd reads the document revision and includes it as
 `writeControl.requiredRevisionId` in one atomic Docs batch. If the document
@@ -316,8 +321,35 @@ pumd publish --dry-run proposal.md
 
 It runs authorization, remote reading, comment inspection, normalization,
 suggestion interpretation, and reconciliation, then reports planned structural
-units, Publication Conflicts, Review Barriers, and concurrency-sensitive status.
+units, Merge Conflicts, Review Barriers, and concurrency-sensitive status.
 It makes zero remote writes and zero Publication Registry changes.
+
+### Pulling committed reviewer changes
+
+Pull is an explicit remote-to-local operation for a ready Publication:
+
+```console
+pumd pull proposal.md
+```
+
+Remote-only Source Semantics are written as deterministic Markdown while
+untouched source regions remain byte-for-byte unchanged. Local-only edits stay
+in the source for a later publish. Disjoint local and remote edits merge, and
+identical independent edits are treated as converged. Overlapping paragraph or
+whole-table edits are reported as Merge Conflicts and leave the source,
+Publication Registry, and Google Doc unchanged.
+
+Preview the same remote read, normalization, alignment, and merge planning with:
+
+```console
+pumd pull --dry-run proposal.md
+pumd pull --dry-run --json proposal.md
+```
+
+Pull output distinguishes incoming, preserved-local, conflicted, and skipped
+structural units. `--json` provides the stable structured form for automation.
+Unresolved suggestions are never imported and block affected units; unresolved
+comments do not block pull because pull never writes Google Docs.
 
 ### Explicit automation routes
 
@@ -558,7 +590,7 @@ The publishing milestone adds the native `pumd publish <markdown-path>` command.
 It reads and decodes the source, creates and records a Publication when
 unlinked, and safely reconciles updates to the recorded Managed Tab when linked.
 It uses the Published Baseline to preserve remote-only work and block
-Publication Conflicts or Review Barriers rather than overwriting review work.
+Merge Conflicts or Review Barriers rather than overwriting review work.
 
 ## Non-goals
 

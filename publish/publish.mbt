@@ -72,7 +72,7 @@ pub(all) enum PublishError {
   BlockedPublication(source_path~ : String)
   Read(document_id~ : String, url~ : String, message~ : String)
   RemoteMissing(document_id~ : String, url~ : String)
-  PublicationConflict(message~ : String)
+  MergeConflict(message~ : String)
   ReviewBarrier(unresolved~ : Int)
   Concurrency(message~ : String)
   AmbiguousUpdate(document_id~ : String, url~ : String)
@@ -318,10 +318,10 @@ pub fn PublishError::user_message(self : PublishError) -> String {
       ", " +
       url +
       ").\n\npumd will not create a replacement; restore the document or forget the Publication explicitly."
-    PublicationConflict(message~) =>
-      "publish blocked.\n\n" +
+    MergeConflict(message~) =>
+      "merge conflict.\n\n" +
       message +
-      "\n\npumd applied no partial updates; resolve the overlapping edits in Google Docs or revert the local change, then publish again."
+      "\n\npumd applied no partial updates; resolve the overlapping local and Google Docs edits, then retry."
     ReviewBarrier(unresolved~) =>
       "publish blocked.\n\n" +
       unresolved.to_string() +

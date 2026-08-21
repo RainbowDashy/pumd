@@ -725,7 +725,7 @@ async test "remote code edit conflicts with a v2-to-v3 style migration" {
       fake,
       false,
     )
-    is Err(PublicationConflict(_)) else {
+    is Err(MergeConflict(_)) else {
     fail("remote code edit must not be overwritten by style migration")
   }
   assert_eq(fake.requests.length(), 1)
@@ -916,7 +916,7 @@ async test "conflicting ready changes do not write the document or registry" {
       fake,
       false,
     )
-    is Err(PublicationConflict(message~)) else {
+    is Err(MergeConflict(message~)) else {
     fail("same paragraph edits must conflict")
   }
   assert_true(message.contains("paragraph 1"))

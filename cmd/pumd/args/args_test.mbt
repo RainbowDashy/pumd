@@ -404,6 +404,51 @@ test "publish rejects duplicate or pathless dry-run" {
 }
 
 ///|
+test "pull accepts remote-read authorization and reporting options in any position" {
+  match parse_command(["pumd", "pull", "proposal.md"]) {
+    Ok(Pull(path, Project(RememberedOrNative), false, false)) =>
+      inspect(path, content="proposal.md")
+    Ok(_) => fail("expected Project Authorization pull command")
+    Err(message) => fail(message)
+  }
+  match parse_command(["pumd", "pull", "--dry-run", "--json", "--auth=adc", "proposal.md"]) {
+    Ok(Pull(path, Adc, true, true)) => inspect(path, content="proposal.md")
+    Ok(_) => fail("expected JSON dry-run ADC pull command")
+    Err(message) => fail(message)
+  }
+  match parse_command(["pumd", "pull", "proposal.md", "--credential-store=file", "--json", "--dry-run"]) {
+    Ok(Pull(path, Project(Explicit(File)), true, true)) =>
+      inspect(path, content="proposal.md")
+    Ok(_) => fail("expected trailing pull options")
+    Err(message) => fail(message)
+  }
+  match parse_command(["pumd", "pull", "--auth=token-env", "proposal.md"]) {
+    Ok(Pull(path, AccessTokenEnvironment, false, false)) =>
+      inspect(path, content="proposal.md")
+    Ok(_) => fail("expected ephemeral-token pull command")
+    Err(message) => fail(message)
+  }
+}
+
+///|
+test "pull rejects duplicate flags, unknown options, and missing or duplicate paths" {
+  for arguments in [
+    ["pumd", "pull"],
+    ["pumd", "pull", "--dry-run"],
+    ["pumd", "pull", "--dry-run", "--dry-run", "proposal.md"],
+    ["pumd", "pull", "--json", "--json", "proposal.md"],
+    ["pumd", "pull", "--unknown", "proposal.md"],
+    ["pumd", "pull", "one.md", "two.md"],
+    ["pumd", "pull", "--auth=adc", "--credential-store=file", "proposal.md"],
+  ] {
+    match parse_command(arguments) {
+      Ok(_) => fail("expected pull validation to fail")
+      Err(message) => assert_true(message.contains("pumd pull"))
+    }
+  }
+}
+
+///|
 test "unknown commands return command usage" {
   match parse_command(["pumd", "frobnicate"]) {
     Ok(_) => fail("expected unknown command validation to fail")
