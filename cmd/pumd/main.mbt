@@ -569,31 +569,54 @@ async fn write_pull_text(
 }
 
 ///|
+priv struct PullPresentation {
+  name : String
+  heading : String
+  dry_run : Bool
+  report : @publish.PullReport
+  conflict : Bool
+}
+
+///|
+fn pull_presentation(
+  outcome : @publish.PullOutcome,
+  requested_dry_run : Bool,
+) -> PullPresentation {
+  match outcome {
+    @publish.PullOutcome::Pulled(report) =>
+      { name: "pulled", heading: "pull completed", dry_run: false, report, conflict: false }
+    @publish.PullOutcome::PullNoOp(report) =>
+      { name: "no-op", heading: "pull completed: no incoming changes", dry_run: false, report, conflict: false }
+    @publish.PullOutcome::PullDryRun(report) =>
+      { name: "dry-run", heading: "dry run: pull inspection succeeded", dry_run: true, report, conflict: false }
+    @publish.PullOutcome::PullConflicted(report) =>
+      if requested_dry_run {
+        { name: "conflicted", heading: "dry run: pull would encounter Merge Conflicts", dry_run: true, report, conflict: true }
+      } else {
+        { name: "conflicted", heading: "pull blocked by Merge Conflicts", dry_run: false, report, conflict: true }
+      }
+  }
+}
+
+///|
 async fn report_pull_outcome(
   outcome : @publish.PullOutcome,
   json : Bool,
   requested_dry_run : Bool,
 ) -> Unit {
-  let (name, heading, dry_run, report, conflict) = match outcome {
-    @publish.PullOutcome::Pulled(report) =>
-      ("pulled", "pull completed", false, report, false)
-    @publish.PullOutcome::PullNoOp(report) =>
-      ("no-op", "pull completed: no incoming changes", false, report, false)
-    @publish.PullOutcome::PullDryRun(report) =>
-      ("dry-run", "dry run: pull inspection succeeded", true, report, false)
-    @publish.PullOutcome::PullConflicted(report) =>
-      if requested_dry_run {
-        ("conflicted", "dry run: pull would encounter Merge Conflicts", true, report, true)
-      } else {
-        ("conflicted", "pull blocked by Merge Conflicts", false, report, true)
-      }
-  }
+  let presentation = pull_presentation(outcome, requested_dry_run)
   if json {
-    @stdio.stdout.write(pull_report_json(name, dry_run, report) + "\n")
+    @stdio.stdout.write(
+      pull_report_json(
+        presentation.name,
+        presentation.dry_run,
+        presentation.report,
+      ) + "\n",
+    )
   } else {
-    write_pull_text(heading, report)
+    write_pull_text(presentation.heading, presentation.report)
   }
-  if conflict { @sys.exit(1) }
+  if presentation.conflict { @sys.exit(1) }
 }
 
 ///|
