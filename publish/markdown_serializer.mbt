@@ -50,6 +50,19 @@ fn markdown_link_destination(url : String) -> String {
 }
 
 ///|
+fn serialize_semantic_code_block(
+  paragraph : SourceSemanticParagraph,
+  newline : String,
+) -> String {
+  let content = StringBuilder::new()
+  for run in paragraph.runs { content.write_string(run.text) }
+  let text = content.to_string()
+  let delimiter = markdown_code_delimiter(text)
+  let fence = if delimiter.length() < 3 { "```" } else { delimiter }
+  fence + newline + text + newline + fence
+}
+
+///|
 fn serialize_semantic_run(run : SourceSemanticRun, table_cell : Bool) -> String {
   let mut text = markdown_escape(run.text, table_cell)
   if run.code {
@@ -76,13 +89,17 @@ fn serialize_semantic_inline(paragraph : SourceSemanticParagraph, table_cell : B
   let mut offset = 0
   for run in paragraph.runs {
     for image in paragraph.images {
-      if image.text_offset == offset { output.write_string("![](" + image.source_url + ")") }
+      if image.text_offset == offset {
+        output.write_string("![](" + markdown_link_destination(image.source_url) + ")")
+      }
     }
     output.write_string(serialize_semantic_run(run, table_cell))
     offset = offset + run.text.length()
   }
   for image in paragraph.images {
-    if image.text_offset >= offset { output.write_string("![](" + image.source_url + ")") }
+    if image.text_offset >= offset {
+      output.write_string("![](" + markdown_link_destination(image.source_url) + ")")
+    }
   }
   output.to_string()
 }
@@ -94,7 +111,7 @@ fn serialize_semantic_paragraph(
   table_cell : Bool,
 ) -> String {
   if paragraph.code_block {
-    return "```" + newline + serialize_semantic_inline(paragraph, false) + newline + "```"
+    return serialize_semantic_code_block(paragraph, newline)
   }
   let prefix = StringBuilder::new()
   prefix.write_string(markdown_repeat("> ", paragraph.quote_depth))
