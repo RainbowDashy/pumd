@@ -459,6 +459,218 @@ async fn publish_file(
 }
 
 ///|
+fn pull_category_name(category : @publish.PullUnitCategory) -> String {
+  match category {
+    @publish.PullUnitCategory::Incoming => "incoming"
+    @publish.PullUnitCategory::PreservedLocal => "preserved-local"
+    @publish.PullUnitCategory::Converged => "converged"
+    @publish.PullUnitCategory::Conflicted => "conflicted"
+    @publish.PullUnitCategory::SkippedSuggestion => "skipped-suggestion"
+    @publish.PullUnitCategory::SkippedUnsupported => "skipped-unsupported"
+  }
+}
+
+///|
+fn write_pull_json_string(value : String, output : StringBuilder) -> Unit {
+  output.write_char('"')
+  for char in value {
+    match char {
+      '"' => output.write_string("\\\"")
+      '\\' => output.write_string("\\\\")
+      '\n' => output.write_string("\\n")
+      '\r' => output.write_string("\\r")
+      '\t' => output.write_string("\\t")
+      '\b' => output.write_string("\\b")
+      _ => {
+        let code = char.to_int()
+        if code == 0x0C {
+          output.write_string("\\f")
+        } else if code < 0x20 {
+          output.write_string("\\u00")
+          output.write_string(code.to_byte().to_hex())
+        } else {
+          output.write_char(char)
+        }
+      }
+    }
+  }
+  output.write_char('"')
+}
+
+///|
+fn pull_report_json(
+  outcome : String,
+  dry_run : Bool,
+  report : @publish.PullReport,
+) -> String {
+  let output = StringBuilder::new()
+  output.write_string("{\"version\":1,\"outcome\":")
+  write_pull_json_string(outcome, output)
+  output.write_string(",\"dry_run\":")
+  output.write_string(dry_run.to_string())
+  output.write_string(",\"document_id\":")
+  write_pull_json_string(report.document_id, output)
+  output.write_string(",\"url\":")
+  write_pull_json_string(report.url, output)
+  output.write_string(",\"title\":")
+  match report.title {
+    Some(title) => write_pull_json_string(title, output)
+    None => output.write_string("null")
+  }
+  output.write_string(",\"incoming\":")
+  output.write_string(report.plan.incoming.to_string())
+  output.write_string(",\"preserved_local\":")
+  output.write_string(report.plan.preserved_local.to_string())
+  output.write_string(",\"converged\":")
+  output.write_string(report.plan.converged.to_string())
+  output.write_string(",\"conflicted\":")
+  output.write_string(report.plan.conflicted.to_string())
+  output.write_string(",\"skipped\":")
+  output.write_string(report.plan.skipped.to_string())
+  output.write_string(",\"units\":[")
+  let mut first = true
+  for unit in report.plan.units {
+    if !first { output.write_char(',') }
+    first = false
+    output.write_string("{\"category\":")
+    write_pull_json_string(pull_category_name(unit.category), output)
+    output.write_string(",\"description\":")
+    write_pull_json_string(unit.description, output)
+    output.write_char('}')
+  }
+  output.write_string("]}")
+  output.to_string()
+}
+
+///|
+async fn write_pull_text(
+  heading : String,
+  report : @publish.PullReport,
+) -> Unit {
+  @stdio.stdout.write(heading + "\n")
+  @stdio.stdout.write("document ID: " + report.document_id + "\n")
+  @stdio.stdout.write("edit URL: " + report.url + "\n")
+  match report.title {
+    Some(title) => @stdio.stdout.write("current title: " + title + "\n")
+    None => @stdio.stdout.write("current title: unavailable\n")
+  }
+  @stdio.stdout.write("incoming units: " + report.plan.incoming.to_string() + "\n")
+  @stdio.stdout.write(
+    "preserved-local units: " + report.plan.preserved_local.to_string() + "\n",
+  )
+  @stdio.stdout.write("converged units: " + report.plan.converged.to_string() + "\n")
+  @stdio.stdout.write("conflicted units: " + report.plan.conflicted.to_string() + "\n")
+  @stdio.stdout.write("skipped units: " + report.plan.skipped.to_string() + "\n")
+  for unit in report.plan.units {
+    @stdio.stdout.write(
+      "  " + pull_category_name(unit.category) + ": " + unit.description + "\n",
+    )
+  }
+}
+
+///|
+async fn report_pull_outcome(
+  outcome : @publish.PullOutcome,
+  json : Bool,
+  requested_dry_run : Bool,
+) -> Unit {
+  let (name, heading, dry_run, report, conflict) = match outcome {
+    @publish.PullOutcome::Pulled(report) =>
+      ("pulled", "pull completed", false, report, false)
+    @publish.PullOutcome::PullNoOp(report) =>
+      ("no-op", "pull completed: no incoming changes", false, report, false)
+    @publish.PullOutcome::PullDryRun(report) =>
+      ("dry-run", "dry run: pull inspection succeeded", true, report, false)
+    @publish.PullOutcome::PullConflicted(report) =>
+      if requested_dry_run {
+        ("conflicted", "dry run: pull would encounter Merge Conflicts", true, report, true)
+      } else {
+        ("conflicted", "pull blocked by Merge Conflicts", false, report, true)
+      }
+  }
+  if json {
+    @stdio.stdout.write(pull_report_json(name, dry_run, report) + "\n")
+  } else {
+    write_pull_text(heading, report)
+  }
+  if conflict { @sys.exit(1) }
+}
+
+///|
+async fn pull_file(
+  path : String,
+  authorization : @args.Authorization,
+  dry_run : Bool,
+  json : Bool,
+) -> Unit {
+  let registry_directory = match @registry.default_registry_directory() {
+    Ok(directory) => directory
+    Err(error) =>
+      return report_failure(
+        @publish.PublishError::Registry(error.user_message()).user_message(),
+      )
+  }
+  let http = @google_http.DefaultHttpClient::new()
+  let result = match authorization {
+    @args.Authorization::Project(store_request) =>
+      @publish.pull_path_with_registry(
+        path,
+        fn(source_path) { read_source(source_path) },
+        @publish.atomic_replace_source,
+        registry_directory,
+        @publish.AuthorizationMode::Project,
+        if dry_run {
+          async fn() { project_access_token(http, store_request) }
+        } else {
+          async fn() { project_access_token_with_onboarding(http, store_request) }
+        },
+        adc_access_token,
+        http,
+        dry_run,
+      )
+    @args.Authorization::Adc =>
+      @publish.pull_path_with_registry(
+        path,
+        fn(source_path) { read_source(source_path) },
+        @publish.atomic_replace_source,
+        registry_directory,
+        @publish.AuthorizationMode::Adc,
+        adc_access_token,
+        adc_access_token,
+        http,
+        dry_run,
+      )
+    @args.Authorization::AccessTokenEnvironment => {
+      @publish.pull_path_with_registry(
+        path,
+        fn(source_path) { read_source(source_path) },
+        @publish.atomic_replace_source,
+        registry_directory,
+        @publish.AuthorizationMode::Ephemeral,
+        fn() {
+          match @env.get_env_var("PUMD_ACCESS_TOKEN") {
+            Some(token) if !token.is_empty() => Ok(token)
+            _ => Err(@publish.AuthenticationProblem::CredentialsNotConfigured)
+          }
+        },
+        fn() {
+          match @env.get_env_var("PUMD_ACCESS_TOKEN") {
+            Some(token) if !token.is_empty() => Ok(token)
+            _ => Err(@publish.AuthenticationProblem::CredentialsNotConfigured)
+          }
+        },
+        http,
+        dry_run,
+      )
+    }
+  }
+  match result {
+    Ok(outcome) => report_pull_outcome(outcome, json, dry_run)
+    Err(error) => report_failure(error.user_message())
+  }
+}
+
+///|
 /// Offer first-publish setup only when Project Authorization is genuinely
 /// absent, only in an interactive session, and only after callers have
 /// successfully prepared the publication. Mirrors the previous
@@ -567,7 +779,7 @@ async fn report_publish_outcome(outcome : @publish.PublishOutcome) -> Unit {
         @stdio.stdout.write("  planned: " + unit + "\n")
       }
       @stdio.stdout.write(
-        "publication conflicts: " + report.conflicts.to_string() + "\n",
+        "merge conflicts: " + report.conflicts.to_string() + "\n",
       )
       for unit in report.conflicted {
         @stdio.stdout.write("  conflict: " + unit + "\n")
@@ -857,6 +1069,8 @@ async fn main {
   match @args.parse_command(@env.args()) {
     Ok(@args.Command::Publish(path, authorization, dry_run)) =>
       publish_file(path, authorization, dry_run)
+    Ok(@args.Command::Pull(path, authorization, dry_run, json)) =>
+      pull_file(path, authorization, dry_run, json)
     Ok(@args.Command::List(options)) => list_publications(options)
     Ok(@args.Command::Move(old_path, new_path)) =>
       move_publication(old_path, new_path)
