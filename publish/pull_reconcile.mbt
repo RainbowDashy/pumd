@@ -266,6 +266,28 @@ fn pull_structural_edits_overlap(
 }
 
 ///|
+fn pull_structural_edits_converge(
+  local_edit : PullStructuralEdit,
+  remote : PullStructuralEdit,
+  desired : Array[SourceSemanticUnit],
+  current : Array[SourceSemanticUnit],
+) -> Bool {
+  if local_edit.base_start != remote.base_start ||
+    local_edit.base_end != remote.base_end {
+    return false
+  }
+  let local_length = local_edit.changed_end - local_edit.changed_start
+  let remote_length = remote.changed_end - remote.changed_start
+  if local_length != remote_length { return false }
+  for offset = 0; offset < local_length; offset = offset + 1 {
+    if desired[local_edit.changed_start + offset] != current[remote.changed_start + offset] {
+      return false
+    }
+  }
+  true
+}
+
+///|
 fn pull_serialized_units(
   units : Array[SourceSemanticUnit],
   start : Int,
@@ -409,19 +431,35 @@ pub fn plan_pull(
     for pair in local_matches {
       base_to_desired[pair.base] = Some(pair.changed)
     }
-    for local_edit in local_edits {
-      preserved_local = preserved_local + pull_edit_size(local_edit)
-      add_pull_report(reports, PreservedLocal, "local structural edit")
-    }
+    let local_converged : Array[Bool] = []
+    for _ in local_edits { local_converged.push(false) }
     for remote_edit in remote_edits {
-      let mut overlaps = false
-      for local_edit in local_edits {
+      let mut overlap_index : Int? = None
+      let mut multiple_overlaps = false
+      for local_index, local_edit in local_edits {
         if pull_structural_edits_overlap(local_edit, remote_edit) {
-          overlaps = true
-          break
+          match overlap_index {
+            None => overlap_index = Some(local_index)
+            Some(_) => multiple_overlaps = true
+          }
         }
       }
-      if overlaps {
+      match overlap_index {
+        Some(local_index) if !multiple_overlaps &&
+          pull_structural_edits_converge(
+            local_edits[local_index],
+            remote_edit,
+            desired_sequence,
+            remote_sequence,
+          ) => {
+          local_converged[local_index] = true
+          converged = converged + pull_edit_size(remote_edit)
+          add_pull_report(reports, Converged, "identical local and remote structural edit")
+          continue
+        }
+        _ => ()
+      }
+      if overlap_index is Some(_) {
         conflicted = conflicted + 1
         add_pull_report(reports, Conflicted, "overlapping local and remote structural edits")
         continue
@@ -484,6 +522,12 @@ pub fn plan_pull(
       incoming = incoming + pull_edit_size(remote_edit)
       add_pull_report(reports, Incoming, "remote structural edit")
     }
+    for local_index, local_edit in local_edits {
+      if !local_converged[local_index] {
+        preserved_local = preserved_local + pull_edit_size(local_edit)
+        add_pull_report(reports, PreservedLocal, "local structural edit")
+      }
+    }
     let baseline_after_pull = if conflicted > 0 { baseline } else {
       match pull_baseline_units(remote_sequence, baseline, newline) {
         Ok(document) => document
@@ -496,7 +540,7 @@ pub fn plan_pull(
       units: reports,
       incoming,
       preserved_local,
-      converged: 0,
+      converged,
       conflicted,
       skipped,
     })
