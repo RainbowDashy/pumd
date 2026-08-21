@@ -545,3 +545,70 @@ test "pull merges remote structural changes with disjoint local edits" {
     Err(error) => abort(error.user_message())
   }
 }
+
+///|
+test "pull merges disjoint local and remote structural insertions" {
+  let baseline = pull_rendered("A\n\nB\n\nC\n")
+  let source = "A\n\nLocal\n\nB\n\nC\n"
+  let remote : RemoteContent = {
+    units: [
+      RemoteUnit::Paragraph(pull_remote_paragraph("A", 1)),
+      RemoteUnit::Paragraph(pull_remote_paragraph("B", 3)),
+      RemoteUnit::Paragraph(pull_remote_paragraph("Remote", 5)),
+      RemoteUnit::Paragraph(pull_remote_paragraph("C", 12)),
+    ],
+  }
+  match plan_pull(source, baseline, pull_rendered(source), remote) {
+    Ok(plan) => {
+      inspect(plan.source, content="A\n\nLocal\n\nB\n\nRemote\n\nC\n")
+      assert_eq(plan.preserved_local, 1)
+      assert_eq(plan.incoming, 1)
+      assert_eq(plan.conflicted, 0)
+    }
+    Err(error) => abort(error.user_message())
+  }
+}
+
+///|
+test "pull merges disjoint local deletion and remote insertion" {
+  let baseline = pull_rendered("A\n\nB\n\nC\n")
+  let source = "B\n\nC\n"
+  let remote : RemoteContent = {
+    units: [
+      RemoteUnit::Paragraph(pull_remote_paragraph("A", 1)),
+      RemoteUnit::Paragraph(pull_remote_paragraph("B", 3)),
+      RemoteUnit::Paragraph(pull_remote_paragraph("Remote", 5)),
+      RemoteUnit::Paragraph(pull_remote_paragraph("C", 12)),
+    ],
+  }
+  match plan_pull(source, baseline, pull_rendered(source), remote) {
+    Ok(plan) => {
+      inspect(plan.source, content="B\n\nRemote\n\nC\n")
+      assert_eq(plan.preserved_local, 1)
+      assert_eq(plan.incoming, 1)
+      assert_eq(plan.conflicted, 0)
+    }
+    Err(error) => abort(error.user_message())
+  }
+}
+
+///|
+test "pull conflicts on overlapping local and remote structural edits" {
+  let baseline = pull_rendered("A\n\nB\n")
+  let source = "A\n\nLocal\n\nB\n"
+  let remote : RemoteContent = {
+    units: [
+      RemoteUnit::Paragraph(pull_remote_paragraph("A", 1)),
+      RemoteUnit::Paragraph(pull_remote_paragraph("Remote", 3)),
+      RemoteUnit::Paragraph(pull_remote_paragraph("B", 10)),
+    ],
+  }
+  match plan_pull(source, baseline, pull_rendered(source), remote) {
+    Ok(plan) => {
+      inspect(plan.source, content=source)
+      assert_true(plan.conflicted > 0)
+      assert_true(plan.baseline.semantic_eq(baseline))
+    }
+    Err(error) => abort(error.user_message())
+  }
+}

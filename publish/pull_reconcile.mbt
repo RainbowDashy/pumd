@@ -49,6 +49,14 @@ priv struct PullSourcePatch { start : Int; end : Int; replacement : String }
 priv struct PullSemanticMatch { base : Int; changed : Int }
 
 ///|
+priv struct PullStructuralEdit {
+  base_start : Int
+  base_end : Int
+  changed_start : Int
+  changed_end : Int
+}
+
+///|
 fn pull_newline(source : String) -> String {
   if source.contains("\r\n") { "\r\n" } else { "\n" }
 }
@@ -149,6 +157,21 @@ fn semantic_has_duplicates(units : Array[SourceSemanticUnit]) -> Bool {
 }
 
 ///|
+fn semantic_baseline_anchors_unique(
+  base : Array[SourceSemanticUnit],
+  changed : Array[SourceSemanticUnit],
+) -> Bool {
+  for base_unit in base {
+    let mut occurrences = 0
+    for changed_unit in changed {
+      if base_unit == changed_unit { occurrences = occurrences + 1 }
+    }
+    if occurrences > 1 { return false }
+  }
+  true
+}
+
+///|
 fn semantic_lcs(
   base : Array[SourceSemanticUnit],
   changed : Array[SourceSemanticUnit],
@@ -189,6 +212,79 @@ fn semantic_lcs(
     result.push(reversed[index])
   }
   result
+}
+
+///|
+fn pull_structural_edits(
+  base_length : Int,
+  changed_length : Int,
+  matches : Array[PullSemanticMatch],
+) -> Array[PullStructuralEdit] {
+  let edits : Array[PullStructuralEdit] = []
+  let mut previous_base = -1
+  let mut previous_changed = -1
+  for match_ in matches {
+    if match_.base > previous_base + 1 || match_.changed > previous_changed + 1 {
+      edits.push({
+        base_start: previous_base + 1,
+        base_end: match_.base,
+        changed_start: previous_changed + 1,
+        changed_end: match_.changed,
+      })
+    }
+    previous_base = match_.base
+    previous_changed = match_.changed
+  }
+  if previous_base + 1 < base_length || previous_changed + 1 < changed_length {
+    edits.push({
+      base_start: previous_base + 1,
+      base_end: base_length,
+      changed_start: previous_changed + 1,
+      changed_end: changed_length,
+    })
+  }
+  edits
+}
+
+///|
+fn pull_structural_edits_overlap(
+  left : PullStructuralEdit,
+  right : PullStructuralEdit,
+) -> Bool {
+  let left_insertion = left.base_start == left.base_end
+  let right_insertion = right.base_start == right.base_end
+  if left_insertion && right_insertion {
+    return left.base_start == right.base_start
+  }
+  if left_insertion {
+    return left.base_start > right.base_start && left.base_start < right.base_end
+  }
+  if right_insertion {
+    return right.base_start > left.base_start && right.base_start < left.base_end
+  }
+  left.base_start < right.base_end && right.base_start < left.base_end
+}
+
+///|
+fn pull_serialized_units(
+  units : Array[SourceSemanticUnit],
+  start : Int,
+  end : Int,
+  newline : String,
+) -> String {
+  let output = StringBuilder::new()
+  for index = start; index < end; index = index + 1 {
+    if index > start { output.write_string(newline + newline) }
+    output.write_string(serialize_source_semantic_unit(units[index], newline~))
+  }
+  output.to_string()
+}
+
+///|
+fn pull_edit_size(edit : PullStructuralEdit) -> Int {
+  let removed = edit.base_end - edit.base_start
+  let added = edit.changed_end - edit.changed_start
+  if removed > added { removed } else { added }
 }
 
 ///|
@@ -285,10 +381,127 @@ pub fn plan_pull(
   let remote_sequence = semantic_sequence(current)
   let local_structure_changed = want.length() != base.length()
   let remote_structure_changed = supported.length() != base.length()
-  if local_structure_changed {
-    if remote_structure_changed {
-      return Err(AmbiguousAlignment("simultaneous local and remote structural insertions or deletions lack unique anchors"))
+  if local_structure_changed && remote_structure_changed {
+    if current.any(fn(entry) { entry.semantic is None }) {
+      return Err(AmbiguousAlignment("unsupported remote structure prevents unique simultaneous structural alignment"))
     }
+    if semantic_has_duplicates(base_sequence) ||
+      !semantic_baseline_anchors_unique(base_sequence, desired_sequence) ||
+      !semantic_baseline_anchors_unique(base_sequence, remote_sequence) {
+      return Err(AmbiguousAlignment("duplicate structural units do not provide unique simultaneous structural anchors"))
+    }
+    let local_matches = semantic_lcs(base_sequence, desired_sequence)
+    let remote_matches = semantic_lcs(base_sequence, remote_sequence)
+    let local_edits = pull_structural_edits(
+      base.length(),
+      want.length(),
+      local_matches,
+    )
+    let remote_edits = pull_structural_edits(
+      base.length(),
+      supported.length(),
+      remote_matches,
+    )
+    let base_to_desired : Array[Int?] = []
+    for index = 0; index < base.length(); index = index + 1 {
+      base_to_desired.push(None)
+    }
+    for pair in local_matches {
+      base_to_desired[pair.base] = Some(pair.changed)
+    }
+    for local_edit in local_edits {
+      preserved_local = preserved_local + pull_edit_size(local_edit)
+      add_pull_report(reports, PreservedLocal, "local structural edit")
+    }
+    for remote_edit in remote_edits {
+      let mut overlaps = false
+      for local_edit in local_edits {
+        if pull_structural_edits_overlap(local_edit, remote_edit) {
+          overlaps = true
+          break
+        }
+      }
+      if overlaps {
+        conflicted = conflicted + 1
+        add_pull_report(reports, Conflicted, "overlapping local and remote structural edits")
+        continue
+      }
+      let replacement = pull_serialized_units(
+        remote_sequence,
+        remote_edit.changed_start,
+        remote_edit.changed_end,
+        newline,
+      )
+      if remote_edit.base_start == remote_edit.base_end {
+        let mut anchor = pull_codepoint_length(source)
+        for base_index = remote_edit.base_start; base_index < base.length(); base_index = base_index + 1 {
+          match base_to_desired[base_index] {
+            Some(desired_index) => {
+              anchor = match want[desired_index].provenance {
+                Some(range) => range.start
+                None => return Err(InvalidLocalSource("insertion anchor has no parser provenance"))
+              }
+              break
+            }
+            None => ()
+          }
+        }
+        let insertion = if anchor == 0 {
+          replacement + newline + newline
+        } else if anchor == pull_codepoint_length(source) {
+          (if source.has_suffix(newline) { newline } else { newline + newline }) +
+            replacement + newline
+        } else {
+          replacement + newline + newline
+        }
+        patches.push({ start: anchor, end: anchor, replacement: insertion })
+      } else {
+        let first_desired = match base_to_desired[remote_edit.base_start] {
+          Some(index) => index
+          None => return Err(AmbiguousAlignment("remote structural edit lost its local baseline anchor"))
+        }
+        let last_desired = match base_to_desired[remote_edit.base_end - 1] {
+          Some(index) => index
+          None => return Err(AmbiguousAlignment("remote structural edit lost its local baseline anchor"))
+        }
+        let first_range = match want[first_desired].provenance {
+          Some(range) => range
+          None => return Err(InvalidLocalSource("structural edit anchor has no parser provenance"))
+        }
+        let last_range = match want[last_desired].provenance {
+          Some(range) => range
+          None => return Err(InvalidLocalSource("structural edit anchor has no parser provenance"))
+        }
+        let local_text = pull_slice(source, first_range.start, last_range.end)
+        patches.push({
+          start: first_range.start,
+          end: last_range.end,
+          replacement: if replacement == "" { "" } else {
+            replacement + pull_trailing_newlines(local_text, newline)
+          },
+        })
+      }
+      incoming = incoming + pull_edit_size(remote_edit)
+      add_pull_report(reports, Incoming, "remote structural edit")
+    }
+    let baseline_after_pull = if conflicted > 0 { baseline } else {
+      match pull_baseline_units(remote_sequence, baseline, newline) {
+        Ok(document) => document
+        Err(error) => return Err(error)
+      }
+    }
+    return Ok({
+      source: if conflicted > 0 { source } else { apply_pull_patches(source, patches) },
+      baseline: baseline_after_pull,
+      units: reports,
+      incoming,
+      preserved_local,
+      converged: 0,
+      conflicted,
+      skipped,
+    })
+  }
+  if local_structure_changed {
     if semantic_has_duplicates(base_sequence) || semantic_has_duplicates(desired_sequence) {
       return Err(AmbiguousAlignment("duplicate local structural units do not provide unique anchors"))
     }
