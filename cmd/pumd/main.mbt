@@ -746,18 +746,44 @@ async fn abort_pull_file(path : String) -> Unit {
         @publish.PublishError::Registry(error.user_message()).user_message(),
       )
   }
-  match
-    @publish.abort_pull_with_registry(
-      path, @publish.atomic_replace_source, registry_directory,
-    ) {
-    Ok(_) => @stdio.stdout.write(abort_pull_success_message())
-    Err(error) => report_failure(error.user_message())
-  }
+  run_abort_handler(
+    async fn() {
+      @publish.abort_pull_with_registry(
+        path, @publish.atomic_replace_source, registry_directory,
+      )
+    },
+    async fn(message) { @stdio.stdout.write(message) },
+    report_failure,
+  )
 }
 
 ///|
 fn abort_pull_success_message() -> String {
   "pull aborted; exact pre-pull Markdown restored\n"
+}
+
+///|
+async fn run_abort_handler(
+  abort : async () -> Result[Unit, @publish.PublishError],
+  report_success : async (String) -> Unit,
+  report_error : async (String) -> Unit,
+) -> Unit {
+  match abort() {
+    Ok(_) => report_success(abort_pull_success_message())
+    Err(error) => report_error(error.user_message())
+  }
+}
+
+///|
+async fn run_resolve_handler(
+  result : Result[@publish.PublishOutcome, @publish.PublishError],
+  report_success : async (@publish.PublishOutcome) -> Unit,
+  report_error : async (String) -> Unit,
+) -> Unit {
+  match result {
+    Ok(outcome) => report_success(outcome)
+    Err(error) => report_error(error.user_message())
+  }
 }
 
 ///|
@@ -832,10 +858,7 @@ async fn resolve_file(
         http,
       )
   }
-  match result {
-    Ok(outcome) => report_publish_outcome(outcome)
-    Err(error) => report_failure(error.user_message())
-  }
+  run_resolve_handler(result, report_publish_outcome, report_failure)
 }
 
 ///|

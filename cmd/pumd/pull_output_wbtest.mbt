@@ -92,3 +92,50 @@ test "Pending Merge text listing reports merge-conflicted" {
   }
   assert_eq(publication_status_label(entry), "merge-conflicted")
 }
+
+///|
+async test "Pending Merge command handlers report recovery outcomes and failures" {
+  let standard_output : Array[String] = []
+  let errors : Array[String] = []
+  let exit_codes : Array[Int] = []
+  run_abort_handler(
+    fn() { Ok(()) },
+    fn(message) { standard_output.push(message) },
+    fn(message) { errors.push(message); exit_codes.push(1) },
+  )
+  assert_eq(standard_output, [abort_pull_success_message()])
+  assert_eq(errors, [])
+  run_abort_handler(
+    fn() { Err(@publish.PublishError::Registry("Pending Merge is missing")) },
+    fn(message) { standard_output.push(message) },
+    fn(message) { errors.push(message); exit_codes.push(1) },
+  )
+  assert_true(errors[0].contains("Pending Merge is missing"))
+  let resolved : Array[@publish.PublishOutcome] = []
+  run_resolve_handler(
+    Ok(@publish.PublishOutcome::Updated(
+      { document_id: "doc", url: "url" },
+      "after",
+    )),
+    fn(outcome) { resolved.push(outcome) },
+    fn(message) { errors.push(message); exit_codes.push(1) },
+  )
+  assert_eq(resolved.length(), 1)
+  for error in [
+    @publish.PublishError::Concurrency(message="stale remote state"),
+    @publish.PublishError::AmbiguousUpdate(document_id="doc", url="url"),
+    @publish.PublishError::ReviewBarrier(unresolved=1),
+    @publish.PublishError::Registry("Publication has a Pending Merge"),
+  ] {
+    run_resolve_handler(
+      Err(error),
+      fn(outcome) { resolved.push(outcome) },
+      fn(message) { errors.push(message); exit_codes.push(1) },
+    )
+  }
+  assert_eq(exit_codes, [1, 1, 1, 1, 1])
+  assert_true(errors.any(fn(message) { message.contains("stale remote state") }))
+  assert_true(errors.any(fn(message) { message.contains("ambiguous") }))
+  assert_true(errors.any(fn(message) { message.contains("unresolved") }))
+  assert_true(errors.any(fn(message) { message.contains("Pending Merge") }))
+}
