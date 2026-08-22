@@ -7,7 +7,7 @@ pub(all) enum PublicationLifecycle {
 } derive(Eq, @debug.Debug)
 
 ///|
-/// Recoverable local and observed-remote state for an unresolved Pull.
+/// Recoverable local and observed-remote state for a Pending Merge.
 pub(all) struct PendingMerge {
   pre_pull_source : String
   marked_source : String

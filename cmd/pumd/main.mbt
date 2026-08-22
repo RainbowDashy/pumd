@@ -750,9 +750,30 @@ async fn abort_pull_file(path : String) -> Unit {
     @publish.abort_pull_with_registry(
       path, @publish.atomic_replace_source, registry_directory,
     ) {
-    Ok(_) =>
-      @stdio.stdout.write("pull aborted; exact pre-pull Markdown restored\n")
+    Ok(_) => @stdio.stdout.write(abort_pull_success_message())
     Err(error) => report_failure(error.user_message())
+  }
+}
+
+///|
+fn abort_pull_success_message() -> String {
+  "pull aborted; exact pre-pull Markdown restored\n"
+}
+
+///|
+priv enum PendingCommandRoute {
+  NotPendingCommand
+  AbortRoute(String)
+  ResolveRoute(String, @args.Authorization)
+}
+
+///|
+fn pending_command_route(command : @args.Command) -> PendingCommandRoute {
+  match command {
+    @args.Command::PullAbort(path) => AbortRoute(path)
+    @args.Command::Resolve(path, authorization) =>
+      ResolveRoute(path, authorization)
+    _ => NotPendingCommand
   }
 }
 
@@ -1183,22 +1204,30 @@ async fn forget_publication(path : String) -> Unit {
 ///|
 async fn main {
   match @args.parse_command(@env.args()) {
-    Ok(@args.Command::Publish(path, authorization, dry_run)) =>
-      publish_file(path, authorization, dry_run)
-    Ok(@args.Command::Pull(path, authorization, dry_run, json)) =>
-      pull_file(path, authorization, dry_run, json)
-    Ok(@args.Command::PullAbort(path)) => abort_pull_file(path)
-    Ok(@args.Command::Resolve(path, authorization)) =>
-      resolve_file(path, authorization)
-    Ok(@args.Command::List(options)) => list_publications(options)
-    Ok(@args.Command::Move(old_path, new_path)) =>
-      move_publication(old_path, new_path)
-    Ok(@args.Command::Forget(path)) => forget_publication(path)
-    Ok(@args.Command::AuthSetup(client_file, store)) =>
-      auth_setup(client_file, store)
-    Ok(@args.Command::AuthStatus(store)) =>
-      report_project_authorization_status(store)
-    Ok(@args.Command::AuthLogout(store)) => logout_project_authorization(store)
+    Ok(command) =>
+      match pending_command_route(command) {
+        AbortRoute(path) => abort_pull_file(path)
+        ResolveRoute(path, authorization) => resolve_file(path, authorization)
+        NotPendingCommand =>
+          match command {
+            @args.Command::Publish(path, authorization, dry_run) =>
+              publish_file(path, authorization, dry_run)
+            @args.Command::Pull(path, authorization, dry_run, json) =>
+              pull_file(path, authorization, dry_run, json)
+            @args.Command::List(options) => list_publications(options)
+            @args.Command::Move(old_path, new_path) =>
+              move_publication(old_path, new_path)
+            @args.Command::Forget(path) => forget_publication(path)
+            @args.Command::AuthSetup(client_file, store) =>
+              auth_setup(client_file, store)
+            @args.Command::AuthStatus(store) =>
+              report_project_authorization_status(store)
+            @args.Command::AuthLogout(store) =>
+              logout_project_authorization(store)
+            @args.Command::PullAbort(_) | @args.Command::Resolve(_, _) =>
+              abort("pending command route")
+          }
+      }
     Err(message) => report_failure(message)
   }
 }
