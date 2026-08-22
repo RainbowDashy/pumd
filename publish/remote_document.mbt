@@ -652,7 +652,16 @@ fn decode_table(element : Json, table : Json, inline_objects : Json) -> RemoteTa
 ///|
 fn decode_content(items : Array[Json], inline_objects : Json) -> RemoteContent {
   let units : Array[RemoteUnit] = []
-  for item in items {
+  for index, item in items {
+    // Google Docs emits a section boundary before the first body character in
+    // every ordinary document. It is container metadata, not reviewer-authored
+    // content; later section breaks remain opaque Source Semantics barriers.
+    if index == 0 &&
+      index_field(item, "startIndex") == 0 &&
+      index_field(item, "endIndex") == 1 &&
+      field(item, "sectionBreak") is Some(_) {
+      continue
+    }
     match field(item, "paragraph") {
       Some(paragraph) =>
         units.push(Paragraph(decode_paragraph(item, paragraph, inline_objects)))

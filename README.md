@@ -497,6 +497,17 @@ moon build --target native cmd/pumd
 moon test --target native -p rainbowdashy/pumd/publish --include-skipped --filter "live smoke publishes and reads a real Google Doc"
 ```
 
+The Publication Pull smoke drives the built native CLI through a complete
+Publication lifecycle: publish, read-only pull preview, clean Pull, diff3
+Merge Conflict, `pull --abort`, a second conflict, `resolve`, and final
+readback/listing verification. It uses an isolated temporary Publication
+Registry but leaves the real Google Doc in Drive:
+
+```console
+moon build --target native cmd/pumd
+moon test --target native -p rainbowdashy/pumd/publish --include-skipped --filter "live Publication Pull smoke covers abort and Pending Merge resolution"
+```
+
 Packaged Project Authorization smoke tests are opt-in for macOS arm64, Linux
 x64, and Windows x64. Each uses that platform's native vault, replaces the
 active Project Authorization twice to cover create and replacement, creates a

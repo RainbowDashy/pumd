@@ -620,6 +620,16 @@ pub async fn publish_prepared_with_registry(
           Blocked => Err(BlockedPublication(source_path=canonical))
           Provisional => {
             let success = success_from_entry(entry)
+            let managed_tab_id = match entry.managed_tab_id {
+              Some(tab_id) => tab_id
+              None =>
+                return Err(
+                  Registry(
+                    "provisional Publication is missing its Managed Tab for " +
+                    canonical,
+                  ),
+                )
+            }
             let token = match
               selected_token(
                 authorization_mode, get_project_token, get_adc_token,
@@ -633,7 +643,12 @@ pub async fn publish_prepared_with_registry(
               http=Some(http),
             )
             match
-              batch_update_document(client, success.document_id, prepared.plan) {
+              batch_update_document_in_tab(
+                client,
+                success.document_id,
+                managed_tab_id,
+                prepared.plan,
+              ) {
               Ok(_) => {
                 let updated = match
                   @registry.document_with_ready(
@@ -709,7 +724,12 @@ pub async fn publish_prepared_with_registry(
                 )
             }
             match
-              batch_update_document(client, success.document_id, prepared.plan) {
+              batch_update_document_in_tab(
+                client,
+                success.document_id,
+                created.managed_tab_id,
+                prepared.plan,
+              ) {
               Ok(_) => {
                 let updated = match
                   @registry.document_with_ready(
@@ -1467,7 +1487,11 @@ pub async fn resolve_path_with_registry(
     Err(error) => return Err(pull_reconciliation_error(error))
   }
   let reconciliation = match
-    reconcile_document(observed_baseline, prepared.document, observed_content) {
+    reconcile_pending_merge_resolution(
+      observed_baseline,
+      prepared.document,
+      observed_content,
+    ) {
     Ok(value) => value
     Err(error) => return Err(reconciliation_error(error))
   }

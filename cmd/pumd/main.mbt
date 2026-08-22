@@ -401,6 +401,10 @@ async fn publish_file(
       )
   }
   let http = @google_http.DefaultHttpClient::new()
+  let adc_http = @publish.adc_quota_http_client(
+    http,
+    @publish.adc_quota_project_id(),
+  )
   let result = match authorization {
     @args.Authorization::Project(store_request) =>
       @publish.publish_prepared_with_registry(
@@ -427,7 +431,7 @@ async fn publish_file(
         @publish.AuthorizationMode::Adc,
         adc_access_token,
         adc_access_token,
-        http,
+        adc_http,
         dry_run,
       )
     @args.Authorization::AccessTokenEnvironment =>
@@ -677,6 +681,10 @@ async fn pull_file(
       )
   }
   let http = @google_http.DefaultHttpClient::new()
+  let adc_http = @publish.adc_quota_http_client(
+    http,
+    @publish.adc_quota_project_id(),
+  )
   let result = match authorization {
     @args.Authorization::Project(store_request) =>
       @publish.pull_path_with_registry(
@@ -705,7 +713,7 @@ async fn pull_file(
         @publish.AuthorizationMode::Adc,
         adc_access_token,
         adc_access_token,
-        http,
+        adc_http,
         dry_run,
       )
     @args.Authorization::AccessTokenEnvironment =>
@@ -816,6 +824,10 @@ async fn resolve_file(
       )
   }
   let http = @google_http.DefaultHttpClient::new()
+  let adc_http = @publish.adc_quota_http_client(
+    http,
+    @publish.adc_quota_project_id(),
+  )
   let result = match authorization {
     @args.Authorization::Project(store_request) =>
       @publish.resolve_path_with_registry(
@@ -835,7 +847,7 @@ async fn resolve_file(
         @publish.AuthorizationMode::Adc,
         adc_access_token,
         adc_access_token,
-        http,
+        adc_http,
       )
     @args.Authorization::AccessTokenEnvironment =>
       @publish.resolve_path_with_registry(

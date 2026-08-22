@@ -70,6 +70,9 @@ priv struct RemoteEntry {
 priv struct Match { left : Int; right : Int }
 
 ///|
+priv enum ReconciliationIdentity { Native; SourceSemantics }
+
+///|
 fn optional_string(value : String?, output : StringBuilder) -> Unit {
   match value { Some(text) => output.write_string(text); None => output.write_string("-") }
 }
@@ -135,7 +138,17 @@ fn desired_paragraph_signature(paragraph : @pumd.Paragraph) -> String {
 fn remote_paragraph_signature(paragraph : RemoteParagraph) -> String {
   let output = StringBuilder::new()
   output.write_string("p:")
-  for run in paragraph.runs { output.write_string(run.text); output.write_char('|'); text_signature(run.style, run.link, output) }
+  for index, run in paragraph.runs {
+    let text = remote_run_source_text(
+      run,
+      index == paragraph.runs.length() - 1,
+    )
+    if !text.is_empty() {
+      output.write_string(text)
+      output.write_char('|')
+      text_signature(run.style, run.link, output)
+    }
+  }
   for image in paragraph.inline_images { output.write_string("image|"); output.write_string(image.text_offset.to_string()); output.write_char('|'); output.write_string(image.source_url); output.write_char(';') }
   output.write_char('#'); paragraph_style_signature(paragraph.style, output); output.write_char('#')
   match paragraph.bullet { Some(bullet) => { if bullet.numeric { output.write_char('n') } else { output.write_char('b') }; output.write_string(bullet.nesting_level.to_string()) }; None => output.write_char('-') }
@@ -217,7 +230,14 @@ fn remote_has_warning(table : RemoteTable) -> Bool {
 ///|
 fn is_final_newline_container(unit : RemoteUnit, is_last : Bool) -> Bool {
   match unit {
-    Paragraph(paragraph) => is_last && paragraph.runs.is_empty() && paragraph.end_index == paragraph.start_index + 1
+    Paragraph(paragraph) => {
+      let semantic = remote_paragraph_semantics(paragraph)
+      is_last &&
+      semantic.runs.is_empty() &&
+      semantic.images.is_empty() &&
+      paragraph.end_index == paragraph.start_index + 1 &&
+      !semantic.code_block
+    }
     _ => false
   }
 }
@@ -578,9 +598,50 @@ fn reorder_brackets_opaque(
 }
 
 ///|
-pub fn reconcile_document(baseline : @pumd.DesiredDocument, desired : @pumd.DesiredDocument, remote : RemoteContent) -> Result[ReconcileOutcome, ReconcileError] {
+fn reconcile_document_with_identity(
+  baseline : @pumd.DesiredDocument,
+  desired : @pumd.DesiredDocument,
+  remote : RemoteContent,
+  identity : ReconciliationIdentity,
+) -> Result[ReconcileOutcome, ReconcileError] {
   match validate_desired(desired) { Err(error) => return Err(error); Ok(_) => () }
   let base = local_units(baseline); let want = local_units(desired); let current = remote_entries(remote)
+  if identity is SourceSemantics {
+    let base_semantics = local_semantic_units(baseline)
+    let desired_semantics = local_semantic_units(desired)
+    let remote_semantics = remote_semantic_entries(remote)
+    if base.length() != base_semantics.length() ||
+      want.length() != desired_semantics.length() ||
+      current.length() != remote_semantics.length() {
+      return Err(
+        AmbiguousAlignment(
+          "the observed remote baseline has inconsistent structural units",
+        ),
+      )
+    }
+    for index = 0; index < base.length(); index = index + 1 {
+      base[index] = {
+        ..base[index],
+        signature: @debug.to_string(base_semantics[index].semantic),
+      }
+    }
+    for index = 0; index < want.length(); index = index + 1 {
+      want[index] = {
+        ..want[index],
+        signature: @debug.to_string(desired_semantics[index].semantic),
+      }
+    }
+    for index = 0; index < current.length(); index = index + 1 {
+      match remote_semantics[index].semantic {
+        Some(semantic) =>
+          current[index] = {
+            ..current[index],
+            signature: @debug.to_string(semantic),
+          }
+        None => ()
+      }
+    }
+  }
   let local_matches = local_lcs(base, want); let remote_matches = lcs(base, current)
   let base_to_desired : Array[Int?] = []; let desired_to_base : Array[Int?] = []; let base_to_remote : Array[Int?] = []
   for base_index = 0; base_index < base.length(); base_index = base_index + 1 { base_to_desired.push(None); base_to_remote.push(None) }
@@ -682,6 +743,32 @@ pub fn reconcile_document(baseline : @pumd.DesiredDocument, desired : @pumd.Desi
     requests.push_iter(group.requests.iter())
   }
   Ok(Planned(report, { requests, }))
+}
+
+///|
+pub fn reconcile_document(
+  baseline : @pumd.DesiredDocument,
+  desired : @pumd.DesiredDocument,
+  remote : RemoteContent,
+) -> Result[ReconcileOutcome, ReconcileError] {
+  reconcile_document_with_identity(baseline, desired, remote, Native)
+}
+
+///|
+/// A Pending Merge records the observed Managed Tab as its common ancestor.
+/// Resolve compares Markdown-representable Source Semantics so cosmetic Google
+/// Docs formatting remains reviewer-owned.
+pub fn reconcile_pending_merge_resolution(
+  observed_baseline : @pumd.DesiredDocument,
+  desired : @pumd.DesiredDocument,
+  observed_remote : RemoteContent,
+) -> Result[ReconcileOutcome, ReconcileError] {
+  reconcile_document_with_identity(
+    observed_baseline,
+    desired,
+    observed_remote,
+    SourceSemantics,
+  )
 }
 
 ///|

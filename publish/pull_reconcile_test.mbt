@@ -81,6 +81,42 @@ test "pull imports remote Source Semantics and ignores cosmetic formatting" {
 }
 
 ///|
+test "pull excludes Google Docs paragraph terminators from Source Semantics" {
+  let baseline = pull_rendered("Base\n")
+  let remote = pull_remote_paragraph("Remote", 1)
+  remote.runs.push({
+    start_index: remote.end_index - 1,
+    end_index: remote.end_index,
+    text: "\n",
+    style: @pumd.builtin_style_profile().body_text,
+    link: None,
+  })
+  let terminal = pull_remote_paragraph("", remote.end_index)
+  terminal.runs.push({
+    start_index: terminal.start_index,
+    end_index: terminal.end_index,
+    text: "\n",
+    style: @pumd.builtin_style_profile().body_text,
+    link: None,
+  })
+  match
+    plan_pull(
+      "Base\n",
+      baseline,
+      baseline,
+      {
+        units: [
+          RemoteUnit::Paragraph(remote),
+          RemoteUnit::Paragraph(terminal),
+        ],
+      },
+    ) {
+    Ok(plan) => inspect(plan.source, content="Remote\n")
+    Err(error) => fail(error.user_message())
+  }
+}
+
+///|
 fn pull_two_paragraphs(first : String, second : String) -> RemoteContent {
   {
     units: [

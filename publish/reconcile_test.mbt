@@ -174,6 +174,66 @@ async test "no-op has no changes" {
 }
 
 ///|
+async test "Google Docs paragraph terminators do not create false conflicts" {
+  let baseline = rendered("Remote")
+  let desired = rendered("Resolved")
+  let remote = remote_from_document(baseline)
+  match remote.units[0] {
+    RemoteUnit::Paragraph(paragraph) => {
+      paragraph.runs.push({
+        start_index: paragraph.end_index - 1,
+        end_index: paragraph.end_index,
+        text: "\n",
+        style: @pumd.builtin_style_profile().body_text,
+        link: None,
+      })
+      remote.units[0] = RemoteUnit::Paragraph({
+        ..paragraph,
+        style: {
+          ..paragraph.style,
+          line_spacing_percent: 177,
+          space_below_points: 42,
+        },
+      })
+      let terminal_start = paragraph.end_index
+      remote.units.push(RemoteUnit::Paragraph({
+        start_index: terminal_start,
+        end_index: terminal_start + 1,
+        runs: [
+          {
+            start_index: terminal_start,
+            end_index: terminal_start + 1,
+            text: "\n",
+            style: @pumd.builtin_style_profile().body_text,
+            link: None,
+          },
+        ],
+        inline_images: [],
+        style: @pumd.builtin_style_profile().body,
+        bullet: None,
+        suggestions: [],
+        normalization_warning: false,
+      }))
+    }
+    _ => fail("paragraph fixture")
+  }
+  match
+    reconcile_pending_merge_resolution(
+      baseline,
+      desired,
+      remote,
+    ) {
+    Err(error) => abort(error.user_message())
+    Ok(Planned(report, _)) => {
+      assert_eq(report.local_changes, 1)
+      assert_eq(report.remote_changes, 0)
+      assert_eq(report.conflicts, 0)
+    }
+    _ => fail("paragraph terminator must not look like a remote edit")
+  }
+}
+
+///|
 async test "remote-only text edit does not publish" {
   let document = rendered("A\n\nB")
   let remote = remote_from_document(document)

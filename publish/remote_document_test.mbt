@@ -253,8 +253,9 @@ async test "remote decoder preserves opaque content tabs warnings and legacy bod
     #| {"startIndex":0,"endIndex":1,"sectionBreak":{}},
     #| {"startIndex":1,"endIndex":2,"pageBreak":{}},
     #| {"startIndex":2,"endIndex":3,"horizontalRule":{}},
-    #| {"startIndex":3,"endIndex":4,"inlineObjectElement":{"inlineObjectProperties":{"embeddedObject":{"title":"chart","description":"ignored"}}}},
-    #| {"startIndex":4,"endIndex":5,"paragraph":{"paragraphStyle":{"namedStyleType":"UNSUPPORTED"},"bullet":{"glyphs":[]},"elements":[{"startIndex":4,"endIndex":5,"inlineObjectElement":{"inlineObjectProperties":{"embeddedObject":{"title":"diagram","description":"ignored"}}}}]}}
+    #| {"startIndex":3,"endIndex":4,"sectionBreak":{}},
+    #| {"startIndex":4,"endIndex":5,"inlineObjectElement":{"inlineObjectProperties":{"embeddedObject":{"title":"chart","description":"ignored"}}}},
+    #| {"startIndex":5,"endIndex":6,"paragraph":{"paragraphStyle":{"namedStyleType":"UNSUPPORTED"},"bullet":{"glyphs":[]},"elements":[{"startIndex":5,"endIndex":6,"inlineObjectElement":{"inlineObjectProperties":{"embeddedObject":{"title":"diagram","description":"ignored"}}}}]}}
     #| ]}}},
     #| {"tabProperties":{"tabId":"two"},"documentTab":{"body":{"content":[]}}}
     #| ]
@@ -265,16 +266,16 @@ async test "remote decoder preserves opaque content tabs warnings and legacy bod
   assert_true(remote_tab_content(document, "one") is Some(_))
   assert_eq(remote_tab_content(document, "missing"), None)
   match document.tabs[0].content.units[0] {
-    Opaque(unit) => inspect(unit.kind, content="sectionBreak")
-    _ => fail("expected opaque section break")
-  }
-  match document.tabs[0].content.units[1] {
     Opaque(item) => inspect(item.kind, content="pageBreak")
     _ => fail("expected opaque page break")
   }
-  match document.tabs[0].content.units[2] {
+  match document.tabs[0].content.units[1] {
     Opaque(item) => inspect(item.kind, content="horizontalRule")
     _ => fail("expected opaque horizontal rule")
+  }
+  match document.tabs[0].content.units[2] {
+    Opaque(unit) => inspect(unit.kind, content="sectionBreak")
+    _ => fail("expected non-leading section break to stay opaque")
   }
   match document.tabs[0].content.units[3] {
     Opaque(item) => {

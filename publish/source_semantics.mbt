@@ -217,18 +217,40 @@ fn remote_list(bullet : RemoteBullet?) -> (SourceSemanticList?, Int) {
 }
 
 ///|
-fn remote_paragraph_semantics(paragraph : RemoteParagraph) -> SourceSemanticParagraph {
-  let (list, nesting_level) = remote_list(paragraph.bullet)
-  {
-    runs: paragraph.runs.map(fn(run) {
-      SourceSemanticRun::{
-        text: run.text,
+fn remote_run_source_text(run : RemoteRun, is_last : Bool) -> String {
+  if is_last && run.text.has_suffix("\n") {
+      run.text.unsafe_substring(start=0, end=run.text.length() - 1)
+  } else {
+    run.text
+  }
+}
+
+///|
+fn remote_semantic_runs(paragraph : RemoteParagraph) -> Array[SourceSemanticRun] {
+  let semantic : Array[SourceSemanticRun] = []
+  for index, run in paragraph.runs {
+    let text = remote_run_source_text(
+      run,
+      index == paragraph.runs.length() - 1,
+    )
+    if !text.is_empty() {
+      semantic.push({
+        text,
         bold: run.style.bold,
         italic: run.style.italic,
         code: semantic_code_text(run.style),
         link: run.link,
-      }
-    }),
+      })
+    }
+  }
+  semantic
+}
+
+///|
+fn remote_paragraph_semantics(paragraph : RemoteParagraph) -> SourceSemanticParagraph {
+  let (list, nesting_level) = remote_list(paragraph.bullet)
+  {
+    runs: remote_semantic_runs(paragraph),
     images: paragraph.inline_images.map(fn(image) {
       SourceSemanticImage::{ source_url: image.source_url, text_offset: image.text_offset }
     }),
@@ -298,12 +320,15 @@ fn remote_semantic_entries(content : RemoteContent) -> Array[RemoteSemanticEntry
   for index, unit in content.units {
     match unit {
       RemoteUnit::Paragraph(paragraph) => {
+        let semantic = remote_paragraph_semantics(paragraph)
         let implicit_final = index == content.units.length() - 1 &&
-          paragraph.runs.is_empty() && paragraph.end_index == paragraph.start_index + 1 &&
+          semantic.runs.is_empty() &&
+          semantic.images.is_empty() &&
+          paragraph.end_index == paragraph.start_index + 1 &&
           !semantic_code_block(paragraph.style)
         if !implicit_final {
           result.push({
-            semantic: Some(Paragraph(remote_paragraph_semantics(paragraph))),
+            semantic: Some(Paragraph(semantic)),
             suggestions: !paragraph.suggestions.is_empty(),
             unsupported: paragraph.normalization_warning,
             description: "paragraph " + (result.length() + 1).to_string(),

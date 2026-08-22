@@ -234,7 +234,11 @@ async test "live smoke publishes and reads a real Google Doc" {
     Err(error) => abort(error.user_message())
   }
   let http = @google_http.DefaultHttpClient::new()
-  let client = @google_core.GoogleClient::new(fn() { token }, http=Some(http))
+  let adc_http = adc_quota_http_client(http, adc_quota_project_id())
+  let client = @google_core.GoogleClient::new(
+    fn() { token },
+    http=Some(adc_http),
+  )
   let document = match get_document(client, document_id) {
     Ok(document) => document
     Err(error) => abort(error.message())
@@ -352,7 +356,11 @@ async test "live smoke creates, updates, and re-reads one real Google Doc" {
     Err(error) => abort(error.user_message())
   }
   let http = @google_http.DefaultHttpClient::new()
-  let client = @google_core.GoogleClient::new(fn() { token }, http=Some(http))
+  let adc_http = adc_quota_http_client(http, adc_quota_project_id())
+  let client = @google_core.GoogleClient::new(
+    fn() { token },
+    http=Some(adc_http),
+  )
   let document = match get_document(client, created.document_id) {
     Ok(document) => document
     Err(error) => abort(error.message())
@@ -368,6 +376,290 @@ async test "live smoke creates, updates, and re-reads one real Google Doc" {
   assert_true(decoded.tabs.length() >= 1)
   println("Live update smoke passed: " + created.url)
   @async_fs.rmdir(temporary_directory, recursive=true) catch {
+    _ => ()
+  }
+}
+
+///|
+#skip("run explicitly after configuring ADC; exercises the native Pull and Pending Merge lifecycle against one real Google Doc")
+async test "live Publication Pull smoke covers abort and Pending Merge resolution" {
+  run_live_publication_pull_lifecycle()
+}
+
+///|
+priv struct LiveCliResult {
+  exit_code : Int
+  stdout : String
+  stderr : String
+}
+
+///|
+async fn run_live_cli(
+  pumd : String,
+  arguments : Array[String],
+  configuration_root : String,
+) -> LiveCliResult {
+  let (exit_code, stdout, stderr) = @process.collect_output(pumd, arguments, extra_env={
+    "XDG_CONFIG_HOME": configuration_root,
+  })
+  {
+    exit_code,
+    stdout: stdout.text() catch {
+      _ => abort("could not decode pumd stdout")
+    },
+    stderr: stderr.text() catch {
+      _ => abort("could not decode pumd stderr")
+    },
+  }
+}
+
+///|
+fn live_paragraph_text(paragraph : RemoteParagraph) -> String {
+  let text = StringBuilder::new()
+  for run in paragraph.runs {
+    text.write_string(run.text)
+  }
+  text.to_string()
+}
+
+///|
+fn live_json_string(value : String) -> String {
+  let output = StringBuilder::new()
+  output.write_char('"')
+  for char in value {
+    match char {
+      '"' => output.write_string("\\\"")
+      '\\' => output.write_string("\\\\")
+      '\n' => output.write_string("\\n")
+      '\r' => output.write_string("\\r")
+      '\t' => output.write_string("\\t")
+      _ => output.write_char(char)
+    }
+  }
+  output.write_char('"')
+  output.to_string()
+}
+
+///|
+async fn replace_live_remote_paragraph(
+  client : @google_core.GoogleClient,
+  document_id : String,
+  tab_id : String,
+  expected : String,
+  replacement : String,
+) -> Unit {
+  let retrieved = match get_document(client, document_id) {
+    Ok(document) => document
+    Err(error) => abort(error.message())
+  }
+  let remote = match decode_remote_document(retrieved.body, document_id) {
+    Ok(document) => document
+    Err(error) => abort(error.user_message())
+  }
+  let content = match remote_tab_content(remote, tab_id) {
+    Some(content) => content
+    None => abort("live Publication Managed Tab disappeared")
+  }
+  let mut target : RemoteParagraph? = None
+  for unit in content.units {
+    match unit {
+      Paragraph(paragraph) if live_paragraph_text(paragraph) == expected =>
+        target = Some(paragraph)
+      _ => ()
+    }
+  }
+  guard target is Some(paragraph) else {
+    abort("could not find the live paragraph to replace: " + expected)
+  }
+  let body = "{\"requests\":[{\"deleteContentRange\":{\"range\":{\"startIndex\":" +
+    paragraph.start_index.to_string() +
+    ",\"endIndex\":" +
+    (paragraph.end_index - 1).to_string() +
+    ",\"tabId\":" +
+    live_json_string(tab_id) +
+    "}}},{\"insertText\":{\"location\":{\"index\":" +
+    paragraph.start_index.to_string() +
+    ",\"tabId\":" +
+    live_json_string(tab_id) +
+    "},\"text\":" +
+    live_json_string(replacement) +
+    "}}]}"
+  let request = @google_http.HttpRequest::new(
+    "https://docs.googleapis.com/v1/documents/" + document_id + ":batchUpdate",
+    @google_http.HttpMethod::POST,
+    { "Content-Type": "application/json" },
+    body=Some(body),
+  )
+  let response = client.request(request) catch {
+    @google_http.HttpError::NetworkError(message) => abort(message)
+    @google_http.HttpError::TimeoutError(message) => abort(message)
+    @google_http.HttpError::InvalidUrl(message) => abort(message)
+  }
+  if response.status_code < 200 || response.status_code >= 300 {
+    abort(
+      "live reviewer edit failed with HTTP " +
+      response.status_code.to_string() +
+      ": " +
+      response.body,
+    )
+  }
+}
+
+///|
+async fn run_live_publication_pull_lifecycle() -> Unit {
+  let pumd = match native_pumd_binary() {
+    Ok(path) => path
+    Err(message) => abort(message)
+  }
+  let directory = @async_fs.tmpdir(prefix="pumd-live-sync-") catch {
+    error =>
+      abort(
+        "could not create live Publication Pull directory: " + error.to_string(),
+      )
+  }
+  let configuration_root = directory + "/config"
+  let markdown_path = directory + "/publication.md"
+  let initial = "# Pumd Publication Pull smoke\n\nPublished Baseline paragraph.\n"
+  @fs.write_string_to_file(markdown_path, initial) catch {
+    @fs.IOError(message) =>
+      abort("could not write live Publication Markdown: " + message)
+  }
+
+  let published = run_live_cli(
+    pumd,
+    ["publish", "--auth=adc", markdown_path],
+    configuration_root,
+  )
+  if published.exit_code != 0 {
+    abort("live publish failed:\n" + published.stderr + published.stdout)
+  }
+  let success = match parse_cli_publish_success(published.stdout) {
+    Some(success) => success
+    None => abort("live publish did not report its Publication identity")
+  }
+  println("REAL GOOGLE DOC CREATED: " + success.url)
+
+  let token = match application_default_access_token() {
+    Ok(token) => token
+    Err(error) => abort(error.user_message())
+  }
+  let http = @google_http.DefaultHttpClient::new()
+  let adc_http = adc_quota_http_client(http, adc_quota_project_id())
+  let client = @google_core.GoogleClient::new(
+    fn() { token },
+    http=Some(adc_http),
+  )
+  let view = match get_document_view(client, success.document_id) {
+    Ok(view) => view
+    Err(error) => abort(error.message())
+  }
+  guard view.tab_ids is [tab_id, ..] else {
+    abort("live Publication document has no Managed Tab")
+  }
+
+  replace_live_remote_paragraph(
+    client,
+    success.document_id,
+    tab_id,
+    "Published Baseline paragraph.\n",
+    "Reviewer clean edit.",
+  )
+  let dry_run = run_live_cli(
+    pumd,
+    ["pull", "--auth=adc", "--dry-run", "--json", markdown_path],
+    configuration_root,
+  )
+  assert_eq(dry_run.exit_code, 0)
+  assert_true(dry_run.stdout.contains("\"dry_run\":true"))
+  assert_true(dry_run.stdout.contains("\"incoming\":1"))
+  assert_eq(@fs.read_file_to_string(markdown_path), initial)
+
+  let pulled = run_live_cli(
+    pumd,
+    ["pull", "--auth=adc", markdown_path],
+    configuration_root,
+  )
+  assert_eq(pulled.exit_code, 0)
+  let clean_source = "# Pumd Publication Pull smoke\n\nReviewer clean edit.\n"
+  assert_eq(@fs.read_file_to_string(markdown_path), clean_source)
+
+  let pre_pull = "# Pumd Publication Pull smoke\n\nAuthor local edit.\n"
+  @fs.write_string_to_file(markdown_path, pre_pull)
+  replace_live_remote_paragraph(
+    client,
+    success.document_id,
+    tab_id,
+    "Reviewer clean edit.\n",
+    "Reviewer conflicting edit.",
+  )
+  let conflicted = run_live_cli(
+    pumd,
+    ["pull", "--auth=adc", markdown_path],
+    configuration_root,
+  )
+  assert_eq(conflicted.exit_code, 1)
+  let marked = @fs.read_file_to_string(markdown_path)
+  assert_true(marked.contains("<<<<<<< local"))
+  assert_true(marked.contains("||||||| baseline"))
+  assert_true(marked.contains("Author local edit."))
+  assert_true(marked.contains("Reviewer clean edit."))
+  assert_true(marked.contains("Reviewer conflicting edit."))
+
+  let conflicted_listing = run_live_cli(
+    pumd,
+    ["list", "--json"],
+    configuration_root,
+  )
+  assert_eq(conflicted_listing.exit_code, 0)
+  assert_true(conflicted_listing.stdout.contains("merge-conflicted"))
+
+  let aborted = run_live_cli(
+    pumd,
+    ["pull", "--abort", markdown_path],
+    configuration_root,
+  )
+  assert_eq(aborted.exit_code, 0)
+  assert_eq(@fs.read_file_to_string(markdown_path), pre_pull)
+
+  let conflicted_again = run_live_cli(
+    pumd,
+    ["pull", "--auth=adc", markdown_path],
+    configuration_root,
+  )
+  if conflicted_again.exit_code != 1 ||
+    !conflicted_again.stdout.contains("pull blocked by Merge Conflicts") {
+    abort(
+      "second live pull did not recreate a Pending Merge:\n" +
+      conflicted_again.stderr +
+      conflicted_again.stdout,
+    )
+  }
+  let resolved_source = "# Pumd Publication Pull smoke\n\nResolved author and reviewer edit.\n"
+  @fs.write_string_to_file(markdown_path, resolved_source)
+  let resolved = run_live_cli(
+    pumd,
+    ["resolve", "--auth=adc", markdown_path],
+    configuration_root,
+  )
+  if resolved.exit_code != 0 {
+    abort("live resolve failed:\n" + resolved.stderr + resolved.stdout)
+  }
+  assert_true(resolved.stdout.contains("Publication updated."))
+  assert_eq(@fs.read_file_to_string(markdown_path), resolved_source)
+
+  let final_document = match get_document(client, success.document_id) {
+    Ok(document) => document
+    Err(error) => abort(error.message())
+  }
+  assert_true(
+    final_document.body.contains("Resolved author and reviewer edit."),
+  )
+  let final_listing = run_live_cli(pumd, ["list", "--json"], configuration_root)
+  assert_eq(final_listing.exit_code, 0)
+  assert_true(final_listing.stdout.contains("\"lifecycle\":\"ready\""))
+  assert_true(!final_listing.stdout.contains("merge-conflicted"))
+  println("Live Publication Pull smoke passed: " + success.url)
+  @async_fs.rmdir(directory, recursive=true) catch {
     _ => ()
   }
 }

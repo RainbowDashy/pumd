@@ -1114,6 +1114,31 @@ pub async fn batch_update_document(
 }
 
 ///|
+/// Populates a recorded Managed Tab without relying on Google Docs' implicit
+/// first-tab routing.
+pub async fn batch_update_document_in_tab(
+  client : @google_core.GoogleClient,
+  document_id : String,
+  tab_id : String,
+  plan : DocsUpdatePlan,
+) -> Result[Unit, DocsAdapterError] {
+  let response = send_post(
+    client,
+    "https://docs.googleapis.com/v1/documents/" + document_id + ":batchUpdate",
+    lower_update_plan(plan, tab_id),
+  )
+  match response {
+    Ok(response) => {
+      let _ = @json.parse(response.body) catch {
+        error => return Err(AdapterDecode(error.to_string()))
+      }
+      Ok(())
+    }
+    Err(error) => Err(error)
+  }
+}
+
+///|
 fn lower_update_plan_with_revision(
   plan : DocsUpdatePlan,
   tab_id : String,

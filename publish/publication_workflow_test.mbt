@@ -403,6 +403,10 @@ async test "registry first publish records baseline after population" {
     fake.requests[1].url,
     content="https://docs.googleapis.com/v1/documents/first-doc:batchUpdate",
   )
+  guard fake.requests[1].body is Some(population_body) else {
+    fail("first population must send a JSON batch")
+  }
+  assert_true(population_body.contains("\"tabId\":\"tab-1\""))
   guard @registry.load_registry_document(directory) is Ok(document) else {
     fail("registry must load")
   }
@@ -474,6 +478,10 @@ async test "registry resumes provisional population" {
   }
   assert_eq(resumed.requests.length(), 1)
   assert_true(resumed.requests[0].url.contains("resume-doc:batchUpdate"))
+  guard resumed.requests[0].body is Some(resume_body) else {
+    fail("resumed population must send a JSON batch")
+  }
+  assert_true(resume_body.contains("\"tabId\":\"tab-r\""))
   guard @registry.load_registry_document(directory) is Ok(after) else {
     fail("registry must load")
   }
