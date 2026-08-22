@@ -73,6 +73,7 @@ fn ready_entry(
     lifecycle: Provisional,
     last_successful_publish: None,
     published_baseline: None,
+    pending_merge: None,
   }
 }
 
@@ -130,7 +131,10 @@ fn write_workflow_paragraph(
   output.write_string(",\"endIndex\":")
   output.write_string(paragraph_end.to_string())
   output.write_string(",\"paragraph\":{\"paragraphStyle\":{\"namedStyleType\":")
-  workflow_json_string(workflow_named_style(paragraph.style.named_style), output)
+  workflow_json_string(
+    workflow_named_style(paragraph.style.named_style),
+    output,
+  )
   output.write_string(",\"lineSpacing\":")
   output.write_string(paragraph.style.line_spacing_percent.to_string())
   output.write_string(",\"spaceAbove\":{\"magnitude\":")
@@ -141,15 +145,22 @@ fn write_workflow_paragraph(
   if include_background {
     match paragraph.style.background_color {
       Some("#F1F3F4") =>
-        output.write_string(",\"shading\":{\"backgroundColor\":{\"color\":{\"rgbColor\":{\"red\":0.9450980392156862,\"green\":0.9529411764705882,\"blue\":0.9568627450980393}}}}")
-      Some(_) => abort("workflow fixture needs an RGB encoding for this paragraph background")
+        output.write_string(
+          ",\"shading\":{\"backgroundColor\":{\"color\":{\"rgbColor\":{\"red\":0.9450980392156862,\"green\":0.9529411764705882,\"blue\":0.9568627450980393}}}}",
+        )
+      Some(_) =>
+        abort(
+          "workflow fixture needs an RGB encoding for this paragraph background",
+        )
       None => ()
     }
   }
   output.write_string("},\"elements\":[")
   let mut cursor = start
   for index, run in paragraph.runs {
-    if index > 0 { output.write_char(',') }
+    if index > 0 {
+      output.write_char(',')
+    }
     let run_end = advance_google_docs_index(index=cursor, text=run.content)
     output.write_string("{\"startIndex\":")
     output.write_string(cursor.to_string())
@@ -173,8 +184,11 @@ fn write_workflow_paragraph(
     // edited before reconciliation considers its foreground-only migration.
     match run.style.background_color {
       Some("#F1F3F4") =>
-        output.write_string(",\"backgroundColor\":{\"color\":{\"rgbColor\":{\"red\":0.9450980392156862,\"green\":0.9529411764705882,\"blue\":0.9568627450980393}}}")
-      Some(_) => abort("workflow fixture needs an RGB encoding for this background")
+        output.write_string(
+          ",\"backgroundColor\":{\"color\":{\"rgbColor\":{\"red\":0.9450980392156862,\"green\":0.9529411764705882,\"blue\":0.9568627450980393}}}",
+        )
+      Some(_) =>
+        abort("workflow fixture needs an RGB encoding for this background")
       None => ()
     }
     match run.link {
@@ -205,26 +219,29 @@ fn docs_response_json_with_implicit_final_newline(
   workflow_json_string(document_id, output)
   output.write_string(",\"revisionId\":")
   workflow_json_string(revision, output)
-  output.write_string(",\"title\":\"Reviewer title\",\"tabs\":[{\"tabProperties\":{\"tabId\":")
+  output.write_string(
+    ",\"title\":\"Reviewer title\",\"tabs\":[{\"tabProperties\":{\"tabId\":",
+  )
   workflow_json_string(tab_id, output)
   output.write_string("},\"documentTab\":{\"body\":{\"content\":[")
   let mut cursor = 1
   for index, element in document.content {
-    if index > 0 { output.write_char(',') }
+    if index > 0 {
+      output.write_char(',')
+    }
     match element {
       @pumd.StructuralElement::Paragraph(paragraph) =>
         cursor = write_workflow_paragraph(
-          paragraph,
-          cursor,
-          output,
-          include_implicit_final_newline,
+          paragraph, cursor, output, include_implicit_final_newline,
         )
       @pumd.StructuralElement::Table(_) =>
         abort("workflow Docs fixture currently supports paragraph documents")
     }
   }
   if include_implicit_final_newline {
-    if !document.content.is_empty() { output.write_char(',') }
+    if !document.content.is_empty() {
+      output.write_char(',')
+    }
     let final_newline : @pumd.Paragraph = {
       runs: [],
       inline_images: [],
@@ -246,11 +263,7 @@ fn docs_response_json(
   tab_id : String,
 ) -> String {
   docs_response_json_with_implicit_final_newline(
-    document,
-    document_id,
-    revision,
-    tab_id,
-    false,
+    document, document_id, revision, tab_id, false,
   )
 }
 
@@ -279,11 +292,7 @@ fn docs_response_with_implicit_final_newline(
     200,
     {},
     docs_response_json_with_implicit_final_newline(
-      document,
-      document_id,
-      revision,
-      tab_id,
-      true,
+      document, document_id, revision, tab_id, true,
     ),
   )
 }
@@ -293,7 +302,9 @@ fn drive_comments_response(unresolved : Int) -> @google_http.HttpResponse {
   let comments = StringBuilder::new()
   comments.write_string("{\"comments\":[")
   for index = 0; index < unresolved; index = index + 1 {
-    if index > 0 { comments.write_char(',') }
+    if index > 0 {
+      comments.write_char(',')
+    }
     comments.write_string("{\"id\":\"c")
     comments.write_string(index.to_string())
     comments.write_string("\",\"resolved\":false}")
@@ -346,10 +357,7 @@ async fn seed_ready_with_baseline(
   )
   assert_eq(
     @registry.commit_ready_publication(
-      directory,
-      canonical,
-      baseline,
-      "2026-08-05T12:00:00Z",
+      directory, canonical, baseline, "2026-08-05T12:00:00Z",
     ),
     Ok(()),
   )
@@ -568,7 +576,9 @@ async test "ready publication with no local changes is a no-op" {
   inspect(success.document_id, content="old-doc")
   assert_eq(calls.length(), 1)
   assert_eq(fake.requests.length(), 1)
-  assert_true(fake.requests[0].url.contains("suggestionsViewMode=SUGGESTIONS_INLINE"))
+  assert_true(
+    fake.requests[0].url.contains("suggestionsViewMode=SUGGESTIONS_INLINE"),
+  )
   clean_workflow_directory(directory)
 }
 
@@ -578,7 +588,9 @@ async test "ready publication updates the baseline with a revision-checked batch
   clean_workflow_directory(directory)
   let baseline = workflow_document("Hello")
   let desired = workflow_document("Updated")
-  seed_ready_with_baseline(directory, "update.md", "update-doc", "update-tab", baseline)
+  seed_ready_with_baseline(
+    directory, "update.md", "update-doc", "update-tab", baseline,
+  )
   let fake = WorkflowFakeHttpClient::{
     requests: [],
     responses: [
@@ -604,7 +616,9 @@ async test "ready publication updates the baseline with a revision-checked batch
   assert_true(timestamp != "2026-08-05T12:00:00Z")
   assert_eq(fake.requests.length(), 3)
   let batch = fake.requests[2].body.unwrap()
-  assert_true(batch.contains("\"writeControl\":{\"requiredRevisionId\":\"rev-update\"}"))
+  assert_true(
+    batch.contains("\"writeControl\":{\"requiredRevisionId\":\"rev-update\"}"),
+  )
   guard @registry.load_registry_document(directory) is Ok(document) else {
     fail("registry must load")
   }
@@ -621,11 +635,15 @@ async test "style migration updates a v2 plain-code baseline to v3 highlighted r
   clean_workflow_directory(directory)
   let desired = workflow_document("```javascript\nconst answer = \"yes\"\n```")
   let baseline = version_two_code_baseline(desired)
-  seed_ready_with_baseline(directory, "migration.md", "migration-doc", "migration-tab", baseline)
+  seed_ready_with_baseline(
+    directory, "migration.md", "migration-doc", "migration-tab", baseline,
+  )
   let fake = WorkflowFakeHttpClient::{
     requests: [],
     responses: [
-      docs_response_with_implicit_final_newline(baseline, "migration-doc", "rev-migration", "migration-tab"),
+      docs_response_with_implicit_final_newline(
+        baseline, "migration-doc", "rev-migration", "migration-tab",
+      ),
       drive_comments_response(0),
       success_response(),
     ],
@@ -651,11 +669,18 @@ async test "style migration updates a v2 plain-code baseline to v3 highlighted r
   assert_true(!batch.contains("weightedFontFamily"))
   assert_true(!batch.contains("\"insertText\""))
   assert_true(!batch.contains("\"deleteContentRange\""))
-  assert_true(batch.contains("\"writeControl\":{\"requiredRevisionId\":\"rev-migration\"}"))
+  assert_true(
+    batch.contains(
+      "\"writeControl\":{\"requiredRevisionId\":\"rev-migration\"}",
+    ),
+  )
   guard @registry.load_registry_document(directory) is Ok(document) else {
     fail("registry must load")
   }
-  assert_eq(@debug.to_string(document.entries[0].published_baseline.unwrap()), @debug.to_string(desired))
+  assert_eq(
+    @debug.to_string(document.entries[0].published_baseline.unwrap()),
+    @debug.to_string(desired),
+  )
   clean_workflow_directory(directory)
 }
 
@@ -666,12 +691,21 @@ async test "style migration preserves remote-only work outside migrated code" {
   let markdown = "Original note\n\n```javascript\nconst answer = \"yes\"\n```"
   let desired = workflow_document(markdown)
   let baseline = version_two_code_baseline(desired)
-  let remote = version_two_code_baseline(workflow_document("Reviewer note\n\n```javascript\nconst answer = \"yes\"\n```"))
-  seed_ready_with_baseline(directory, "migration-remote.md", "migration-remote-doc", "migration-remote-tab", baseline)
+  let remote = version_two_code_baseline(
+    workflow_document(
+      "Reviewer note\n\n```javascript\nconst answer = \"yes\"\n```",
+    ),
+  )
+  seed_ready_with_baseline(
+    directory, "migration-remote.md", "migration-remote-doc", "migration-remote-tab",
+    baseline,
+  )
   let fake = WorkflowFakeHttpClient::{
     requests: [],
     responses: [
-      docs_response_with_implicit_final_newline(remote, "migration-remote-doc", "rev-migration-remote", "migration-remote-tab"),
+      docs_response_with_implicit_final_newline(
+        remote, "migration-remote-doc", "rev-migration-remote", "migration-remote-tab",
+      ),
       drive_comments_response(0),
       success_response(),
     ],
@@ -708,11 +742,21 @@ async test "remote code edit conflicts with a v2-to-v3 style migration" {
   clean_workflow_directory(directory)
   let desired = workflow_document("```javascript\nconst answer = \"yes\"\n```")
   let baseline = version_two_code_baseline(desired)
-  seed_ready_with_baseline(directory, "migration-conflict.md", "migration-conflict-doc", "migration-conflict-tab", baseline)
+  seed_ready_with_baseline(
+    directory, "migration-conflict.md", "migration-conflict-doc", "migration-conflict-tab",
+    baseline,
+  )
   let fake = WorkflowFakeHttpClient::{
     requests: [],
     responses: [
-      docs_response_with_implicit_final_newline(version_two_code_baseline(workflow_document("```javascript\nconst answer = \"reviewed\"\n```")), "migration-conflict-doc", "rev-migration-conflict", "migration-conflict-tab"),
+      docs_response_with_implicit_final_newline(
+        version_two_code_baseline(
+          workflow_document("```javascript\nconst answer = \"reviewed\"\n```"),
+        ),
+        "migration-conflict-doc",
+        "rev-migration-conflict",
+        "migration-conflict-tab",
+      ),
     ],
   }
   guard publish_path_with_registry(
@@ -732,7 +776,10 @@ async test "remote code edit conflicts with a v2-to-v3 style migration" {
   guard @registry.load_registry_document(directory) is Ok(document) else {
     fail("registry must load")
   }
-  assert_eq(@debug.to_string(document.entries[0].published_baseline.unwrap()), @debug.to_string(baseline))
+  assert_eq(
+    @debug.to_string(document.entries[0].published_baseline.unwrap()),
+    @debug.to_string(baseline),
+  )
   clean_workflow_directory(directory)
 }
 
@@ -742,11 +789,15 @@ async test "dry-run plans style migration without mutating the document or regis
   clean_workflow_directory(directory)
   let desired = workflow_document("```javascript\nconst answer = \"yes\"\n```")
   let baseline = version_two_code_baseline(desired)
-  seed_ready_with_baseline(directory, "migration-dry.md", "migration-dry-doc", "migration-dry-tab", baseline)
+  seed_ready_with_baseline(
+    directory, "migration-dry.md", "migration-dry-doc", "migration-dry-tab", baseline,
+  )
   let fake = WorkflowFakeHttpClient::{
     requests: [],
     responses: [
-      docs_response_with_implicit_final_newline(baseline, "migration-dry-doc", "rev-migration-dry", "migration-dry-tab"),
+      docs_response_with_implicit_final_newline(
+        baseline, "migration-dry-doc", "rev-migration-dry", "migration-dry-tab",
+      ),
       drive_comments_response(0),
     ],
   }
@@ -767,11 +818,16 @@ async test "dry-run plans style migration without mutating the document or regis
   assert_eq(report.planned, ["paragraph 1"])
   assert_true(report.concurrency_sensitive)
   assert_eq(fake.requests.length(), 2)
-  for request in fake.requests { assert_true(!request.url.contains(":batchUpdate")) }
+  for request in fake.requests {
+    assert_true(!request.url.contains(":batchUpdate"))
+  }
   guard @registry.load_registry_document(directory) is Ok(document) else {
     fail("registry must load")
   }
-  assert_eq(@debug.to_string(document.entries[0].published_baseline.unwrap()), @debug.to_string(baseline))
+  assert_eq(
+    @debug.to_string(document.entries[0].published_baseline.unwrap()),
+    @debug.to_string(baseline),
+  )
   clean_workflow_directory(directory)
 }
 
@@ -781,11 +837,16 @@ async test "unresolved comments remain a review barrier during style migration" 
   clean_workflow_directory(directory)
   let desired = workflow_document("```javascript\nconst answer = \"yes\"\n```")
   let baseline = version_two_code_baseline(desired)
-  seed_ready_with_baseline(directory, "migration-review.md", "migration-review-doc", "migration-review-tab", baseline)
+  seed_ready_with_baseline(
+    directory, "migration-review.md", "migration-review-doc", "migration-review-tab",
+    baseline,
+  )
   let fake = WorkflowFakeHttpClient::{
     requests: [],
     responses: [
-      docs_response_with_implicit_final_newline(baseline, "migration-review-doc", "rev-migration-review", "migration-review-tab"),
+      docs_response_with_implicit_final_newline(
+        baseline, "migration-review-doc", "rev-migration-review", "migration-review-tab",
+      ),
       drive_comments_response(1),
     ],
   }
@@ -806,7 +867,10 @@ async test "unresolved comments remain a review barrier during style migration" 
   guard @registry.load_registry_document(directory) is Ok(document) else {
     fail("registry must load")
   }
-  assert_eq(@debug.to_string(document.entries[0].published_baseline.unwrap()), @debug.to_string(baseline))
+  assert_eq(
+    @debug.to_string(document.entries[0].published_baseline.unwrap()),
+    @debug.to_string(baseline),
+  )
   clean_workflow_directory(directory)
 }
 
@@ -817,11 +881,16 @@ async test "style migration revision failure leaves the v2 baseline unchanged" {
   let markdown = "```javascript\nconst answer = \"yes\"\n```"
   let desired = workflow_document(markdown)
   let baseline = version_two_code_baseline(desired)
-  seed_ready_with_baseline(directory, "migration-concurrency.md", "migration-concurrency-doc", "migration-concurrency-tab", baseline)
+  seed_ready_with_baseline(
+    directory, "migration-concurrency.md", "migration-concurrency-doc", "migration-concurrency-tab",
+    baseline,
+  )
   let fake = WorkflowFakeHttpClient::{
     requests: [],
     responses: [
-      docs_response_with_implicit_final_newline(baseline, "migration-concurrency-doc", "rev-migration-old", "migration-concurrency-tab"),
+      docs_response_with_implicit_final_newline(
+        baseline, "migration-concurrency-doc", "rev-migration-old", "migration-concurrency-tab",
+      ),
       drive_comments_response(0),
       @google_http.HttpResponse::new(400, {}, "{}"),
     ],
@@ -842,11 +911,18 @@ async test "style migration revision failure leaves the v2 baseline unchanged" {
   assert_eq(fake.requests.length(), 3)
   let batch = fake.requests[2].body.unwrap()
   assert_true(batch.contains("foregroundColor"))
-  assert_true(batch.contains("\"writeControl\":{\"requiredRevisionId\":\"rev-migration-old\"}"))
+  assert_true(
+    batch.contains(
+      "\"writeControl\":{\"requiredRevisionId\":\"rev-migration-old\"}",
+    ),
+  )
   guard @registry.load_registry_document(directory) is Ok(document) else {
     fail("registry must load")
   }
-  assert_eq(@debug.to_string(document.entries[0].published_baseline.unwrap()), @debug.to_string(baseline))
+  assert_eq(
+    @debug.to_string(document.entries[0].published_baseline.unwrap()),
+    @debug.to_string(baseline),
+  )
   clean_workflow_directory(directory)
 }
 
@@ -857,11 +933,16 @@ async test "failed style migration update leaves the v2 baseline unchanged" {
   let markdown = "```javascript\nconst answer = \"yes\"\n```"
   let desired = workflow_document(markdown)
   let baseline = version_two_code_baseline(desired)
-  seed_ready_with_baseline(directory, "migration-failed.md", "migration-failed-doc", "migration-failed-tab", baseline)
+  seed_ready_with_baseline(
+    directory, "migration-failed.md", "migration-failed-doc", "migration-failed-tab",
+    baseline,
+  )
   let fake = WorkflowFakeHttpClient::{
     requests: [],
     responses: [
-      docs_response_with_implicit_final_newline(baseline, "migration-failed-doc", "rev-migration-failed", "migration-failed-tab"),
+      docs_response_with_implicit_final_newline(
+        baseline, "migration-failed-doc", "rev-migration-failed", "migration-failed-tab",
+      ),
       drive_comments_response(0),
       @google_http.HttpResponse::new(500, {}, "{}"),
     ],
@@ -885,7 +966,10 @@ async test "failed style migration update leaves the v2 baseline unchanged" {
   guard @registry.load_registry_document(directory) is Ok(document) else {
     fail("registry must load")
   }
-  assert_eq(@debug.to_string(document.entries[0].published_baseline.unwrap()), @debug.to_string(baseline))
+  assert_eq(
+    @debug.to_string(document.entries[0].published_baseline.unwrap()),
+    @debug.to_string(baseline),
+  )
   clean_workflow_directory(directory)
 }
 
@@ -894,7 +978,9 @@ async test "conflicting ready changes do not write the document or registry" {
   let directory = workflow_directory("conflict")
   clean_workflow_directory(directory)
   let baseline = workflow_document("Hello")
-  seed_ready_with_baseline(directory, "conflict.md", "conflict-doc", "conflict-tab", baseline)
+  seed_ready_with_baseline(
+    directory, "conflict.md", "conflict-doc", "conflict-tab", baseline,
+  )
   let fake = WorkflowFakeHttpClient::{
     requests: [],
     responses: [
@@ -924,7 +1010,10 @@ async test "conflicting ready changes do not write the document or registry" {
   guard @registry.load_registry_document(directory) is Ok(document) else {
     fail("registry must load")
   }
-  assert_eq(@debug.to_string(document.entries[0].published_baseline.unwrap()), @debug.to_string(baseline))
+  assert_eq(
+    @debug.to_string(document.entries[0].published_baseline.unwrap()),
+    @debug.to_string(baseline),
+  )
   clean_workflow_directory(directory)
 }
 
@@ -933,7 +1022,9 @@ async test "unresolved comments block a planned ready update" {
   let directory = workflow_directory("review")
   clean_workflow_directory(directory)
   let baseline = workflow_document("Hello")
-  seed_ready_with_baseline(directory, "review.md", "review-doc", "review-tab", baseline)
+  seed_ready_with_baseline(
+    directory, "review.md", "review-doc", "review-tab", baseline,
+  )
   let fake = WorkflowFakeHttpClient::{
     requests: [],
     responses: [
@@ -963,7 +1054,9 @@ async test "revision conflicts leave the ready baseline unchanged" {
   let directory = workflow_directory("concurrency")
   clean_workflow_directory(directory)
   let baseline = workflow_document("Hello")
-  seed_ready_with_baseline(directory, "concurrency.md", "concurrency-doc", "concurrency-tab", baseline)
+  seed_ready_with_baseline(
+    directory, "concurrency.md", "concurrency-doc", "concurrency-tab", baseline,
+  )
   let fake = WorkflowFakeHttpClient::{
     requests: [],
     responses: [
@@ -989,7 +1082,10 @@ async test "revision conflicts leave the ready baseline unchanged" {
   guard @registry.load_registry_document(directory) is Ok(document) else {
     fail("registry must load")
   }
-  assert_eq(@debug.to_string(document.entries[0].published_baseline.unwrap()), @debug.to_string(baseline))
+  assert_eq(
+    @debug.to_string(document.entries[0].published_baseline.unwrap()),
+    @debug.to_string(baseline),
+  )
   clean_workflow_directory(directory)
 }
 
@@ -1018,7 +1114,9 @@ async test "ambiguous transport recovery commits when the re-read confirms the u
   clean_workflow_directory(directory)
   let baseline = workflow_document("Hello")
   let desired = workflow_document("Local edit")
-  seed_ready_with_baseline(directory, "ambiguous.md", "ambiguous-doc", "ambiguous-tab", baseline)
+  seed_ready_with_baseline(
+    directory, "ambiguous.md", "ambiguous-doc", "ambiguous-tab", baseline,
+  )
   let fake = WorkflowAmbiguousHttpClient::{
     requests: [],
     responses: [
@@ -1057,7 +1155,9 @@ async test "ambiguous transport recovery reports ambiguity when the intended sta
   let directory = workflow_directory("ambiguous-lost")
   clean_workflow_directory(directory)
   let baseline = workflow_document("Hello")
-  seed_ready_with_baseline(directory, "ambiguous.md", "ambiguous-doc", "ambiguous-tab", baseline)
+  seed_ready_with_baseline(
+    directory, "ambiguous.md", "ambiguous-doc", "ambiguous-tab", baseline,
+  )
   let fake = WorkflowAmbiguousHttpClient::{
     requests: [],
     responses: [
@@ -1085,7 +1185,10 @@ async test "ambiguous transport recovery reports ambiguity when the intended sta
   guard @registry.load_registry_document(directory) is Ok(document) else {
     fail("registry must load")
   }
-  assert_eq(@debug.to_string(document.entries[0].published_baseline.unwrap()), @debug.to_string(baseline))
+  assert_eq(
+    @debug.to_string(document.entries[0].published_baseline.unwrap()),
+    @debug.to_string(baseline),
+  )
   clean_workflow_directory(directory)
 }
 
@@ -1094,7 +1197,9 @@ async test "dry-run reports barriers without posting or changing a ready registr
   let directory = workflow_directory("dry-update")
   clean_workflow_directory(directory)
   let baseline = workflow_document("Hello")
-  seed_ready_with_baseline(directory, "dry-update.md", "dry-doc", "dry-tab", baseline)
+  seed_ready_with_baseline(
+    directory, "dry-update.md", "dry-doc", "dry-tab", baseline,
+  )
   let fake = WorkflowFakeHttpClient::{
     requests: [],
     responses: [
@@ -1128,7 +1233,10 @@ async test "dry-run reports barriers without posting or changing a ready registr
   guard @registry.load_registry_document(directory) is Ok(document) else {
     fail("registry must load")
   }
-  assert_eq(@debug.to_string(document.entries[0].published_baseline.unwrap()), @debug.to_string(baseline))
+  assert_eq(
+    @debug.to_string(document.entries[0].published_baseline.unwrap()),
+    @debug.to_string(baseline),
+  )
   clean_workflow_directory(directory)
 }
 
@@ -1499,11 +1607,14 @@ async test "pull writes source before advancing baseline and never writes Google
   clean_workflow_directory(directory)
   let baseline = workflow_document("Original")
   let remote = workflow_document("Reviewer wording")
-  seed_ready_with_baseline(directory, "pull-clean.md", "pull-doc", "pull-tab", baseline)
+  seed_ready_with_baseline(
+    directory, "pull-clean.md", "pull-doc", "pull-tab", baseline,
+  )
   let source = ["Original"]
   let replacement_observed_old_baseline = [false]
-  let registry_before =
-    (@async_fs.read_file(@registry.registry_file_path(directory))).text()
+  let registry_before = @async_fs.read_file(
+    @registry.registry_file_path(directory),
+  ).text()
   let docs = WorkflowFakeHttpClient::{
     requests: [],
     responses: [docs_response(remote, "pull-doc", "rev-pull", "pull-tab")],
@@ -1512,8 +1623,9 @@ async test "pull writes source before advancing baseline and never writes Google
       "pull-clean.md",
       fn(_) { Ok(source[0]) },
       async fn(_, replacement) {
-        replacement_observed_old_baseline[0] =
-          (@async_fs.read_file(@registry.registry_file_path(directory))).text() ==
+        replacement_observed_old_baseline[0] = @async_fs.read_file(
+            @registry.registry_file_path(directory),
+          ).text() ==
           registry_before
         source[0] = replacement
         Ok(())
@@ -1524,7 +1636,8 @@ async test "pull writes source before advancing baseline and never writes Google
       fn() { Ok("adc") },
       docs,
       false,
-    ) is Ok(Pulled(report)) else {
+    )
+    is Ok(Pulled(report)) else {
     fail("clean pull must complete")
   }
   assert_eq(source[0], "Reviewer wording")
@@ -1546,83 +1659,148 @@ async test "pull dry run performs the full read and plan without local mutation"
   let directory = workflow_directory("pull-dry-run")
   clean_workflow_directory(directory)
   let baseline = workflow_document("Original")
-  seed_ready_with_baseline(directory, "pull-dry.md", "pull-dry-doc", "pull-dry-tab", baseline)
-  let before = (@async_fs.read_file(@registry.registry_file_path(directory))).text()
+  seed_ready_with_baseline(
+    directory, "pull-dry.md", "pull-dry-doc", "pull-dry-tab", baseline,
+  )
+  let before = @async_fs.read_file(@registry.registry_file_path(directory)).text()
   let writes : Array[String] = []
   let docs = WorkflowFakeHttpClient::{
     requests: [],
-    responses: [docs_response(workflow_document("Incoming"), "pull-dry-doc", "rev-dry", "pull-dry-tab")],
+    responses: [
+      docs_response(
+        workflow_document("Incoming"),
+        "pull-dry-doc",
+        "rev-dry",
+        "pull-dry-tab",
+      ),
+    ],
   }
   guard pull_path_with_registry(
       "pull-dry.md",
       fn(_) { Ok("Original") },
-      fn(_, replacement) { writes.push(replacement); Ok(()) },
+      fn(_, replacement) {
+        writes.push(replacement)
+        Ok(())
+      },
       directory,
       Adc,
       fn() { Ok("project") },
       fn() { Ok("adc") },
       docs,
       true,
-    ) is Ok(PullDryRun(report)) else {
+    )
+    is Ok(PullDryRun(report)) else {
     fail("dry-run pull must return its plan")
   }
   assert_eq(report.plan.incoming, 1)
   assert_eq(writes.length(), 0)
   assert_eq(docs.requests.length(), 1)
-  assert_eq((@async_fs.read_file(@registry.registry_file_path(directory))).text(), before)
+  assert_eq(
+    @async_fs.read_file(@registry.registry_file_path(directory)).text(),
+    before,
+  )
   clean_workflow_directory(directory)
 }
 
 ///|
-async test "pull preserves disjoint local changes and reports overlap without mutation" {
+async test "pull preserves disjoint local changes and persists Pending Merge before writing diff3 markers" {
   let directory = workflow_directory("pull-three-way")
   clean_workflow_directory(directory)
   let baseline = workflow_document("Base\n\nKeep")
-  seed_ready_with_baseline(directory, "pull-merge.md", "pull-merge-doc", "pull-merge-tab", baseline)
+  seed_ready_with_baseline(
+    directory, "pull-merge.md", "pull-merge-doc", "pull-merge-tab", baseline,
+  )
   let source = ["Local\n\nKeep"]
   let writes : Array[String] = []
   let disjoint = WorkflowFakeHttpClient::{
     requests: [],
-    responses: [docs_response(workflow_document("Base\n\nRemote"), "pull-merge-doc", "rev-merge", "pull-merge-tab")],
+    responses: [
+      docs_response(
+        workflow_document("Base\n\nRemote"),
+        "pull-merge-doc",
+        "rev-merge",
+        "pull-merge-tab",
+      ),
+    ],
   }
   guard pull_path_with_registry(
       "pull-merge.md",
       fn(_) { Ok(source[0]) },
-      fn(_, replacement) { source[0] = replacement; writes.push(replacement); Ok(()) },
+      fn(_, replacement) {
+        source[0] = replacement
+        writes.push(replacement)
+        Ok(())
+      },
       directory,
       Adc,
       fn() { Ok("project") },
       fn() { Ok("adc") },
       disjoint,
       false,
-    ) is Ok(Pulled(report)) else {
+    )
+    is Ok(Pulled(report)) else {
     fail("disjoint pull must merge")
   }
   assert_eq(source[0], "Local\n\nRemote")
   assert_eq(report.plan.incoming, 1)
   assert_eq(report.plan.preserved_local, 1)
 
-  let registry_before_conflict = (@async_fs.read_file(@registry.registry_file_path(directory))).text()
+  let registry_before_conflict = @async_fs.read_file(
+    @registry.registry_file_path(directory),
+  ).text()
+  let replacement_observed_pending = [false]
   let conflicting = WorkflowFakeHttpClient::{
     requests: [],
-    responses: [docs_response(workflow_document("Reviewer\n\nRemote"), "pull-merge-doc", "rev-conflict", "pull-merge-tab")],
+    responses: [
+      docs_response(
+        workflow_document("Reviewer\n\nRemote"),
+        "pull-merge-doc",
+        "rev-conflict",
+        "pull-merge-tab",
+      ),
+    ],
   }
   guard pull_path_with_registry(
       "pull-merge.md",
       fn(_) { Ok("Author\n\nRemote") },
-      fn(_, replacement) { writes.push(replacement); Ok(()) },
+      async fn(_, replacement) {
+        replacement_observed_pending[0] = @registry.load_registry_document(
+            directory,
+          ).unwrap().entries[0].pending_merge
+          is Some(_)
+        writes.push(replacement)
+        Ok(())
+      },
       directory,
       Adc,
       fn() { Ok("project") },
       fn() { Ok("adc") },
       conflicting,
       false,
-    ) is Ok(PullConflicted(conflict_report)) else {
+    )
+    is Ok(PullConflicted(conflict_report)) else {
     fail("overlap must be reported")
   }
   assert_eq(conflict_report.plan.conflicted, 1)
-  assert_eq(writes.length(), 1)
-  assert_eq((@async_fs.read_file(@registry.registry_file_path(directory))).text(), registry_before_conflict)
+  assert_eq(writes.length(), 2)
+  assert_true(
+    writes[1].contains(
+      "<<<<<<< local\nAuthor\n||||||| baseline\nBase\n=======\nReviewer\n>>>>>>> remote",
+    ),
+  )
+  assert_true(replacement_observed_pending[0])
+  let conflicted_entry = @registry.registry_snapshot(directory).unwrap().entries[0]
+  guard conflicted_entry.pending_merge is Some(pending) else {
+    fail("overlap must record a Pending Merge")
+  }
+  assert_eq(pending.pre_pull_source, "Author\n\nRemote")
+  assert_eq(pending.marked_source, conflict_report.plan.source)
+  assert_eq(pending.observed_revision_id, "rev-conflict")
+  assert_true(pending.observed_remote_body.contains("Reviewer"))
+  assert_true(
+    @async_fs.read_file(@registry.registry_file_path(directory)).text() !=
+    registry_before_conflict,
+  )
   clean_workflow_directory(directory)
 }
 
@@ -1640,19 +1818,30 @@ async test "pull retry after interrupted baseline persistence converges without 
   let writes : Array[String] = []
   let docs = WorkflowFakeHttpClient::{
     requests: [],
-    responses: [docs_response(workflow_document("Landed"), "pull-retry-doc", "rev-retry", "pull-retry-tab")],
+    responses: [
+      docs_response(
+        workflow_document("Landed"),
+        "pull-retry-doc",
+        "rev-retry",
+        "pull-retry-tab",
+      ),
+    ],
   }
   guard pull_path_with_registry(
       "pull-retry.md",
       fn(_) { Ok("Landed") },
-      fn(_, replacement) { writes.push(replacement); Ok(()) },
+      fn(_, replacement) {
+        writes.push(replacement)
+        Ok(())
+      },
       directory,
       Adc,
       fn() { Ok("project") },
       fn() { Ok("adc") },
       docs,
       false,
-    ) is Ok(Pulled(report)) else {
+    )
+    is Ok(Pulled(report)) else {
     fail("converged retry must finish baseline persistence")
   }
   assert_eq(report.plan.converged, 1)
@@ -1666,22 +1855,505 @@ async test "pull retry after interrupted baseline persistence converges without 
 }
 
 ///|
+async test "pull abort restores exact pre-pull bytes before clearing Pending Merge and is retryable" {
+  let directory = workflow_directory("pull-abort")
+  clean_workflow_directory(directory)
+  seed_ready_with_baseline(
+    directory,
+    "pull-abort.md",
+    "pull-abort-doc",
+    "pull-abort-tab",
+    workflow_document("Base"),
+  )
+  let canonical = @registry.canonical_source_path("pull-abort.md")
+  let document = @registry.registry_snapshot(directory).unwrap()
+  let pre_pull_source = "Local\r\n\r\nExact bytes\r\n"
+  let marked = "<<<<<<< local\r\nLocal\r\n||||||| baseline\r\nBase\r\n=======\r\nRemote\r\n>>>>>>> remote\r\n"
+  let pending : @registry.PendingMerge = {
+    pre_pull_source,
+    marked_source: marked,
+    observed_remote_body: docs_response_json(
+      workflow_document("Remote"),
+      "pull-abort-doc",
+      "rev-abort",
+      "pull-abort-tab",
+    ),
+    observed_revision_id: "rev-abort",
+  }
+  let begun = @registry.document_with_pending_merge(
+    document, canonical, pending,
+  ).unwrap()
+  assert_eq(@registry.save_registry_document(directory, begun), Ok(()))
+  let source = [marked]
+  guard abort_pull_with_registry(
+      "pull-abort.md",
+      fn(_, replacement) {
+        source[0] = replacement
+        Err("simulated interruption after replacement")
+      },
+      directory,
+    )
+    is Err(SourceWrite(..)) else {
+    fail("an interrupted abort must retain its Pending Merge")
+  }
+  assert_eq(source[0], pre_pull_source)
+  assert_true(
+    @registry.registry_snapshot(directory).unwrap().entries[0].pending_merge
+    is Some(_),
+  )
+  guard abort_pull_with_registry(
+      "pull-abort.md",
+      fn(_, replacement) {
+        source[0] = replacement
+        Ok(())
+      },
+      directory,
+    )
+    is Ok(_) else {
+    fail("a retried abort must clear Pending Merge")
+  }
+  assert_eq(source[0], pre_pull_source)
+  assert_eq(
+    @registry.registry_snapshot(directory).unwrap().entries[0].pending_merge,
+    None,
+  )
+  clean_workflow_directory(directory)
+}
+
+///|
+async test "resolve requires Pending Merge and rejects remaining conflict markers before authorization" {
+  let directory = workflow_directory("resolve-markers")
+  clean_workflow_directory(directory)
+  seed_ready_with_baseline(
+    directory,
+    "resolve-markers.md",
+    "resolve-markers-doc",
+    "resolve-markers-tab",
+    workflow_document("Base"),
+  )
+  let canonical = @registry.canonical_source_path("resolve-markers.md")
+  let document = @registry.registry_snapshot(directory).unwrap()
+  let marked = "<<<<<<< local\nLocal\n||||||| baseline\nBase\n=======\nRemote\n>>>>>>> remote\n"
+  let pending : @registry.PendingMerge = {
+    pre_pull_source: "Local\n",
+    marked_source: marked,
+    observed_remote_body: docs_response_json(
+      workflow_document("Remote"),
+      "resolve-markers-doc",
+      "rev-markers",
+      "resolve-markers-tab",
+    ),
+    observed_revision_id: "rev-markers",
+  }
+  assert_eq(
+    @registry.save_registry_document(
+      directory,
+      @registry.document_with_pending_merge(document, canonical, pending).unwrap(),
+    ),
+    Ok(()),
+  )
+  let fake = WorkflowFakeHttpClient::{ requests: [], responses: [] }
+  let token_calls = [0]
+  guard publish_path_with_registry(
+      "resolve-markers.md",
+      fn(_) { Ok("Resolved") },
+      directory,
+      Adc,
+      fn() {
+        token_calls[0] = token_calls[0] + 1
+        Ok("project")
+      },
+      fn() {
+        token_calls[0] = token_calls[0] + 1
+        Ok("adc")
+      },
+      fake,
+      false,
+    )
+    is Err(Registry(message)) else {
+    fail("publish must be blocked by Pending Merge")
+  }
+  assert_true(message.contains("Pending Merge"))
+  guard pull_path_with_registry(
+      "resolve-markers.md",
+      fn(_) { Ok("Resolved") },
+      fn(_, _) { Ok(()) },
+      directory,
+      Adc,
+      fn() {
+        token_calls[0] = token_calls[0] + 1
+        Ok("project")
+      },
+      fn() {
+        token_calls[0] = token_calls[0] + 1
+        Ok("adc")
+      },
+      fake,
+      false,
+    )
+    is Err(Registry(pull_message)) else {
+    fail("normal pull must be blocked by Pending Merge")
+  }
+  assert_true(pull_message.contains("Pending Merge"))
+  guard resolve_path_with_registry(
+      "resolve-markers.md",
+      fn(_) { Ok(marked) },
+      directory,
+      Adc,
+      fn() {
+        token_calls[0] = token_calls[0] + 1
+        Ok("project")
+      },
+      fn() {
+        token_calls[0] = token_calls[0] + 1
+        Ok("adc")
+      },
+      fake,
+    )
+    is Err(Planning(message)) else {
+    fail("resolve must reject remaining markers")
+  }
+  assert_true(message.contains("conflict markers"))
+  assert_eq(token_calls[0], 0)
+  assert_eq(fake.requests.length(), 0)
+  assert_true(
+    @registry.registry_snapshot(directory).unwrap().entries[0].pending_merge
+    is Some(_),
+  )
+  clean_workflow_directory(directory)
+}
+
+///|
+async test "resolve revision-checks the edited resolution then advances baseline and clears Pending Merge" {
+  let directory = workflow_directory("resolve-success")
+  clean_workflow_directory(directory)
+  let baseline = workflow_document("Base")
+  let remote = workflow_document("Remote")
+  let resolved = workflow_document("Resolved")
+  seed_ready_with_baseline(
+    directory, "resolve-success.md", "resolve-success-doc", "resolve-success-tab",
+    baseline,
+  )
+  let canonical = @registry.canonical_source_path("resolve-success.md")
+  let document = @registry.registry_snapshot(directory).unwrap()
+  let remote_body = docs_response_json(
+    remote, "resolve-success-doc", "rev-resolve", "resolve-success-tab",
+  )
+  let pending : @registry.PendingMerge = {
+    pre_pull_source: "Local\n",
+    marked_source: "marked",
+    observed_remote_body: remote_body,
+    observed_revision_id: "rev-resolve",
+  }
+  assert_eq(
+    @registry.save_registry_document(
+      directory,
+      @registry.document_with_pending_merge(document, canonical, pending).unwrap(),
+    ),
+    Ok(()),
+  )
+  let fake = WorkflowFakeHttpClient::{
+    requests: [],
+    responses: [
+      docs_response(
+        remote, "resolve-success-doc", "rev-resolve", "resolve-success-tab",
+      ),
+      drive_comments_response(0),
+      success_response(),
+    ],
+  }
+  guard resolve_path_with_registry(
+      "resolve-success.md",
+      fn(_) { Ok("Resolved") },
+      directory,
+      Adc,
+      fn() { Ok("project") },
+      fn() { Ok("adc") },
+      fake,
+    )
+    is Ok(Updated(success, _)) else {
+    fail("a valid edited resolution must update Google Docs")
+  }
+  assert_eq(success.document_id, "resolve-success-doc")
+  assert_eq(fake.requests.length(), 3)
+  assert_true(fake.requests[2].url.contains(":batchUpdate"))
+  assert_true(fake.requests[2].body.unwrap().contains("rev-resolve"))
+  let entry = @registry.registry_snapshot(directory).unwrap().entries[0]
+  assert_eq(entry.pending_merge, None)
+  assert_eq(
+    @debug.to_string(entry.published_baseline),
+    @debug.to_string(Some(resolved)),
+  )
+  clean_workflow_directory(directory)
+}
+
+///|
+async test "resolve retains Pending Merge for stale remote state and unresolved comments" {
+  let directory = workflow_directory("resolve-blocked")
+  clean_workflow_directory(directory)
+  let baseline = workflow_document("Base")
+  let remote = workflow_document("Remote")
+  seed_ready_with_baseline(
+    directory, "resolve-blocked.md", "resolve-blocked-doc", "resolve-blocked-tab",
+    baseline,
+  )
+  let canonical = @registry.canonical_source_path("resolve-blocked.md")
+  let document = @registry.registry_snapshot(directory).unwrap()
+  let pending : @registry.PendingMerge = {
+    pre_pull_source: "Local",
+    marked_source: "marked",
+    observed_remote_body: docs_response_json(
+      remote, "resolve-blocked-doc", "rev-observed", "resolve-blocked-tab",
+    ),
+    observed_revision_id: "rev-observed",
+  }
+  assert_eq(
+    @registry.save_registry_document(
+      directory,
+      @registry.document_with_pending_merge(document, canonical, pending).unwrap(),
+    ),
+    Ok(()),
+  )
+  let stale = WorkflowFakeHttpClient::{
+    requests: [],
+    responses: [
+      docs_response(
+        workflow_document("Unexpected"),
+        "resolve-blocked-doc",
+        "rev-new",
+        "resolve-blocked-tab",
+      ),
+    ],
+  }
+  guard resolve_path_with_registry(
+      "resolve-blocked.md",
+      fn(_) { Ok("Resolved") },
+      directory,
+      Adc,
+      fn() { Ok("project") },
+      fn() { Ok("adc") },
+      stale,
+    )
+    is Err(Concurrency(_)) else {
+    fail("stale remote state must block resolve")
+  }
+  assert_eq(stale.requests.length(), 1)
+  let stale_noop = WorkflowFakeHttpClient::{
+    requests: [],
+    responses: [
+      docs_response(
+        workflow_document("Unexpected"),
+        "resolve-blocked-doc",
+        "rev-newer",
+        "resolve-blocked-tab",
+      ),
+    ],
+  }
+  guard resolve_path_with_registry(
+      "resolve-blocked.md",
+      fn(_) { Ok("Remote") },
+      directory,
+      Adc,
+      fn() { Ok("project") },
+      fn() { Ok("adc") },
+      stale_noop,
+    ) is Err(Concurrency(_)) else {
+    fail("a no-write resolution must still reject incompatible stale state")
+  }
+  assert_eq(stale_noop.requests.length(), 1)
+  let comments = WorkflowFakeHttpClient::{
+    requests: [],
+    responses: [
+      docs_response(
+        remote, "resolve-blocked-doc", "rev-observed", "resolve-blocked-tab",
+      ),
+      drive_comments_response(1),
+    ],
+  }
+  guard resolve_path_with_registry(
+      "resolve-blocked.md",
+      fn(_) { Ok("Resolved") },
+      directory,
+      Adc,
+      fn() { Ok("project") },
+      fn() { Ok("adc") },
+      comments,
+    )
+    is Err(ReviewBarrier(unresolved=1)) else {
+    fail("unresolved comments must block resolve")
+  }
+  assert_eq(comments.requests.length(), 2)
+  assert_true(
+    @registry.registry_snapshot(directory).unwrap().entries[0].pending_merge
+    is Some(_),
+  )
+  clean_workflow_directory(directory)
+}
+
+///|
+async test "resolve diagnoses ambiguous updates and retries an already-landed resolution idempotently" {
+  let directory = workflow_directory("resolve-ambiguous")
+  clean_workflow_directory(directory)
+  let baseline = workflow_document("Base")
+  let remote = workflow_document("Remote")
+  let resolved = workflow_document("Resolved")
+  seed_ready_with_baseline(
+    directory, "resolve-ambiguous.md", "resolve-ambiguous-doc", "resolve-ambiguous-tab",
+    baseline,
+  )
+  let canonical = @registry.canonical_source_path("resolve-ambiguous.md")
+  let observed_body = docs_response_json(
+    remote, "resolve-ambiguous-doc", "rev-before", "resolve-ambiguous-tab",
+  )
+  let pending : @registry.PendingMerge = {
+    pre_pull_source: "Local",
+    marked_source: "marked",
+    observed_remote_body: observed_body,
+    observed_revision_id: "rev-before",
+  }
+  let document = @registry.registry_snapshot(directory).unwrap()
+  assert_eq(
+    @registry.save_registry_document(
+      directory,
+      @registry.document_with_pending_merge(document, canonical, pending).unwrap(),
+    ),
+    Ok(()),
+  )
+  let ambiguous = WorkflowAmbiguousHttpClient::{
+    requests: [],
+    responses: [
+      docs_response(
+        remote, "resolve-ambiguous-doc", "rev-before", "resolve-ambiguous-tab",
+      ),
+      drive_comments_response(0),
+      success_response(),
+      docs_response(
+        resolved, "resolve-ambiguous-doc", "rev-after", "resolve-ambiguous-tab",
+      ),
+    ],
+  }
+  guard resolve_path_with_registry(
+      "resolve-ambiguous.md",
+      fn(_) { Ok("Resolved") },
+      directory,
+      Adc,
+      fn() { Ok("project") },
+      fn() { Ok("adc") },
+      ambiguous,
+    )
+    is Ok(Updated(_, _)) else {
+    fail("a reread-confirmed ambiguous resolve must commit")
+  }
+  assert_eq(ambiguous.requests.length(), 4)
+  let committed = @registry.registry_snapshot(directory).unwrap()
+  assert_eq(committed.entries[0].pending_merge, None)
+  let interrupted : @registry.RegistryDocument = {
+    entries: [{ ..committed.entries[0], pending_merge: Some(pending) }],
+  }
+  assert_eq(@registry.save_registry_document(directory, interrupted), Ok(()))
+  let retry = WorkflowFakeHttpClient::{
+    requests: [],
+    responses: [
+      docs_response(
+        resolved, "resolve-ambiguous-doc", "rev-after", "resolve-ambiguous-tab",
+      ),
+      drive_comments_response(0),
+    ],
+  }
+  guard resolve_path_with_registry(
+      "resolve-ambiguous.md",
+      fn(_) { Ok("Resolved") },
+      directory,
+      Adc,
+      fn() { Ok("project") },
+      fn() { Ok("adc") },
+      retry,
+    )
+    is Ok(Updated(_, _)) else {
+    fail("an already-landed resolution must finish without another write")
+  }
+  assert_eq(retry.requests.length(), 2)
+  for request in retry.requests {
+    assert_true(!request.url.contains(":batchUpdate"))
+  }
+  assert_eq(
+    @registry.registry_snapshot(directory).unwrap().entries[0].pending_merge,
+    None,
+  )
+  clean_workflow_directory(directory)
+}
+
+///|
+async test "resolve blocks an unresolved suggestion overlapping the edited resolution" {
+  let directory = workflow_directory("resolve-suggestion")
+  clean_workflow_directory(directory)
+  let baseline = workflow_document("Base")
+  let remote = workflow_document("Remote")
+  seed_ready_with_baseline(
+    directory, "resolve-suggestion.md", "resolve-suggestion-doc", "resolve-suggestion-tab",
+    baseline,
+  )
+  let canonical = @registry.canonical_source_path("resolve-suggestion.md")
+  let body = docs_response_json(
+    remote, "resolve-suggestion-doc", "rev-suggestion", "resolve-suggestion-tab",
+  ).replace_all(
+    old="\"textRun\":{\"content\":\"Remote\"",
+    new="\"textRun\":{\"content\":\"Remote\",\"suggestedDeletionIds\":[\"s-1\"]",
+  )
+  let pending : @registry.PendingMerge = {
+    pre_pull_source: "Local",
+    marked_source: "marked",
+    observed_remote_body: body,
+    observed_revision_id: "rev-suggestion",
+  }
+  let document = @registry.registry_snapshot(directory).unwrap()
+  assert_eq(
+    @registry.save_registry_document(
+      directory,
+      @registry.document_with_pending_merge(document, canonical, pending).unwrap(),
+    ),
+    Ok(()),
+  )
+  let fake = WorkflowFakeHttpClient::{ requests: [], responses: [] }
+  let token_calls = [0]
+  guard resolve_path_with_registry(
+      "resolve-suggestion.md",
+      fn(_) { Ok("Resolved") },
+      directory,
+      Adc,
+      fn() {
+        token_calls[0] = token_calls[0] + 1
+        Ok("project")
+      },
+      fn() {
+        token_calls[0] = token_calls[0] + 1
+        Ok("adc")
+      },
+      fake,
+    )
+    is Err(MergeConflict(_)) else {
+    fail("an overlapping unresolved suggestion must block resolve")
+  }
+  assert_eq(token_calls[0], 0)
+  assert_eq(fake.requests.length(), 0)
+  assert_true(
+    @registry.registry_snapshot(directory).unwrap().entries[0].pending_merge
+    is Some(_),
+  )
+  clean_workflow_directory(directory)
+}
+
+///|
 async test "pull suggestions stay remote-only and do not inspect comments" {
   let directory = workflow_directory("pull-suggestion")
   clean_workflow_directory(directory)
   let baseline = workflow_document("Original")
   seed_ready_with_baseline(
-    directory,
-    "pull-suggestion.md",
-    "pull-suggestion-doc",
-    "pull-suggestion-tab",
+    directory, "pull-suggestion.md", "pull-suggestion-doc", "pull-suggestion-tab",
     baseline,
   )
   let body = docs_response_json(
-    baseline,
-    "pull-suggestion-doc",
-    "rev-suggestion",
-    "pull-suggestion-tab",
+    baseline, "pull-suggestion-doc", "rev-suggestion", "pull-suggestion-tab",
   ).replace_all(
     old="\"textRun\":{\"content\":\"Original\"",
     new="\"textRun\":{\"content\":\"Original\",\"suggestedDeletionIds\":[\"s-1\"]",
@@ -1694,14 +2366,18 @@ async test "pull suggestions stay remote-only and do not inspect comments" {
   guard pull_path_with_registry(
       "pull-suggestion.md",
       fn(_) { Ok("Original") },
-      fn(_, replacement) { writes.push(replacement); Ok(()) },
+      fn(_, replacement) {
+        writes.push(replacement)
+        Ok(())
+      },
       directory,
       Adc,
       fn() { Ok("project") },
       fn() { Ok("adc") },
       docs,
       false,
-    ) is Ok(PullNoOp(report)) else {
+    )
+    is Ok(PullNoOp(report)) else {
     fail("a suggested unit must be skipped without blocking pure pull")
   }
   assert_eq(report.plan.skipped, 1)
@@ -1715,7 +2391,9 @@ async test "pull suggestions stay remote-only and do not inspect comments" {
 async test "pull keeps missing documents and Managed Tabs fail closed" {
   let directory = workflow_directory("pull-missing")
   clean_workflow_directory(directory)
-  seed_ready(directory, "pull-missing.md", "pull-missing-doc", "pull-missing-tab")
+  seed_ready(
+    directory, "pull-missing.md", "pull-missing-doc", "pull-missing-tab",
+  )
   let writes : Array[String] = []
   let missing_document = WorkflowFakeHttpClient::{
     requests: [],
@@ -1724,35 +2402,45 @@ async test "pull keeps missing documents and Managed Tabs fail closed" {
   guard pull_path_with_registry(
       "pull-missing.md",
       fn(_) { Ok("Hello") },
-      fn(_, replacement) { writes.push(replacement); Ok(()) },
+      fn(_, replacement) {
+        writes.push(replacement)
+        Ok(())
+      },
       directory,
       Adc,
       fn() { Ok("project") },
       fn() { Ok("adc") },
       missing_document,
       false,
-    ) is Err(RemoteMissing(..)) else {
+    )
+    is Err(RemoteMissing(..)) else {
     fail("missing document must fail closed")
   }
   let missing_tab = WorkflowFakeHttpClient::{
     requests: [],
-    responses: [@google_http.HttpResponse::new(
-      200,
-      {},
-      "{\"documentId\":\"pull-missing-doc\",\"revisionId\":\"rev\",\"tabs\":[]}",
-    )],
+    responses: [
+      @google_http.HttpResponse::new(
+        200,
+        {},
+        "{\"documentId\":\"pull-missing-doc\",\"revisionId\":\"rev\",\"tabs\":[]}",
+      ),
+    ],
   }
   guard pull_path_with_registry(
       "pull-missing.md",
       fn(_) { Ok("Hello") },
-      fn(_, replacement) { writes.push(replacement); Ok(()) },
+      fn(_, replacement) {
+        writes.push(replacement)
+        Ok(())
+      },
       directory,
       Adc,
       fn() { Ok("project") },
       fn() { Ok("adc") },
       missing_tab,
       false,
-    ) is Err(RemoteMissing(..)) else {
+    )
+    is Err(RemoteMissing(..)) else {
     fail("missing Managed Tab must fail closed")
   }
   assert_eq(writes.length(), 0)
@@ -1769,6 +2457,7 @@ async test "listing JSON is deterministic and refresh adds matching inspection" 
     lifecycle: Blocked,
     last_successful_publish: None,
     published_baseline: None,
+    pending_merge: None,
   }
   let ready = ready_entry("a.md", "a-doc", "a-tab")
   let document : @registry.RegistryDocument = { entries: [blocked, ready] }
@@ -1790,6 +2479,23 @@ async test "listing JSON is deterministic and refresh adds matching inspection" 
   assert_true(refreshed.contains("\"title\":\"Remote\""))
   assert_true(refreshed.contains("\"remote_status\":\"ready\""))
   assert_true(!refreshed.contains("\"title\":null"))
+  let conflicted : @registry.PublicationEntry = {
+    ..ready,
+    lifecycle: Ready,
+    last_successful_publish: Some("before"),
+    published_baseline: Some(workflow_document("Base")),
+    pending_merge: Some({
+      pre_pull_source: "Local",
+      marked_source: "marked",
+      observed_remote_body: "body",
+      observed_revision_id: "rev",
+    }),
+  }
+  assert_true(
+    publication_list_json({ entries: [conflicted] }, fn(_) { false }).contains(
+      "\"lifecycle\":\"merge-conflicted\"",
+    ),
+  )
 }
 
 ///|

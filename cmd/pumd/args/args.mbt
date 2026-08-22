@@ -76,6 +76,8 @@ pub(all) struct ListOptions {
 pub enum Command {
   Publish(String, Authorization, Bool)
   Pull(String, Authorization, Bool, Bool)
+  PullAbort(String)
+  Resolve(String, Authorization)
   List(ListOptions)
   Move(String, String)
   Forget(String)
@@ -91,7 +93,12 @@ fn publish_usage() -> String {
 
 ///|
 fn pull_usage() -> String {
-  "Project Authorization usage: pumd pull [--dry-run] [--json] [--auth=project|adc|token-env] [--credential-store=native|file] <markdown-path>"
+  "Project Authorization usage: pumd pull [--dry-run] [--json] [--auth=project|adc|token-env] [--credential-store=native|file] <markdown-path>; pumd pull --abort <markdown-path>"
+}
+
+///|
+fn resolve_usage() -> String {
+  "Project Authorization usage: pumd resolve [--auth=project|adc|token-env] [--credential-store=native|file] <markdown-path>"
 }
 
 ///|
@@ -126,7 +133,7 @@ fn logout_usage() -> String {
 
 ///|
 fn command_usage() -> String {
-  "Project Authorization usage: pumd publish [--dry-run] [--auth=project|adc|token-env] [--credential-store=native|file] <markdown-path>; pumd pull [--dry-run] [--json] [--auth=project|adc|token-env] [--credential-store=native|file] <markdown-path>; pumd list [--json] [--refresh]; pumd move <old-path> <new-path>; pumd forget <path>; pumd auth <setup|status|logout>"
+  "Project Authorization usage: pumd publish [--dry-run] [--auth=project|adc|token-env] [--credential-store=native|file] <markdown-path>; pumd pull [--dry-run] [--json] [--auth=project|adc|token-env] [--credential-store=native|file] <markdown-path>; pumd pull --abort <markdown-path>; pumd resolve [--auth=project|adc|token-env] [--credential-store=native|file] <markdown-path>; pumd list [--json] [--refresh]; pumd move <old-path> <new-path>; pumd forget <path>; pumd auth <setup|status|logout>"
 }
 
 ///|
@@ -155,13 +162,15 @@ fn parse_publish_options(
       None => Err(publish_usage())
       Some(path) =>
         match (authorization, credential_store) {
-          (None, None) => Ok(Publish(path, Project(RememberedOrNative), dry_run))
+          (None, None) =>
+            Ok(Publish(path, Project(RememberedOrNative), dry_run))
           (Some(Project(_)), None) =>
             Ok(Publish(path, Project(RememberedOrNative), dry_run))
           (Some(Adc), None) => Ok(Publish(path, Adc, dry_run))
           (Some(AccessTokenEnvironment), None) =>
             Ok(Publish(path, AccessTokenEnvironment, dry_run))
-          (None, Some(store)) => Ok(Publish(path, Project(Explicit(store)), dry_run))
+          (None, Some(store)) =>
+            Ok(Publish(path, Project(Explicit(store)), dry_run))
           (Some(Project(_)), Some(store)) =>
             Ok(Publish(path, Project(Explicit(store)), dry_run))
           _ => Err(publish_usage())
@@ -175,22 +184,38 @@ fn parse_publish_options(
           Some(_) => Err(publish_usage())
           None =>
             parse_publish_options(
-              args, index + 1, Some(Project(RememberedOrNative)), credential_store,
-              dry_run, path,
+              args,
+              index + 1,
+              Some(Project(RememberedOrNative)),
+              credential_store,
+              dry_run,
+              path,
             )
         }
       "--auth=adc" =>
         match authorization {
           Some(_) => Err(publish_usage())
           None =>
-            parse_publish_options(args, index + 1, Some(Adc), credential_store, dry_run, path)
+            parse_publish_options(
+              args,
+              index + 1,
+              Some(Adc),
+              credential_store,
+              dry_run,
+              path,
+            )
         }
       "--auth=token-env" =>
         match authorization {
           Some(_) => Err(publish_usage())
           None =>
             parse_publish_options(
-              args, index + 1, Some(AccessTokenEnvironment), credential_store, dry_run, path,
+              args,
+              index + 1,
+              Some(AccessTokenEnvironment),
+              credential_store,
+              dry_run,
+              path,
             )
         }
       "--dry-run" =>
@@ -198,7 +223,12 @@ fn parse_publish_options(
           Err(publish_usage())
         } else {
           parse_publish_options(
-            args, index + 1, authorization, credential_store, true, path,
+            args,
+            index + 1,
+            authorization,
+            credential_store,
+            true,
+            path,
           )
         }
       _ =>
@@ -208,7 +238,12 @@ fn parse_publish_options(
               Some(_) => Err(publish_usage())
               None =>
                 parse_publish_options(
-                  args, index + 1, authorization, Some(store), dry_run, path,
+                  args,
+                  index + 1,
+                  authorization,
+                  Some(store),
+                  dry_run,
+                  path,
                 )
             }
           None =>
@@ -219,7 +254,11 @@ fn parse_publish_options(
                 Some(_) => Err(publish_usage())
                 None =>
                   parse_publish_options(
-                    args, index + 1, authorization, credential_store, dry_run,
+                    args,
+                    index + 1,
+                    authorization,
+                    credential_store,
+                    dry_run,
                     Some(argument),
                   )
               }
@@ -249,13 +288,15 @@ fn parse_pull_options(
       None => Err(pull_usage())
       Some(path) =>
         match (authorization, credential_store) {
-          (None, None) => Ok(Pull(path, Project(RememberedOrNative), dry_run, json))
+          (None, None) =>
+            Ok(Pull(path, Project(RememberedOrNative), dry_run, json))
           (Some(Project(_)), None) =>
             Ok(Pull(path, Project(RememberedOrNative), dry_run, json))
           (Some(Adc), None) => Ok(Pull(path, Adc, dry_run, json))
           (Some(AccessTokenEnvironment), None) =>
             Ok(Pull(path, AccessTokenEnvironment, dry_run, json))
-          (None, Some(store)) => Ok(Pull(path, Project(Explicit(store)), dry_run, json))
+          (None, Some(store)) =>
+            Ok(Pull(path, Project(Explicit(store)), dry_run, json))
           (Some(Project(_)), Some(store)) =>
             Ok(Pull(path, Project(Explicit(store)), dry_run, json))
           _ => Err(pull_usage())
@@ -269,8 +310,13 @@ fn parse_pull_options(
           Some(_) => Err(pull_usage())
           None =>
             parse_pull_options(
-              args, index + 1, Some(Project(RememberedOrNative)), credential_store,
-              dry_run, json, path,
+              args,
+              index + 1,
+              Some(Project(RememberedOrNative)),
+              credential_store,
+              dry_run,
+              json,
+              path,
             )
         }
       "--auth=adc" =>
@@ -278,7 +324,13 @@ fn parse_pull_options(
           Some(_) => Err(pull_usage())
           None =>
             parse_pull_options(
-              args, index + 1, Some(Adc), credential_store, dry_run, json, path,
+              args,
+              index + 1,
+              Some(Adc),
+              credential_store,
+              dry_run,
+              json,
+              path,
             )
         }
       "--auth=token-env" =>
@@ -286,8 +338,13 @@ fn parse_pull_options(
           Some(_) => Err(pull_usage())
           None =>
             parse_pull_options(
-              args, index + 1, Some(AccessTokenEnvironment), credential_store,
-              dry_run, json, path,
+              args,
+              index + 1,
+              Some(AccessTokenEnvironment),
+              credential_store,
+              dry_run,
+              json,
+              path,
             )
         }
       "--dry-run" =>
@@ -295,7 +352,13 @@ fn parse_pull_options(
           Err(pull_usage())
         } else {
           parse_pull_options(
-            args, index + 1, authorization, credential_store, true, json, path,
+            args,
+            index + 1,
+            authorization,
+            credential_store,
+            true,
+            json,
+            path,
           )
         }
       "--json" =>
@@ -303,7 +366,13 @@ fn parse_pull_options(
           Err(pull_usage())
         } else {
           parse_pull_options(
-            args, index + 1, authorization, credential_store, dry_run, true, path,
+            args,
+            index + 1,
+            authorization,
+            credential_store,
+            dry_run,
+            true,
+            path,
           )
         }
       _ =>
@@ -313,7 +382,13 @@ fn parse_pull_options(
               Some(_) => Err(pull_usage())
               None =>
                 parse_pull_options(
-                  args, index + 1, authorization, Some(store), dry_run, json, path,
+                  args,
+                  index + 1,
+                  authorization,
+                  Some(store),
+                  dry_run,
+                  json,
+                  path,
                 )
             }
           None =>
@@ -324,8 +399,13 @@ fn parse_pull_options(
                 Some(_) => Err(pull_usage())
                 None =>
                   parse_pull_options(
-                    args, index + 1, authorization, credential_store, dry_run,
-                    json, Some(argument),
+                    args,
+                    index + 1,
+                    authorization,
+                    credential_store,
+                    dry_run,
+                    json,
+                    Some(argument),
                   )
               }
             }
@@ -336,7 +416,36 @@ fn parse_pull_options(
 
 ///|
 fn parse_pull(args : Array[String]) -> Result[Command, String] {
+  let mut abort_count = 0
+  let mut abort_path : String? = None
+  for index = 2; index < args.length(); index = index + 1 {
+    if args[index] == "--abort" {
+      abort_count = abort_count + 1
+    } else if !args[index].has_prefix("--") && !args[index].is_empty() {
+      match abort_path {
+        None => abort_path = Some(args[index])
+        Some(_) => ()
+      }
+    }
+  }
+  if abort_count > 0 {
+    if abort_count == 1 && args.length() == 4 {
+      match abort_path {
+        Some(path) => return Ok(PullAbort(path))
+        None => ()
+      }
+    }
+    return Err(pull_usage())
+  }
   parse_pull_options(args, 2, None, None, false, false, None)
+}
+
+///|
+fn parse_resolve(args : Array[String]) -> Result[Command, String] {
+  match parse_publish_options(args, 2, None, None, false, None) {
+    Ok(Publish(path, authorization, false)) => Ok(Resolve(path, authorization))
+    _ => Err(resolve_usage())
+  }
 }
 
 ///|
@@ -360,7 +469,10 @@ fn parse_move(args : Array[String]) -> Result[Command, String] {
   }
   let old_path = args[2]
   let new_path = args[3]
-  if old_path.is_empty() || new_path.is_empty() || old_path.has_prefix("--") || new_path.has_prefix("--") {
+  if old_path.is_empty() ||
+    new_path.is_empty() ||
+    old_path.has_prefix("--") ||
+    new_path.has_prefix("--") {
     Err(move_usage())
   } else {
     Ok(Move(old_path, new_path))
@@ -465,6 +577,7 @@ pub fn parse_command(args : Array[String]) -> Result[Command, String] {
   match args[1] {
     "publish" => parse_publish(args)
     "pull" => parse_pull(args)
+    "resolve" => parse_resolve(args)
     "list" => parse_list(args)
     "move" => parse_move(args)
     "forget" => parse_forget(args)

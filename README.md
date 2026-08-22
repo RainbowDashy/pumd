@@ -336,8 +336,9 @@ Remote-only Source Semantics are written as deterministic Markdown while
 untouched source regions remain byte-for-byte unchanged. Local-only edits stay
 in the source for a later publish. Disjoint local and remote edits merge, and
 identical independent edits are treated as converged. Overlapping paragraph or
-whole-table edits are reported as Merge Conflicts and leave the source,
-Publication Registry, and Google Doc unchanged.
+whole-table edits create a Pending Merge: the affected Markdown units receive
+Git-style `local` / `baseline` / `remote` diff3 markers, and the Publication
+Registry retains the exact pre-pull bytes and observed Google Docs revision.
 
 Preview the same remote read, normalization, alignment, and merge planning with:
 
@@ -350,6 +351,26 @@ Pull output distinguishes incoming, preserved-local, conflicted, and skipped
 structural units. `--json` provides the stable structured form for automation.
 Unresolved suggestions are never imported and block affected units; unresolved
 comments do not block pull because pull never writes Google Docs.
+
+Edit every diff3 section into the intended Markdown and resolve it with:
+
+```console
+pumd resolve proposal.md
+```
+
+Resolve rejects remaining markers and invalid Markdown, re-reads the Managed
+Tab, blocks stale remote state and unresolved review barriers, then uses a
+revision-checked atomic Docs update. While a Pending Merge exists, normal
+publish, pull, move, and forget operations are blocked; `pumd list` reports the
+Publication as `merge-conflicted`.
+
+To discard the Pending Merge without authorization or any Google request:
+
+```console
+pumd pull --abort proposal.md
+```
+
+Abort restores the exact pre-pull Markdown bytes and clears the Pending Merge.
 
 ### Explicit automation routes
 

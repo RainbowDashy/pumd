@@ -130,8 +130,7 @@ test "noninteractive setup honors explicit and remembered stores without prompti
 
 ///|
 test "first-publish onboarding preserves explicit and remembered store intent" {
-  guard project_onboarding_setup_store(Explicit(File), None)
-    is Selected(File) else {
+  guard project_onboarding_setup_store(Explicit(File), None) is Selected(File) else {
     fail("explicit publish storage must remain explicit during onboarding")
   }
   guard project_onboarding_setup_store(RememberedOrNative, Some(File))
@@ -324,14 +323,19 @@ test "list accepts its optional flags in either order" {
 
 ///|
 test "list rejects unknown, repeated, and positional arguments" {
-  for arguments in [
-    ["pumd", "list", "--unknown"],
-    ["pumd", "list", "--json", "--json"],
-    ["pumd", "list", "notes.md"],
-  ] {
+  for
+    arguments in [
+      ["pumd", "list", "--unknown"],
+      ["pumd", "list", "--json", "--json"],
+      ["pumd", "list", "notes.md"],
+    ] {
     match parse_command(arguments) {
       Ok(_) => fail("expected list argument validation to fail")
-      Err(message) => inspect(message, content="Project Authorization usage: pumd list [--json] [--refresh]")
+      Err(message) =>
+        inspect(
+          message,
+          content="Project Authorization usage: pumd list [--json] [--refresh]",
+        )
     }
   }
 }
@@ -351,14 +355,15 @@ test "move and forget validate positional paths" {
     Ok(_) => fail("expected forget command")
     Err(message) => fail(message)
   }
-  for arguments in [
-    ["pumd", "move", "old.md"],
-    ["pumd", "move", "--old", "new.md"],
-    ["pumd", "move", "", "new.md"],
-    ["pumd", "forget"],
-    ["pumd", "forget", "--path"],
-    ["pumd", "forget", ""],
-  ] {
+  for
+    arguments in [
+      ["pumd", "move", "old.md"],
+      ["pumd", "move", "--old", "new.md"],
+      ["pumd", "move", "", "new.md"],
+      ["pumd", "forget"],
+      ["pumd", "forget", "--path"],
+      ["pumd", "forget", ""],
+    ] {
     match parse_command(arguments) {
       Ok(_) => fail("expected path validation to fail")
       Err(_) => ()
@@ -369,22 +374,33 @@ test "move and forget validate positional paths" {
 ///|
 test "publish accepts dry-run in any position with supported options" {
   match parse_command(["pumd", "publish", "--dry-run", "proposal.md"]) {
-    Ok(Publish(path, Project(RememberedOrNative), true)) => inspect(path, content="proposal.md")
+    Ok(Publish(path, Project(RememberedOrNative), true)) =>
+      inspect(path, content="proposal.md")
     Ok(_) => fail("expected dry-run Project Authorization publish command")
     Err(message) => fail(message)
   }
-  match parse_command(["pumd", "publish", "--auth=adc", "--dry-run", "proposal.md"]) {
+  match
+    parse_command(["pumd", "publish", "--auth=adc", "--dry-run", "proposal.md"]) {
     Ok(Publish(path, Adc, true)) => inspect(path, content="proposal.md")
     Ok(_) => fail("expected dry-run ADC publish command")
     Err(message) => fail(message)
   }
-  match parse_command(["pumd", "publish", "--dry-run", "--auth=project", "--credential-store=file", "proposal.md"]) {
-    Ok(Publish(path, Project(Explicit(File)), true)) => inspect(path, content="proposal.md")
+  match
+    parse_command([
+      "pumd", "publish", "--dry-run", "--auth=project", "--credential-store=file",
+      "proposal.md",
+    ]) {
+    Ok(Publish(path, Project(Explicit(File)), true)) =>
+      inspect(path, content="proposal.md")
     Ok(_) => fail("expected dry-run file-backed publish command")
     Err(message) => fail(message)
   }
-  match parse_command(["pumd", "publish", "proposal.md", "--credential-store=file", "--dry-run"]) {
-    Ok(Publish(path, Project(Explicit(File)), true)) => inspect(path, content="proposal.md")
+  match
+    parse_command([
+      "pumd", "publish", "proposal.md", "--credential-store=file", "--dry-run",
+    ]) {
+    Ok(Publish(path, Project(Explicit(File)), true)) =>
+      inspect(path, content="proposal.md")
     Ok(_) => fail("expected trailing dry-run file-backed publish command")
     Err(message) => fail(message)
   }
@@ -392,13 +408,15 @@ test "publish accepts dry-run in any position with supported options" {
 
 ///|
 test "publish rejects duplicate or pathless dry-run" {
-  for arguments in [
-    ["pumd", "publish", "--dry-run", "--dry-run", "proposal.md"],
-    ["pumd", "publish", "--dry-run"],
-  ] {
+  for
+    arguments in [
+      ["pumd", "publish", "--dry-run", "--dry-run", "proposal.md"],
+      ["pumd", "publish", "--dry-run"],
+    ] {
     match parse_command(arguments) {
       Ok(_) => fail("expected dry-run validation to fail")
-      Err(message) => assert_true(message.contains("Project Authorization usage"))
+      Err(message) =>
+        assert_true(message.contains("Project Authorization usage"))
     }
   }
 }
@@ -411,12 +429,18 @@ test "pull accepts remote-read authorization and reporting options in any positi
     Ok(_) => fail("expected Project Authorization pull command")
     Err(message) => fail(message)
   }
-  match parse_command(["pumd", "pull", "--dry-run", "--json", "--auth=adc", "proposal.md"]) {
+  match
+    parse_command([
+      "pumd", "pull", "--dry-run", "--json", "--auth=adc", "proposal.md",
+    ]) {
     Ok(Pull(path, Adc, true, true)) => inspect(path, content="proposal.md")
     Ok(_) => fail("expected JSON dry-run ADC pull command")
     Err(message) => fail(message)
   }
-  match parse_command(["pumd", "pull", "proposal.md", "--credential-store=file", "--json", "--dry-run"]) {
+  match
+    parse_command([
+      "pumd", "pull", "proposal.md", "--credential-store=file", "--json", "--dry-run",
+    ]) {
     Ok(Pull(path, Project(Explicit(File)), true, true)) =>
       inspect(path, content="proposal.md")
     Ok(_) => fail("expected trailing pull options")
@@ -432,15 +456,16 @@ test "pull accepts remote-read authorization and reporting options in any positi
 
 ///|
 test "pull rejects duplicate flags, unknown options, and missing or duplicate paths" {
-  for arguments in [
-    ["pumd", "pull"],
-    ["pumd", "pull", "--dry-run"],
-    ["pumd", "pull", "--dry-run", "--dry-run", "proposal.md"],
-    ["pumd", "pull", "--json", "--json", "proposal.md"],
-    ["pumd", "pull", "--unknown", "proposal.md"],
-    ["pumd", "pull", "one.md", "two.md"],
-    ["pumd", "pull", "--auth=adc", "--credential-store=file", "proposal.md"],
-  ] {
+  for
+    arguments in [
+      ["pumd", "pull"],
+      ["pumd", "pull", "--dry-run"],
+      ["pumd", "pull", "--dry-run", "--dry-run", "proposal.md"],
+      ["pumd", "pull", "--json", "--json", "proposal.md"],
+      ["pumd", "pull", "--unknown", "proposal.md"],
+      ["pumd", "pull", "one.md", "two.md"],
+      ["pumd", "pull", "--auth=adc", "--credential-store=file", "proposal.md"],
+    ] {
     match parse_command(arguments) {
       Ok(_) => fail("expected pull validation to fail")
       Err(message) => assert_true(message.contains("pumd pull"))
@@ -449,17 +474,78 @@ test "pull rejects duplicate flags, unknown options, and missing or duplicate pa
 }
 
 ///|
+test "pull abort is a distinct unauthenticated command and rejects remote options" {
+  match parse_command(["pumd", "pull", "--abort", "proposal.md"]) {
+    Ok(PullAbort(path)) => inspect(path, content="proposal.md")
+    _ => fail("expected pull abort command")
+  }
+  match parse_command(["pumd", "pull", "proposal.md", "--abort"]) {
+    Ok(PullAbort(path)) => inspect(path, content="proposal.md")
+    _ => fail("expected trailing pull abort command")
+  }
+  for
+    args in [
+      ["pumd", "pull", "--abort"],
+      ["pumd", "pull", "--abort", "--auth=adc", "proposal.md"],
+      ["pumd", "pull", "--abort", "--dry-run", "proposal.md"],
+      ["pumd", "pull", "--abort", "--json", "proposal.md"],
+    ] {
+    guard parse_command(args) is Err(_) else {
+      fail("pull abort must reject missing paths and remote options")
+    }
+  }
+}
+
+///|
+test "resolve accepts publish authorization options without dry-run" {
+  match parse_command(["pumd", "resolve", "proposal.md"]) {
+    Ok(Resolve(path, Project(RememberedOrNative))) =>
+      inspect(path, content="proposal.md")
+    _ => fail("expected default Project Authorization resolve")
+  }
+  match
+    parse_command([
+      "pumd", "resolve", "--auth=project", "--credential-store=file", "proposal.md",
+    ]) {
+    Ok(Resolve(path, Project(Explicit(File)))) =>
+      inspect(path, content="proposal.md")
+    _ => fail("expected file-backed Project Authorization resolve")
+  }
+  match parse_command(["pumd", "resolve", "proposal.md", "--auth=adc"]) {
+    Ok(Resolve(path, Adc)) => inspect(path, content="proposal.md")
+    _ => fail("expected ADC resolve")
+  }
+  for
+    args in [
+      ["pumd", "resolve"],
+      ["pumd", "resolve", "--dry-run", "proposal.md"],
+      ["pumd", "resolve", "one.md", "two.md"],
+    ] {
+    guard parse_command(args) is Err(_) else {
+      fail("resolve must reject invalid arguments")
+    }
+  }
+}
+
+///|
 test "unknown commands return command usage" {
   match parse_command(["pumd", "frobnicate"]) {
     Ok(_) => fail("expected unknown command validation to fail")
-    Err(message) => assert_true(message.contains("pumd list [--json] [--refresh]"))
+    Err(message) =>
+      assert_true(message.contains("pumd list [--json] [--refresh]"))
   }
 }
 
 ///|
 test "parse_publish_path rejects dry-run forms" {
-  match parse_publish_path(["pumd", "publish", "--auth=adc", "--dry-run", "proposal.md"]) {
-    Ok(_) => fail("expected dry-run ADC publish to stay outside the compatibility seam")
+  match
+    parse_publish_path([
+      "pumd", "publish", "--auth=adc", "--dry-run", "proposal.md",
+    ]) {
+    Ok(_) =>
+      fail(
+        "expected dry-run ADC publish to stay outside the compatibility seam",
+      )
     Err(message) => assert_true(message.contains("Project Authorization usage"))
   }
 }

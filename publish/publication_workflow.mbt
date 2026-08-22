@@ -170,10 +170,7 @@ async fn commit_updated_baseline(
 ) -> Result[PublishOutcome, PublishError] {
   let updated = match
     @registry.document_with_updated_baseline(
-      document,
-      canonical,
-      baseline,
-      timestamp,
+      document, canonical, baseline, timestamp,
     ) {
     Ok(value) => value
     Err(error) => return Err(registry_error(error))
@@ -192,11 +189,12 @@ fn decoded_read_error(
   match error {
     MissingManagedTab(_) =>
       RemoteMissing(document_id=success.document_id, url=success.url)
-    _ => Read(
-      document_id=success.document_id,
-      url=success.url,
-      message=error.user_message(),
-    )
+    _ =>
+      Read(
+        document_id=success.document_id,
+        url=success.url,
+        message=error.user_message(),
+      )
   }
 }
 
@@ -216,7 +214,9 @@ fn conflict_error(report : ReconciliationReport) -> PublishError {
   let descriptions = StringBuilder::new()
   for unit in report.units {
     if unit.conflict {
-      if !descriptions.is_empty() { descriptions.write_string(", ") }
+      if !descriptions.is_empty() {
+        descriptions.write_string(", ")
+      }
       descriptions.write_string(unit.description)
     }
   }
@@ -235,23 +235,21 @@ fn comment_error(
     HttpStatus(status=404) =>
       RemoteMissing(document_id=success.document_id, url=success.url)
     HttpStatus(status=403) =>
-      Permission(
-        authorization_mode~,
-        stage=DocumentRead,
-        created_document=None,
-      )
-    HttpStatus(status=429) => Throttled(stage=DocumentRead, created_document=None)
+      Permission(authorization_mode~, stage=DocumentRead, created_document=None)
+    HttpStatus(status=429) =>
+      Throttled(stage=DocumentRead, created_document=None)
     HttpStatus(status=401) =>
       Authentication(
         authorization_mode~,
         problem=CredentialsRejected,
         created_document=None,
       )
-    _ => Read(
-      document_id=success.document_id,
-      url=success.url,
-      message="comment inspection failed: " + error.user_message(),
-    )
+    _ =>
+      Read(
+        document_id=success.document_id,
+        url=success.url,
+        message="comment inspection failed: " + error.user_message(),
+      )
   }
 }
 
@@ -278,21 +276,20 @@ fn update_error(
         problem=CredentialsRejected,
         created_document=Some(success),
       )
-    AdapterHttpStatus(status~, kind~) => UpdateFailed(
-      document_id=success.document_id,
-      url=success.url,
-      message=AdapterHttpStatus(status~, kind~).message(),
-    )
-    AdapterDecode(message) => UpdateFailed(
-      document_id=success.document_id,
-      url=success.url,
-      message~,
-    )
-    AdapterTransport(message) => UpdateFailed(
-      document_id=success.document_id,
-      url=success.url,
-      message="transport error: " + message,
-    )
+    AdapterHttpStatus(status~, kind~) =>
+      UpdateFailed(
+        document_id=success.document_id,
+        url=success.url,
+        message=AdapterHttpStatus(status~, kind~).message(),
+      )
+    AdapterDecode(message) =>
+      UpdateFailed(document_id=success.document_id, url=success.url, message~)
+    AdapterTransport(message) =>
+      UpdateFailed(
+        document_id=success.document_id,
+        url=success.url,
+        message="transport error: " + message,
+      )
   }
 }
 
@@ -340,7 +337,10 @@ pub async fn publish_prepared_with_registry(
     }
     match @registry.publication_for_source(document, canonical) {
       None => Ok(DryRunCreation(title=prepared.title))
-      Some(entry) =>
+      Some(entry) => {
+        if entry.pending_merge is Some(_) {
+          return Err(registry_error(@registry.PendingMergeBlocked(canonical)))
+        }
         match entry.lifecycle {
           Blocked => Ok(DryRunBlocked(source_path=canonical))
           Provisional => Ok(DryRunProvisional(success_from_entry(entry)))
@@ -366,7 +366,8 @@ pub async fn publish_prepared_with_registry(
               fn() { token },
               http=Some(http),
             )
-            let retrieved = match get_remote_document_body(client, success.document_id) {
+            let retrieved = match
+              get_remote_document_body(client, success.document_id) {
               Ok(value) => value
               Err(error) =>
                 return Err(
@@ -378,18 +379,20 @@ pub async fn publish_prepared_with_registry(
                   ),
                 )
             }
-            let decoded = match decode_remote_document(
-              retrieved.body,
-              retrieved.document_id,
-            ) {
+            let decoded = match
+              decode_remote_document(retrieved.body, retrieved.document_id) {
               Ok(value) => value
               Err(error) => return Err(decoded_read_error(success, error))
             }
-            let managed_content = match remote_tab_content(decoded, managed_tab_id) {
+            let managed_content = match
+              remote_tab_content(decoded, managed_tab_id) {
               Some(value) => value
               None =>
                 return Err(
-                  RemoteMissing(document_id=success.document_id, url=success.url),
+                  RemoteMissing(
+                    document_id=success.document_id,
+                    url=success.url,
+                  ),
                 )
             }
             let outcome = match
@@ -414,7 +417,8 @@ pub async fn publish_prepared_with_registry(
             }
             let comments = match inspect_comments(client, success.document_id) {
               Ok(value) => value
-              Err(error) => return Err(comment_error(authorization_mode, success, error))
+              Err(error) =>
+                return Err(comment_error(authorization_mode, success, error))
             }
             Ok(
               DryRunUpdate(report={
@@ -427,12 +431,13 @@ pub async fn publish_prepared_with_registry(
                 conflicted,
                 review_barriers: comments.unresolved,
                 concurrency_sensitive: report.local_changes > 0 &&
-                  report.conflicts == 0 &&
-                  comments.unresolved == 0,
+                report.conflicts == 0 &&
+                comments.unresolved == 0,
               }),
             )
           }
         }
+      }
     }
   } else {
     let lock = match @registry.acquire_registry_lock(registry_directory) {
@@ -445,7 +450,10 @@ pub async fn publish_prepared_with_registry(
       Err(error) => return Err(registry_error(error))
     }
     match @registry.publication_for_source(document, canonical) {
-      Some(entry) =>
+      Some(entry) => {
+        if entry.pending_merge is Some(_) {
+          return Err(registry_error(@registry.PendingMergeBlocked(canonical)))
+        }
         match entry.lifecycle {
           Ready => {
             let previous_timestamp = match entry.last_successful_publish {
@@ -473,7 +481,8 @@ pub async fn publish_prepared_with_registry(
               fn() { token },
               http=Some(http),
             )
-            let retrieved = match get_remote_document_body(client, success.document_id) {
+            let retrieved = match
+              get_remote_document_body(client, success.document_id) {
               Ok(value) => value
               Err(error) =>
                 return Err(
@@ -485,18 +494,20 @@ pub async fn publish_prepared_with_registry(
                   ),
                 )
             }
-            let decoded = match decode_remote_document(
-              retrieved.body,
-              retrieved.document_id,
-            ) {
+            let decoded = match
+              decode_remote_document(retrieved.body, retrieved.document_id) {
               Ok(value) => value
               Err(error) => return Err(decoded_read_error(success, error))
             }
-            let managed_content = match remote_tab_content(decoded, managed_tab_id) {
+            let managed_content = match
+              remote_tab_content(decoded, managed_tab_id) {
               Some(value) => value
               None =>
                 return Err(
-                  RemoteMissing(document_id=success.document_id, url=success.url),
+                  RemoteMissing(
+                    document_id=success.document_id,
+                    url=success.url,
+                  ),
                 )
             }
             let reconciliation = match
@@ -511,7 +522,8 @@ pub async fn publish_prepared_with_registry(
             }
             let comments = match inspect_comments(client, success.document_id) {
               Ok(value) => value
-              Err(error) => return Err(comment_error(authorization_mode, success, error))
+              Err(error) =>
+                return Err(comment_error(authorization_mode, success, error))
             }
             if comments.unresolved > 0 {
               return Err(ReviewBarrier(unresolved=comments.unresolved))
@@ -553,10 +565,8 @@ pub async fn publish_prepared_with_registry(
                       ),
                     )
                 }
-                let remote = match decode_remote_document(
-                  reread.body,
-                  reread.document_id,
-                ) {
+                let remote = match
+                  decode_remote_document(reread.body, reread.document_id) {
                   Ok(value) => value
                   Err(_) =>
                     return Err(
@@ -579,8 +589,7 @@ pub async fn publish_prepared_with_registry(
                 // Confirm the intended remote state actually landed by checking
                 // the planned units specifically, not by re-reconciling
                 // (which is always a no-op against the desired document).
-                if
-                  update_intended_state_landed(
+                if update_intended_state_landed(
                     baseline,
                     prepared.document,
                     content,
@@ -604,7 +613,8 @@ pub async fn publish_prepared_with_registry(
                   )
                 }
               }
-              Err(Adapter(error)) => Err(update_error(authorization_mode, success, error))
+              Err(Adapter(error)) =>
+                Err(update_error(authorization_mode, success, error))
             }
           }
           Blocked => Err(BlockedPublication(source_path=canonical))
@@ -646,6 +656,7 @@ pub async fn publish_prepared_with_registry(
             }
           }
         }
+      }
       None => {
         match @registry.probe_registry_writable(registry_directory) {
           Ok(_) => ()
@@ -675,6 +686,7 @@ pub async fn publish_prepared_with_registry(
               lifecycle: Provisional,
               last_successful_publish: None,
               published_baseline: None,
+              pending_merge: None,
             }
             let provisional_document = match
               @registry.document_with_provisional(document, provisional) {
@@ -932,8 +944,11 @@ fn write_optional_bool(value : Bool?, output : StringBuilder) -> Unit {
 }
 
 ///|
-fn lifecycle_name(lifecycle : @registry.PublicationLifecycle) -> String {
-  match lifecycle {
+fn lifecycle_name(entry : @registry.PublicationEntry) -> String {
+  if entry.pending_merge is Some(_) {
+    return "merge-conflicted"
+  }
+  match entry.lifecycle {
     Ready => "ready"
     Provisional => "provisional"
     Blocked => "blocked"
@@ -968,7 +983,7 @@ fn write_publication(
   output.write_string(",\"managed_tab_id\":")
   write_optional_string(entry.managed_tab_id, output)
   output.write_string(",\"lifecycle\":")
-  write_json_string(lifecycle_name(entry.lifecycle), output)
+  write_json_string(lifecycle_name(entry), output)
   output.write_string(",\"last_successful_publish\":")
   write_optional_string(entry.last_successful_publish, output)
   output.write_string(",\"source_missing\":")
@@ -1092,6 +1107,17 @@ async fn pull_loaded_publication(
     Provisional => return Err(Registry("Publication is not ready for pull"))
     Ready => ()
   }
+  if entry.pending_merge is Some(_) {
+    return Err(
+      Registry(
+        "Publication has a Pending Merge; run `pumd resolve " +
+        canonical +
+        "` or `pumd pull --abort " +
+        canonical +
+        "`",
+      ),
+    )
+  }
   let success = success_from_entry(entry)
   let managed_tab_id = match entry.managed_tab_id {
     Some(value) => value
@@ -1112,17 +1138,11 @@ async fn pull_loaded_publication(
       return Err(authentication_error(authorization_mode, problem))
   }
   let client = @google_core.GoogleClient::new(fn() { token }, http=Some(http))
-  let retrieved = match
-    get_remote_document_body(client, success.document_id) {
+  let retrieved = match get_remote_document_body(client, success.document_id) {
     Ok(value) => value
     Err(error) =>
       return Err(
-        read_error(
-          authorization_mode,
-          success.document_id,
-          success.url,
-          error,
-        ),
+        read_error(authorization_mode, success.document_id, success.url, error),
       )
   }
   let decoded = match
@@ -1148,8 +1168,33 @@ async fn pull_loaded_publication(
     title: decoded.title,
     plan,
   }
-  if plan.conflicted > 0 { return Ok(PullConflicted(report)) }
-  if dry_run { return Ok(PullDryRun(report)) }
+  if plan.conflicted > 0 {
+    if dry_run {
+      return Ok(PullConflicted(report))
+    }
+    let pending : @registry.PendingMerge = {
+      pre_pull_source: source,
+      marked_source: plan.source,
+      observed_remote_body: retrieved.body,
+      observed_revision_id: remote_revision_id(decoded),
+    }
+    let updated = match
+      @registry.document_with_pending_merge(document, canonical, pending) {
+      Ok(value) => value
+      Err(error) => return Err(registry_error(error))
+    }
+    match @registry.save_registry_document(registry_directory, updated) {
+      Ok(_) => ()
+      Err(error) => return Err(registry_error(error))
+    }
+    match replace_source(canonical, plan.source) {
+      Ok(_) => return Ok(PullConflicted(report))
+      Err(message) => return Err(SourceWrite(path=canonical, message~))
+    }
+  }
+  if dry_run {
+    return Ok(PullDryRun(report))
+  }
   let source_changed = plan.source != source
   let baseline_changed = plan.incoming > 0 || plan.converged > 0
   if source_changed {
@@ -1211,17 +1256,8 @@ pub async fn pull_path_with_registry(
       Err(error) => return Err(registry_error(error))
     }
     return pull_loaded_publication(
-      source,
-      prepared,
-      canonical,
-      document,
-      registry_directory,
-      authorization_mode,
-      get_project_token,
-      get_adc_token,
-      http,
-      replace_source,
-      true,
+      source, prepared, canonical, document, registry_directory, authorization_mode,
+      get_project_token, get_adc_token, http, replace_source, true,
     )
   }
   let lock = match @registry.acquire_registry_lock(registry_directory) {
@@ -1234,16 +1270,334 @@ pub async fn pull_path_with_registry(
     Err(error) => return Err(registry_error(error))
   }
   pull_loaded_publication(
-    source,
-    prepared,
-    canonical,
-    document,
-    registry_directory,
-    authorization_mode,
-    get_project_token,
-    get_adc_token,
-    http,
-    replace_source,
-    false,
+    source, prepared, canonical, document, registry_directory, authorization_mode,
+    get_project_token, get_adc_token, http, replace_source, false,
   )
+}
+
+///|
+/// Restore the exact pre-pull Markdown bytes and then clear Pending Merge.
+/// This path performs no authorization or remote access; source-first ordering
+/// makes a retry safe if registry persistence is interrupted.
+pub async fn abort_pull_with_registry(
+  path : String,
+  replace_source : async (String, String) -> Result[Unit, String],
+  registry_directory : String,
+) -> Result[Unit, PublishError] {
+  let canonical = @registry.canonical_source_path(path)
+  let lock = match @registry.acquire_registry_lock(registry_directory) {
+    Ok(value) => value
+    Err(error) => return Err(registry_error(error))
+  }
+  defer lock.release()
+  let document = match @registry.load_registry_document(registry_directory) {
+    Ok(value) => value
+    Err(error) => return Err(registry_error(error))
+  }
+  let entry = match @registry.publication_for_source(document, canonical) {
+    Some(value) => value
+    None =>
+      return Err(
+        Registry("no Publication is registered for `" + canonical + "`"),
+      )
+  }
+  let pending = match entry.pending_merge {
+    Some(value) => value
+    None =>
+      return Err(registry_error(@registry.PendingMergeRequired(canonical)))
+  }
+  match replace_source(canonical, pending.pre_pull_source) {
+    Ok(_) => ()
+    Err(message) => return Err(SourceWrite(path=canonical, message~))
+  }
+  let updated = match
+    @registry.document_without_pending_merge(document, canonical) {
+    Ok(value) => value
+    Err(error) => return Err(registry_error(error))
+  }
+  match @registry.save_registry_document(registry_directory, updated) {
+    Ok(_) => Ok(())
+    Err(error) => Err(registry_error(error))
+  }
+}
+
+///|
+fn source_has_merge_markers(source : String) -> Bool {
+  for line in source.split("\n") {
+    if line.has_prefix("<<<<<<< ") ||
+      line.has_prefix("||||||| ") ||
+      (line.has_prefix("=======") &&
+      (line.length() == 7 ||
+      (line.length() == 8 && line.has_suffix("\r")))) ||
+      line.has_prefix(">>>>>>> ") {
+      return true
+    }
+  }
+  false
+}
+
+///|
+fn resolved_state_landed(
+  source : String,
+  observed_baseline : @pumd.DesiredDocument,
+  desired : @pumd.DesiredDocument,
+  current : RemoteContent,
+  report : ReconciliationReport,
+) -> Bool {
+  if report.local_changes > 0 {
+    return update_intended_state_landed(
+      observed_baseline,
+      desired,
+      current,
+      report,
+    )
+  }
+  match plan_pull(source, desired, desired, current) {
+    Ok(plan) => plan.incoming == 0 && plan.conflicted == 0
+    Err(_) => false
+  }
+}
+
+///|
+async fn commit_resolved_merge(
+  document : @registry.RegistryDocument,
+  registry_directory : String,
+  canonical : String,
+  baseline : @pumd.DesiredDocument,
+  success : PublishSuccess,
+) -> Result[PublishOutcome, PublishError] {
+  let cleared = match
+    @registry.document_without_pending_merge(document, canonical) {
+    Ok(value) => value
+    Err(error) => return Err(registry_error(error))
+  }
+  let timestamp = format_unix_timestamp(current_unix_seconds())
+  let updated = match
+    @registry.document_with_updated_baseline(
+      cleared, canonical, baseline, timestamp,
+    ) {
+    Ok(value) => value
+    Err(error) => return Err(registry_error(error))
+  }
+  match @registry.save_registry_document(registry_directory, updated) {
+    Ok(_) => Ok(Updated(success, timestamp))
+    Err(error) => Err(registry_error(error))
+  }
+}
+
+///|
+/// Resolve an edited Pending Merge through the same authenticated, revision-
+/// checked remote update path used by publish.
+pub async fn resolve_path_with_registry(
+  path : String,
+  read_source : async (String) -> Result[String, String],
+  registry_directory : String,
+  authorization_mode : AuthorizationMode,
+  get_project_token : async () -> Result[String, AuthenticationProblem],
+  get_adc_token : async () -> Result[String, AuthenticationProblem],
+  http : &@google_http.HttpClient,
+) -> Result[PublishOutcome, PublishError] {
+  let canonical = @registry.canonical_source_path(path)
+  let lock = match @registry.acquire_registry_lock(registry_directory) {
+    Ok(value) => value
+    Err(error) => return Err(registry_error(error))
+  }
+  defer lock.release()
+  let document = match @registry.load_registry_document(registry_directory) {
+    Ok(value) => value
+    Err(error) => return Err(registry_error(error))
+  }
+  let entry = match @registry.publication_for_source(document, canonical) {
+    Some(value) => value
+    None =>
+      return Err(
+        Registry("no Publication is registered for `" + canonical + "`"),
+      )
+  }
+  let pending = match entry.pending_merge {
+    Some(value) => value
+    None =>
+      return Err(registry_error(@registry.PendingMergeRequired(canonical)))
+  }
+  let source = match read_source(path) {
+    Ok(value) => value
+    Err(_) => return Err(SourceAccess(path~))
+  }
+  if source_has_merge_markers(source) {
+    return Err(
+      Planning("edited Markdown still contains diff3 conflict markers"),
+    )
+  }
+  let prepared = match
+    prepare_publication_markdown(source, publication_title_from_path(path)) {
+    Ok(value) => value
+    Err(error) => return Err(error)
+  }
+  guard entry.lifecycle is Ready else {
+    return Err(Registry("Publication is not ready for resolve"))
+  }
+  let success = success_from_entry(entry)
+  let managed_tab_id = match entry.managed_tab_id {
+    Some(value) => value
+    None => abort("invalid ready registry entry")
+  }
+  let published_baseline = match entry.published_baseline {
+    Some(value) => value
+    None => abort("invalid ready registry entry")
+  }
+  let observed = match
+    decode_remote_document(pending.observed_remote_body, success.document_id) {
+    Ok(value) => value
+    Err(_) =>
+      return Err(
+        Registry("Pending Merge contains invalid observed remote state"),
+      )
+  }
+  if remote_revision_id(observed) != pending.observed_revision_id {
+    return Err(Registry("Pending Merge observed revision is inconsistent"))
+  }
+  let observed_content = match remote_tab_content(observed, managed_tab_id) {
+    Some(value) => value
+    None => return Err(Registry("Pending Merge Managed Tab is missing"))
+  }
+  let newline = if source.contains("\r\n") { "\r\n" } else { "\n" }
+  let observed_baseline = match
+    desired_document_from_remote(observed_content, published_baseline, newline~) {
+    Ok(value) => value
+    Err(error) => return Err(pull_reconciliation_error(error))
+  }
+  let reconciliation = match
+    reconcile_document(observed_baseline, prepared.document, observed_content) {
+    Ok(value) => value
+    Err(error) => return Err(reconciliation_error(error))
+  }
+  let (report, plan) = match reconciliation {
+    Conflict(report) => return Err(conflict_error(report))
+    NoLocalChanges(report) => (report, None)
+    Planned(report, plan) => (report, Some(plan))
+  }
+  let token = match
+    selected_token(authorization_mode, get_project_token, get_adc_token) {
+    Ok(value) => value
+    Err(problem) =>
+      return Err(authentication_error(authorization_mode, problem))
+  }
+  let client = @google_core.GoogleClient::new(fn() { token }, http=Some(http))
+  let retrieved = match get_remote_document_body(client, success.document_id) {
+    Ok(value) => value
+    Err(error) =>
+      return Err(
+        read_error(authorization_mode, success.document_id, success.url, error),
+      )
+  }
+  let current = match
+    decode_remote_document(retrieved.body, retrieved.document_id) {
+    Ok(value) => value
+    Err(error) => return Err(decoded_read_error(success, error))
+  }
+  let current_content = match remote_tab_content(current, managed_tab_id) {
+    Some(value) => value
+    None =>
+      return Err(
+        RemoteMissing(document_id=success.document_id, url=success.url),
+      )
+  }
+  let current_revision = remote_revision_id(current)
+  if current_revision != pending.observed_revision_id &&
+    !resolved_state_landed(
+      source,
+      observed_baseline,
+      prepared.document,
+      current_content,
+      report,
+    ) {
+    return Err(
+      Concurrency(
+        message="the Google Docs revision changed since pull; the Pending Merge was retained",
+      ),
+    )
+  }
+  let comments = match inspect_comments(client, success.document_id) {
+    Ok(value) => value
+    Err(error) => return Err(comment_error(authorization_mode, success, error))
+  }
+  if comments.unresolved > 0 {
+    return Err(ReviewBarrier(unresolved=comments.unresolved))
+  }
+  if current_revision != pending.observed_revision_id || plan is None {
+    return commit_resolved_merge(
+      document,
+      registry_directory,
+      canonical,
+      prepared.document,
+      success,
+    )
+  }
+  guard plan is Some(update_plan) else { abort("checked resolve plan") }
+  match
+    batch_update_document_with_revision(
+      client,
+      success.document_id,
+      managed_tab_id,
+      update_plan,
+      current_revision,
+    ) {
+    Ok(_) =>
+      commit_resolved_merge(
+        document,
+        registry_directory,
+        canonical,
+        prepared.document,
+        success,
+      )
+    Err(RevisionConflict) =>
+      Err(
+        Concurrency(
+          message="the Google Docs revision changed during resolve; nothing was applied and the Pending Merge was retained",
+        ),
+      )
+    Err(Adapter(AdapterTransport(_))) => {
+      let reread = match get_remote_document_body(client, success.document_id) {
+        Ok(value) => value
+        Err(_) =>
+          return Err(
+            AmbiguousUpdate(document_id=success.document_id, url=success.url),
+          )
+      }
+      let reread_document = match
+        decode_remote_document(reread.body, reread.document_id) {
+        Ok(value) => value
+        Err(_) =>
+          return Err(
+            AmbiguousUpdate(document_id=success.document_id, url=success.url),
+          )
+      }
+      let reread_content = match
+        remote_tab_content(reread_document, managed_tab_id) {
+        Some(value) => value
+        None =>
+          return Err(
+            AmbiguousUpdate(document_id=success.document_id, url=success.url),
+          )
+      }
+      if resolved_state_landed(
+        source,
+        observed_baseline,
+          prepared.document,
+          reread_content,
+          report,
+        ) {
+        commit_resolved_merge(
+          document,
+          registry_directory,
+          canonical,
+          prepared.document,
+          success,
+        )
+      } else {
+        Err(AmbiguousUpdate(document_id=success.document_id, url=success.url))
+      }
+    }
+    Err(Adapter(error)) => Err(update_error(authorization_mode, success, error))
+  }
 }

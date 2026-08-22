@@ -530,7 +530,9 @@ fn pull_report_json(
   output.write_string(",\"units\":[")
   let mut first = true
   for unit in report.plan.units {
-    if !first { output.write_char(',') }
+    if !first {
+      output.write_char(',')
+    }
     first = false
     output.write_string("{\"category\":")
     write_pull_json_string(pull_category_name(unit.category), output)
@@ -554,13 +556,21 @@ async fn write_pull_text(
     Some(title) => @stdio.stdout.write("current title: " + title + "\n")
     None => @stdio.stdout.write("current title: unavailable\n")
   }
-  @stdio.stdout.write("incoming units: " + report.plan.incoming.to_string() + "\n")
+  @stdio.stdout.write(
+    "incoming units: " + report.plan.incoming.to_string() + "\n",
+  )
   @stdio.stdout.write(
     "preserved-local units: " + report.plan.preserved_local.to_string() + "\n",
   )
-  @stdio.stdout.write("converged units: " + report.plan.converged.to_string() + "\n")
-  @stdio.stdout.write("conflicted units: " + report.plan.conflicted.to_string() + "\n")
-  @stdio.stdout.write("skipped units: " + report.plan.skipped.to_string() + "\n")
+  @stdio.stdout.write(
+    "converged units: " + report.plan.converged.to_string() + "\n",
+  )
+  @stdio.stdout.write(
+    "conflicted units: " + report.plan.conflicted.to_string() + "\n",
+  )
+  @stdio.stdout.write(
+    "skipped units: " + report.plan.skipped.to_string() + "\n",
+  )
   for unit in report.plan.units {
     @stdio.stdout.write(
       "  " + pull_category_name(unit.category) + ": " + unit.description + "\n",
@@ -584,16 +594,46 @@ fn pull_presentation(
 ) -> PullPresentation {
   match outcome {
     @publish.PullOutcome::Pulled(report) =>
-      { name: "pulled", heading: "pull completed", dry_run: false, report, conflict: false }
+      {
+        name: "pulled",
+        heading: "pull completed",
+        dry_run: false,
+        report,
+        conflict: false,
+      }
     @publish.PullOutcome::PullNoOp(report) =>
-      { name: "no-op", heading: "pull completed: no incoming changes", dry_run: false, report, conflict: false }
+      {
+        name: "no-op",
+        heading: "pull completed: no incoming changes",
+        dry_run: false,
+        report,
+        conflict: false,
+      }
     @publish.PullOutcome::PullDryRun(report) =>
-      { name: "dry-run", heading: "dry run: pull inspection succeeded", dry_run: true, report, conflict: false }
+      {
+        name: "dry-run",
+        heading: "dry run: pull inspection succeeded",
+        dry_run: true,
+        report,
+        conflict: false,
+      }
     @publish.PullOutcome::PullConflicted(report) =>
       if requested_dry_run {
-        { name: "conflicted", heading: "dry run: pull would encounter Merge Conflicts", dry_run: true, report, conflict: true }
+        {
+          name: "conflicted",
+          heading: "dry run: pull would encounter Merge Conflicts",
+          dry_run: true,
+          report,
+          conflict: true,
+        }
       } else {
-        { name: "conflicted", heading: "pull blocked by Merge Conflicts", dry_run: false, report, conflict: true }
+        {
+          name: "conflicted",
+          heading: "pull blocked by Merge Conflicts",
+          dry_run: false,
+          report,
+          conflict: true,
+        }
       }
   }
 }
@@ -611,12 +651,15 @@ async fn report_pull_outcome(
         presentation.name,
         presentation.dry_run,
         presentation.report,
-      ) + "\n",
+      ) +
+      "\n",
     )
   } else {
     write_pull_text(presentation.heading, presentation.report)
   }
-  if presentation.conflict { @sys.exit(1) }
+  if presentation.conflict {
+    @sys.exit(1)
+  }
 }
 
 ///|
@@ -645,7 +688,9 @@ async fn pull_file(
         if dry_run {
           async fn() { project_access_token(http, store_request) }
         } else {
-          async fn() { project_access_token_with_onboarding(http, store_request) }
+          async fn() {
+            project_access_token_with_onboarding(http, store_request)
+          }
         },
         adc_access_token,
         http,
@@ -663,7 +708,7 @@ async fn pull_file(
         http,
         dry_run,
       )
-    @args.Authorization::AccessTokenEnvironment => {
+    @args.Authorization::AccessTokenEnvironment =>
       @publish.pull_path_with_registry(
         path,
         fn(source_path) { read_source(source_path) },
@@ -685,10 +730,89 @@ async fn pull_file(
         http,
         dry_run,
       )
-    }
   }
   match result {
     Ok(outcome) => report_pull_outcome(outcome, json, dry_run)
+    Err(error) => report_failure(error.user_message())
+  }
+}
+
+///|
+async fn abort_pull_file(path : String) -> Unit {
+  let registry_directory = match @registry.default_registry_directory() {
+    Ok(directory) => directory
+    Err(error) =>
+      return report_failure(
+        @publish.PublishError::Registry(error.user_message()).user_message(),
+      )
+  }
+  match
+    @publish.abort_pull_with_registry(
+      path, @publish.atomic_replace_source, registry_directory,
+    ) {
+    Ok(_) =>
+      @stdio.stdout.write("pull aborted; exact pre-pull Markdown restored\n")
+    Err(error) => report_failure(error.user_message())
+  }
+}
+
+///|
+async fn resolve_file(
+  path : String,
+  authorization : @args.Authorization,
+) -> Unit {
+  let registry_directory = match @registry.default_registry_directory() {
+    Ok(directory) => directory
+    Err(error) =>
+      return report_failure(
+        @publish.PublishError::Registry(error.user_message()).user_message(),
+      )
+  }
+  let http = @google_http.DefaultHttpClient::new()
+  let result = match authorization {
+    @args.Authorization::Project(store_request) =>
+      @publish.resolve_path_with_registry(
+        path,
+        fn(source_path) { read_source(source_path) },
+        registry_directory,
+        @publish.AuthorizationMode::Project,
+        async fn() { project_access_token(http, store_request) },
+        adc_access_token,
+        http,
+      )
+    @args.Authorization::Adc =>
+      @publish.resolve_path_with_registry(
+        path,
+        fn(source_path) { read_source(source_path) },
+        registry_directory,
+        @publish.AuthorizationMode::Adc,
+        adc_access_token,
+        adc_access_token,
+        http,
+      )
+    @args.Authorization::AccessTokenEnvironment =>
+      @publish.resolve_path_with_registry(
+        path,
+        fn(source_path) { read_source(source_path) },
+        registry_directory,
+        @publish.AuthorizationMode::Ephemeral,
+        fn() {
+          match @env.get_env_var("PUMD_ACCESS_TOKEN") {
+            Some(token) if !token.is_empty() => Ok(token)
+            _ => Err(@publish.AuthenticationProblem::CredentialsNotConfigured)
+          }
+        },
+        fn() {
+          match @env.get_env_var("PUMD_ACCESS_TOKEN") {
+            Some(token) if !token.is_empty() => Ok(token)
+            _ => Err(@publish.AuthenticationProblem::CredentialsNotConfigured)
+          }
+        },
+        http,
+      )
+  }
+  match result {
+    Ok(outcome) => report_publish_outcome(outcome)
     Err(error) => report_failure(error.user_message())
   }
 }
@@ -704,7 +828,7 @@ async fn project_access_token_with_onboarding(
 ) -> Result[String, @publish.AuthenticationProblem] {
   match project_access_token(http, request) {
     Ok(token) => Ok(token)
-    Err(@publish.AuthenticationProblem::CredentialsNotConfigured) if terminal_is_interactive() => {
+    Err(@publish.AuthenticationProblem::CredentialsNotConfigured) if terminal_is_interactive() =>
       if !confirm_yes(
           "Project Authorization is not configured. Run guided setup now?",
         ) {
@@ -725,12 +849,13 @@ async fn project_access_token_with_onboarding(
             project_access_token(http, request)
           }
           Err(error) => {
-            @stdio.stderr.write(format_error_message(error.user_message()) + "\n")
+            @stdio.stderr.write(
+              format_error_message(error.user_message()) + "\n",
+            )
             Err(project_authentication_problem(error))
           }
         }
       }
-    }
     Err(problem) => Err(problem)
   }
 }
@@ -747,17 +872,13 @@ async fn report_publish_outcome(outcome : @publish.PublishOutcome) -> Unit {
       @stdio.stdout.write("already published\n")
       @stdio.stdout.write("document ID: " + success.document_id + "\n")
       @stdio.stdout.write("edit URL: " + success.url + "\n")
-      @stdio.stdout.write(
-        "last successful publish: " + last_publish + "\n",
-      )
+      @stdio.stdout.write("last successful publish: " + last_publish + "\n")
     }
     @publish.PublishOutcome::Updated(success, last_publish) => {
       @stdio.stdout.write("Publication updated.\n")
       @stdio.stdout.write("document ID: " + success.document_id + "\n")
       @stdio.stdout.write("edit URL: " + success.url + "\n")
-      @stdio.stdout.write(
-        "last successful publish: " + last_publish + "\n",
-      )
+      @stdio.stdout.write("last successful publish: " + last_publish + "\n")
     }
     @publish.PublishOutcome::NoOp(success, last_publish) => {
       @stdio.stdout.write(
@@ -765,9 +886,7 @@ async fn report_publish_outcome(outcome : @publish.PublishOutcome) -> Unit {
       )
       @stdio.stdout.write("document ID: " + success.document_id + "\n")
       @stdio.stdout.write("edit URL: " + success.url + "\n")
-      @stdio.stdout.write(
-        "last successful publish: " + last_publish + "\n",
-      )
+      @stdio.stdout.write("last successful publish: " + last_publish + "\n")
       @stdio.stdout.write(
         "reviewer changes and the Published Baseline were preserved.\n",
       )
@@ -777,22 +896,17 @@ async fn report_publish_outcome(outcome : @publish.PublishOutcome) -> Unit {
         "dry run: this source has no Publication; publishing would create\n",
       )
       @stdio.stdout.write("  a new document titled \"" + title + "\"\n")
-      @stdio.stdout.write(
-        "  and register it locally as a Publication.\n",
-      )
+      @stdio.stdout.write("  and register it locally as a Publication.\n")
       @stdio.stdout.write(
         "No authorization, document creation, or registry change was performed.\n",
       )
     }
     @publish.PublishOutcome::DryRunUpdate(report~) => {
-      @stdio.stdout.write(
-        "dry run: update inspection succeeded\n",
-      )
+      @stdio.stdout.write("dry run: update inspection succeeded\n")
       @stdio.stdout.write("document ID: " + report.document_id + "\n")
       @stdio.stdout.write("edit URL: " + report.url + "\n")
       match report.title {
-        Some(title) =>
-          @stdio.stdout.write("current title: " + title + "\n")
+        Some(title) => @stdio.stdout.write("current title: " + title + "\n")
         None => @stdio.stdout.write("current title: unavailable\n")
       }
       @stdio.stdout.write(
@@ -817,18 +931,14 @@ async fn report_publish_outcome(outcome : @publish.PublishOutcome) -> Unit {
         (if report.concurrency_sensitive { "yes" } else { "no" }) +
         "\n",
       )
-      @stdio.stdout.write(
-        "No remote write or registry change was performed.\n",
-      )
+      @stdio.stdout.write("No remote write or registry change was performed.\n")
     }
     @publish.PublishOutcome::DryRunProvisional(success) => {
       @stdio.stdout.write(
         "dry run: this source has a Publication whose population is not\n",
       )
       @stdio.stdout.write("  yet confirmed.\n")
-      @stdio.stdout.write(
-        "document ID: " + success.document_id + "\n",
-      )
+      @stdio.stdout.write("document ID: " + success.document_id + "\n")
       @stdio.stdout.write("edit URL: " + success.url + "\n")
       @stdio.stdout.write(
         "Run publish again to resume population; no state changed.\n",
@@ -849,10 +959,11 @@ async fn report_publish_outcome(outcome : @publish.PublishOutcome) -> Unit {
 }
 
 ///|
-fn publication_status_label(
-  lifecycle : @registry.PublicationLifecycle,
-) -> String {
-  match lifecycle {
+fn publication_status_label(entry : @registry.PublicationEntry) -> String {
+  if entry.pending_merge is Some(_) {
+    return "merge-conflicted"
+  }
+  match entry.lifecycle {
     @registry.PublicationLifecycle::Ready => "ready"
     @registry.PublicationLifecycle::Provisional =>
       "provisional (population not confirmed)"
@@ -862,9 +973,7 @@ fn publication_status_label(
 }
 
 ///|
-fn remote_status_label(
-  status : @publish.RemotePublicationStatus,
-) -> String {
+fn remote_status_label(status : @publish.RemotePublicationStatus) -> String {
   match status {
     @publish.RemotePublicationStatus::Ready => "ready"
     @publish.RemotePublicationStatus::Trashed => "trashed"
@@ -894,23 +1003,17 @@ async fn print_publication_listing(
   }
   match entry.last_successful_publish {
     Some(timestamp) =>
-      @stdio.stdout.write(
-        "  last successful publish: " + timestamp + "\n",
-      )
+      @stdio.stdout.write("  last successful publish: " + timestamp + "\n")
     None => ()
   }
-  @stdio.stdout.write(
-    "  status: " + publication_status_label(entry.lifecycle),
-  )
+  @stdio.stdout.write("  status: " + publication_status_label(entry))
   if missing_source {
     @stdio.stdout.write(" (source missing)")
   }
   @stdio.stdout.write("\n")
   match inspection {
     Some(inspection) => {
-      @stdio.stdout.write(
-        "  remote: " + remote_status_label(inspection.status),
-      )
+      @stdio.stdout.write("  remote: " + remote_status_label(inspection.status))
       match inspection.title {
         Some(title) => @stdio.stdout.write(" (title \"" + title + "\"")
         None => @stdio.stdout.write(" (title unavailable")
@@ -988,11 +1091,8 @@ async fn list_publications(options : @args.ListOptions) -> Unit {
     }
     if options.json {
       @stdio.stdout.write(
-        @publish.publication_refresh_json(
-          document,
-          missing_source,
-          inspections,
-        ) + "\n",
+        @publish.publication_refresh_json(document, missing_source, inspections) +
+        "\n",
       )
       return
     }
@@ -1027,11 +1127,7 @@ async fn list_publications(options : @args.ListOptions) -> Unit {
     }
   })
   for entry in entries {
-    print_publication_listing(
-      entry,
-      None,
-      !@fs.path_exists(entry.source_path),
-    )
+    print_publication_listing(entry, None, !@fs.path_exists(entry.source_path))
   }
 }
 
@@ -1049,11 +1145,8 @@ async fn move_publication(old_path : String, new_path : String) -> Unit {
   // (the reassociation case); canonical_source_path keeps typed paths then.
   let canonical_old = @registry.canonical_source_path(old_path)
   let canonical_new = @registry.canonical_source_path(new_path)
-  match @registry.reassociate_publication(
-    directory,
-    canonical_old,
-    canonical_new,
-  ) {
+  match
+    @registry.reassociate_publication(directory, canonical_old, canonical_new) {
     Ok(_) =>
       @stdio.stdout.write(
         "moved Publication: " + canonical_old + " -> " + canonical_new + "\n",
@@ -1094,6 +1187,9 @@ async fn main {
       publish_file(path, authorization, dry_run)
     Ok(@args.Command::Pull(path, authorization, dry_run, json)) =>
       pull_file(path, authorization, dry_run, json)
+    Ok(@args.Command::PullAbort(path)) => abort_pull_file(path)
+    Ok(@args.Command::Resolve(path, authorization)) =>
+      resolve_file(path, authorization)
     Ok(@args.Command::List(options)) => list_publications(options)
     Ok(@args.Command::Move(old_path, new_path)) =>
       move_publication(old_path, new_path)
@@ -1137,9 +1233,7 @@ async fn complete_project_console_handoff(
     "Guided Project Authorization hands off three browser-owned steps to Google Cloud Console:",
   )
   println("  1) Enable the Google Docs API: " + handoff.enable_docs_api_url)
-  println(
-    "  2) Enable the Google Drive API: " + handoff.enable_drive_api_url
-  )
+  println("  2) Enable the Google Drive API: " + handoff.enable_drive_api_url)
   println(
     "  3) Create a Desktop OAuth client and download its JSON: " +
     handoff.oauth_clients_url,
@@ -1177,9 +1271,7 @@ async fn complete_project_console_handoff(
     return Err(@authorization.ProjectConsoleHandoffError::Cancelled)
   }
   open_project_console_url(handoff.enable_drive_api_url)
-  if !confirm_yes(
-      "Have you enabled the Google Drive API for the same project?",
-    ) {
+  if !confirm_yes("Have you enabled the Google Drive API for the same project?") {
     return Err(@authorization.ProjectConsoleHandoffError::Cancelled)
   }
   open_project_console_url(handoff.oauth_clients_url)
@@ -1323,7 +1415,8 @@ async fn prepared_setup_store(
     @stdio.stderr.write(
       format_error_message(
         "warning: file credential storage is an explicit reduced-protection choice; no OS vault fallback is active.",
-      ) + "\n",
+      ) +
+      "\n",
     )
   }
   Ok(store)

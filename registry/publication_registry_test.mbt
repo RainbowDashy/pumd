@@ -1,28 +1,74 @@
 ///|
-fn test_directory(name : String) -> String { "_build/registry-" + name }
+fn test_directory(name : String) -> String {
+  "_build/registry-" + name
+}
 
 ///|
 async fn clean_directory(directory : String) -> Unit {
-  @async_fs.rmdir(directory, recursive=true) catch { _ => () }
+  @async_fs.rmdir(directory, recursive=true) catch {
+    _ => ()
+  }
 }
 
 ///|
 test "registry directory resolution follows XDG then Windows then HOME" {
-  assert_eq(resolve_registry_directory(fn(name) { if name == "XDG_CONFIG_HOME" { Some("/xdg") } else { None } }), Ok("/xdg/pumd"))
-  assert_eq(resolve_registry_directory(fn(name) { if name == "APPDATA" { Some("/appdata") } else { None } }), Ok("/appdata/pumd"))
-  assert_eq(resolve_registry_directory(fn(name) { if name == "HOME" { Some("/home/user") } else { None } }), Ok("/home/user/.config/pumd"))
-  guard resolve_registry_directory(fn(_) { None }) is Err(Unavailable(_)) else { fail("missing environment must fail") }
+  assert_eq(
+    resolve_registry_directory(fn(name) {
+      if name == "XDG_CONFIG_HOME" {
+        Some("/xdg")
+      } else {
+        None
+      }
+    }),
+    Ok("/xdg/pumd"),
+  )
+  assert_eq(
+    resolve_registry_directory(fn(name) {
+      if name == "APPDATA" {
+        Some("/appdata")
+      } else {
+        None
+      }
+    }),
+    Ok("/appdata/pumd"),
+  )
+  assert_eq(
+    resolve_registry_directory(fn(name) {
+      if name == "HOME" {
+        Some("/home/user")
+      } else {
+        None
+      }
+    }),
+    Ok("/home/user/.config/pumd"),
+  )
+  guard resolve_registry_directory(fn(_) { None }) is Err(Unavailable(_)) else {
+    fail("missing environment must fail")
+  }
 }
 
 ///|
 async test "missing registry is empty and provisional publications round trip" {
   let directory = test_directory("round-trip")
   clean_directory(directory)
-  guard load_registry_document(directory) is Ok(empty) else { fail("missing registry should load") }
+  guard load_registry_document(directory) is Ok(empty) else {
+    fail("missing registry should load")
+  }
   assert_eq(empty.entries.length(), 0)
-  let entry : PublicationEntry = { source_path: "notes/a.md", document_id: Some("doc-a"), url: Some("https://docs/a"), managed_tab_id: Some("tab-a"), lifecycle: Provisional, last_successful_publish: None, published_baseline: None }
+  let entry : PublicationEntry = {
+    source_path: "notes/a.md",
+    document_id: Some("doc-a"),
+    url: Some("https://docs/a"),
+    managed_tab_id: Some("tab-a"),
+    lifecycle: Provisional,
+    last_successful_publish: None,
+    published_baseline: None,
+    pending_merge: None,
+  }
   assert_eq(register_provisional_publication(directory, entry), Ok(()))
-  guard load_registry_document(directory) is Ok(loaded) else { fail("registry should load") }
+  guard load_registry_document(directory) is Ok(loaded) else {
+    fail("registry should load")
+  }
   assert_eq(loaded.entries.length(), 1)
   assert_eq(loaded.entries[0].document_id, Some("doc-a"))
   clean_directory(directory)
@@ -32,12 +78,30 @@ async test "missing registry is empty and provisional publications round trip" {
 async test "registry rejects duplicates and fails closed on corruption" {
   let directory = test_directory("corruption")
   clean_directory(directory)
-  let entry : PublicationEntry = { source_path: "notes/a.md", document_id: Some("doc-a"), url: Some("https://docs/a"), managed_tab_id: Some("tab-a"), lifecycle: Provisional, last_successful_publish: None, published_baseline: None }
+  let entry : PublicationEntry = {
+    source_path: "notes/a.md",
+    document_id: Some("doc-a"),
+    url: Some("https://docs/a"),
+    managed_tab_id: Some("tab-a"),
+    lifecycle: Provisional,
+    last_successful_publish: None,
+    published_baseline: None,
+    pending_merge: None,
+  }
   assert_eq(register_provisional_publication(directory, entry), Ok(()))
-  guard register_provisional_publication(directory, entry) is Err(DuplicateSource("notes/a.md")) else { fail("duplicate source must fail") }
-  @async_fs.write_file(registry_file_path(directory), "garbage", create_mode=@async_fs.TruncateExisting)
+  guard register_provisional_publication(directory, entry)
+    is Err(DuplicateSource("notes/a.md")) else {
+    fail("duplicate source must fail")
+  }
+  @async_fs.write_file(
+    registry_file_path(directory),
+    "garbage",
+    create_mode=@async_fs.TruncateExisting,
+  )
   let before = @async_fs.read_file(registry_file_path(directory)).text()
-  guard record_blocked_publication(directory, "notes/b.md") is Err(Malformed(_)) else { fail("corruption must fail closed") }
+  guard record_blocked_publication(directory, "notes/b.md") is Err(Malformed(_)) else {
+    fail("corruption must fail closed")
+  }
   assert_eq(@async_fs.read_file(registry_file_path(directory)).text(), before)
   clean_directory(directory)
 }
@@ -47,7 +111,23 @@ async test "blocked, forget, reassociate and canonical path behavior" {
   let directory = test_directory("mutations")
   clean_directory(directory)
   assert_eq(record_blocked_publication(directory, "notes/blocked.md"), Ok(()))
-  guard commit_ready_publication(directory, "notes/blocked.md", { metadata: { title: None, locale: None }, render_metadata: { style_profile_id: "default", style_profile_version: 1 }, content: [], provenance: None }, "now") is Err(BlockedPublication(_)) else { fail("blocked publication must not become ready") }
+  guard commit_ready_publication(
+      directory,
+      "notes/blocked.md",
+      {
+        metadata: { title: None, locale: None },
+        render_metadata: {
+          style_profile_id: "default",
+          style_profile_version: 1,
+        },
+        content: [],
+        provenance: None,
+      },
+      "now",
+    )
+    is Err(BlockedPublication(_)) else {
+    fail("blocked publication must not become ready")
+  }
   assert_eq(forget_publication(directory, "notes/blocked.md"), Ok(true))
   assert_eq(forget_publication(directory, "notes/blocked.md"), Ok(false))
   let missing = "_build/registry-not-a-real-source.md"
@@ -100,7 +180,10 @@ fn test_paragraph_style() -> @pumd.ParagraphStyle {
 fn test_baseline() -> @pumd.DesiredDocument {
   {
     metadata: { title: Some("Design Notes"), locale: Some("en") },
-    render_metadata: { style_profile_id: "pumd.default", style_profile_version: 2 },
+    render_metadata: {
+      style_profile_id: "pumd.default",
+      style_profile_version: 2,
+    },
     content: [
       @pumd.StructuralElement::Paragraph({
         runs: [
@@ -130,9 +213,16 @@ fn test_baseline() -> @pumd.DesiredDocument {
           background_color: None,
           indent_start_points: Some(36),
           indent_first_line_points: Some(18),
-          border_left: Some({ color: "#000000", width_points: 3, padding_points: 4 }),
+          border_left: Some({
+            color: "#000000",
+            width_points: 3,
+            padding_points: 4,
+          }),
         },
-        bullet: Some({ kind: @pumd.ListKind::Numbered(start=1, delimiter="."), nesting_level: 1 }),
+        bullet: Some({
+          kind: @pumd.ListKind::Numbered(start=1, delimiter="."),
+          nesting_level: 1,
+        }),
         provenance: Some({ start: 0, end: 30 }),
       }),
       @pumd.StructuralElement::Table({
@@ -141,7 +231,13 @@ fn test_baseline() -> @pumd.DesiredDocument {
             cells: [
               {
                 content: [
-                  { runs: [test_run("Cell A")], inline_images: [], style: test_paragraph_style(), bullet: None, provenance: None },
+                  {
+                    runs: [test_run("Cell A")],
+                    inline_images: [],
+                    style: test_paragraph_style(),
+                    bullet: None,
+                    provenance: None,
+                  },
                 ],
                 alignment: @pumd.TableAlignment::Center,
                 background_color: Some("#ffffff"),
@@ -176,6 +272,7 @@ async test "updating a ready publication replaces its baseline without changing 
     lifecycle: Ready,
     last_successful_publish: Some("2026-08-05T09:30:00Z"),
     published_baseline: Some(original),
+    pending_merge: None,
   }
   let untouched : PublicationEntry = {
     source_path: "notes/other.md",
@@ -185,9 +282,13 @@ async test "updating a ready publication replaces its baseline without changing 
     lifecycle: Provisional,
     last_successful_publish: None,
     published_baseline: None,
+    pending_merge: None,
   }
   let document : RegistryDocument = { entries: [ready, untouched] }
-  guard document_with_updated_baseline(document, "notes/ready.md", replacement, "2026-08-06T09:30:00Z") is Ok(updated) else {
+  guard document_with_updated_baseline(
+      document, "notes/ready.md", replacement, "2026-08-06T09:30:00Z",
+    )
+    is Ok(updated) else {
     fail("ready publication update must succeed")
   }
   let updated_ready = updated.entries[0]
@@ -196,7 +297,10 @@ async test "updating a ready publication replaces its baseline without changing 
   assert_eq(updated_ready.url, ready.url)
   assert_eq(updated_ready.managed_tab_id, ready.managed_tab_id)
   assert_eq(updated_ready.last_successful_publish, Some("2026-08-06T09:30:00Z"))
-  assert_eq(@debug.to_string(updated_ready.published_baseline), @debug.to_string(Some(replacement)))
+  assert_eq(
+    @debug.to_string(updated_ready.published_baseline),
+    @debug.to_string(Some(replacement)),
+  )
   assert_eq(@debug.to_string(updated.entries[1]), @debug.to_string(untouched))
 }
 
@@ -210,6 +314,7 @@ async test "updating provisional, blocked, or missing publications is rejected" 
     lifecycle: Provisional,
     last_successful_publish: None,
     published_baseline: None,
+    pending_merge: None,
   }
   let blocked : PublicationEntry = {
     source_path: "notes/blocked.md",
@@ -219,15 +324,34 @@ async test "updating provisional, blocked, or missing publications is rejected" 
     lifecycle: Blocked,
     last_successful_publish: None,
     published_baseline: None,
+    pending_merge: None,
   }
   let document : RegistryDocument = { entries: [provisional, blocked] }
-  guard document_with_updated_baseline(document, "notes/provisional.md", test_baseline(), "now") is Err(Invalid(_)) else {
+  guard document_with_updated_baseline(
+      document,
+      "notes/provisional.md",
+      test_baseline(),
+      "now",
+    )
+    is Err(Invalid(_)) else {
     fail("provisional publication update must be invalid")
   }
-  guard document_with_updated_baseline(document, "notes/blocked.md", test_baseline(), "now") is Err(Invalid(_)) else {
+  guard document_with_updated_baseline(
+      document,
+      "notes/blocked.md",
+      test_baseline(),
+      "now",
+    )
+    is Err(Invalid(_)) else {
     fail("blocked publication update must be invalid")
   }
-  guard document_with_updated_baseline(document, "notes/missing.md", test_baseline(), "now") is Err(NotFound("notes/missing.md")) else {
+  guard document_with_updated_baseline(
+      document,
+      "notes/missing.md",
+      test_baseline(),
+      "now",
+    )
+    is Err(NotFound("notes/missing.md")) else {
     fail("missing publication update must be not found")
   }
 }
@@ -244,18 +368,35 @@ async test "updating a publication baseline persists a valid registry" {
     lifecycle: Provisional,
     last_successful_publish: None,
     published_baseline: None,
+    pending_merge: None,
   }
   assert_eq(register_provisional_publication(directory, entry), Ok(()))
-  assert_eq(commit_ready_publication(directory, "notes/persist.md", test_baseline(), "first"), Ok(()))
+  assert_eq(
+    commit_ready_publication(
+      directory,
+      "notes/persist.md",
+      test_baseline(),
+      "first",
+    ),
+    Ok(()),
+  )
   let replacement = updated_baseline("Persisted update")
-  assert_eq(update_publication_baseline(directory, "notes/persist.md", replacement, "second"), Ok(()))
+  assert_eq(
+    update_publication_baseline(
+      directory, "notes/persist.md", replacement, "second",
+    ),
+    Ok(()),
+  )
   guard load_registry_document(directory) is Ok(loaded) else {
     fail("updated registry must load")
   }
   assert_eq(validate_registry_document(loaded), Ok(()))
   let updated = loaded.entries[0]
   assert_eq(updated.last_successful_publish, Some("second"))
-  assert_eq(@debug.to_string(updated.published_baseline), @debug.to_string(Some(replacement)))
+  assert_eq(
+    @debug.to_string(updated.published_baseline),
+    @debug.to_string(Some(replacement)),
+  )
   clean_directory(directory)
 }
 
@@ -271,15 +412,28 @@ async test "updating twice replaces the previous published baseline" {
     lifecycle: Ready,
     last_successful_publish: Some("original"),
     published_baseline: Some(test_baseline()),
+    pending_merge: None,
   }
-  guard document_with_updated_baseline({ entries: [ready] }, "notes/twice.md", first, "first") is Ok(after_first) else {
+  guard document_with_updated_baseline(
+      { entries: [ready] },
+      "notes/twice.md",
+      first,
+      "first",
+    )
+    is Ok(after_first) else {
     fail("first update must succeed")
   }
-  guard document_with_updated_baseline(after_first, "notes/twice.md", second, "second") is Ok(after_second) else {
+  guard document_with_updated_baseline(
+      after_first, "notes/twice.md", second, "second",
+    )
+    is Ok(after_second) else {
     fail("second update must succeed")
   }
   assert_eq(after_second.entries[0].last_successful_publish, Some("second"))
-  assert_eq(@debug.to_string(after_second.entries[0].published_baseline), @debug.to_string(Some(second)))
+  assert_eq(
+    @debug.to_string(after_second.entries[0].published_baseline),
+    @debug.to_string(Some(second)),
+  )
 }
 
 ///|
@@ -292,8 +446,15 @@ async test "updating a publication never changes its destination identity" {
     lifecycle: Ready,
     last_successful_publish: Some("before"),
     published_baseline: Some(test_baseline()),
+    pending_merge: None,
   }
-  guard document_with_updated_baseline({ entries: [ready] }, "notes/identity.md", updated_baseline("Identity update"), "after") is Ok(updated) else {
+  guard document_with_updated_baseline(
+      { entries: [ready] },
+      "notes/identity.md",
+      updated_baseline("Identity update"),
+      "after",
+    )
+    is Ok(updated) else {
     fail("ready publication update must succeed")
   }
   assert_eq(updated.entries[0].document_id, ready.document_id)
@@ -313,6 +474,7 @@ async test "ready publication round-trips a complete Published Baseline" {
     lifecycle: Provisional,
     last_successful_publish: None,
     published_baseline: None,
+    pending_merge: None,
   }
   assert_eq(register_provisional_publication(directory, entry), Ok(()))
   assert_eq(
@@ -339,11 +501,12 @@ async test "ready publication round-trips a complete Published Baseline" {
     None => fail("published baseline must round trip")
   }
   guard commit_ready_publication(
-    directory,
-    "notes/design.md",
-    test_baseline(),
-    "2026-08-05T09:31:00Z",
-  ) is Err(Invalid(_)) else {
+      directory,
+      "notes/design.md",
+      test_baseline(),
+      "2026-08-05T09:31:00Z",
+    )
+    is Err(Invalid(_)) else {
     fail("committing an already-ready publication must fail")
   }
   clean_directory(directory)
@@ -364,6 +527,7 @@ async test "registry directory and file are owner-only on non-Windows" {
     lifecycle: Provisional,
     last_successful_publish: None,
     published_baseline: None,
+    pending_merge: None,
   }
   assert_eq(register_provisional_publication(directory, entry), Ok(()))
   assert_eq(registry_file_mode(directory), 0o700)
@@ -371,13 +535,33 @@ async test "registry directory and file are owner-only on non-Windows" {
   clean_directory(directory)
 }
 
+///|
 async test "version-one baselines without image fields remain readable" {
-  let directory = test_directory("legacy-baseline"); clean_directory(directory); @async_fs.mkdir(directory, permission=0o700, recursive=true)
-  let baseline = Json::Json(test_baseline()).stringify(); let legacy = baseline.replace_all(old=",\"inline_images\":[]", new="")
-  let registry = "{\"version\":1,\"publications\":[{\"source_path\":\"notes/legacy.md\",\"document_id\":\"doc\",\"url\":\"u\",\"managed_tab_id\":\"tab\",\"lifecycle\":\"ready\",\"last_successful_publish\":\"now\",\"published_baseline\":" + legacy + "}]}"
-  @async_fs.write_file(registry_file_path(directory), registry, create_mode=@async_fs.CreateNew)
-  guard load_registry_document(directory) is Ok(document) else { fail("legacy baseline must load") }; guard document.entries[0].published_baseline is Some(baseline) else { fail("legacy baseline must be restored") }
-  match baseline.content[0] { @pumd.StructuralElement::Paragraph(paragraph) => assert_true(paragraph.inline_images.is_empty()); _ => fail("expected paragraph") }; clean_directory(directory)
+  let directory = test_directory("legacy-baseline")
+  clean_directory(directory)
+  @async_fs.mkdir(directory, permission=0o700, recursive=true)
+  let baseline = Json::Json(test_baseline()).stringify()
+  let legacy = baseline.replace_all(old=",\"inline_images\":[]", new="")
+  let registry = "{\"version\":1,\"publications\":[{\"source_path\":\"notes/legacy.md\",\"document_id\":\"doc\",\"url\":\"u\",\"managed_tab_id\":\"tab\",\"lifecycle\":\"ready\",\"last_successful_publish\":\"now\",\"published_baseline\":" +
+    legacy +
+    "}]}"
+  @async_fs.write_file(
+    registry_file_path(directory),
+    registry,
+    create_mode=@async_fs.CreateNew,
+  )
+  guard load_registry_document(directory) is Ok(document) else {
+    fail("legacy baseline must load")
+  }
+  guard document.entries[0].published_baseline is Some(baseline) else {
+    fail("legacy baseline must be restored")
+  }
+  match baseline.content[0] {
+    @pumd.StructuralElement::Paragraph(paragraph) =>
+      assert_true(paragraph.inline_images.is_empty())
+    _ => fail("expected paragraph")
+  }
+  clean_directory(directory)
 }
 
 ///|
@@ -392,6 +576,7 @@ async test "duplicate document IDs are rejected in mutation and load" {
     lifecycle: Provisional,
     last_successful_publish: None,
     published_baseline: None,
+    pending_merge: None,
   }
   assert_eq(register_provisional_publication(directory, first), Ok(()))
   let second : PublicationEntry = {
@@ -399,13 +584,16 @@ async test "duplicate document IDs are rejected in mutation and load" {
     source_path: "notes/b.md",
     managed_tab_id: Some("tab-b"),
   }
-  guard register_provisional_publication(directory, second) is Err(
-    DuplicateDocument("doc-shared"),
-  ) else {
+  guard register_provisional_publication(directory, second)
+    is Err(DuplicateDocument("doc-shared")) else {
     fail("a document ID must belong to at most one publication")
   }
   let text = "{\"version\":1,\"publications\":[{\"source_path\":\"x.md\",\"document_id\":\"dup\",\"url\":\"u\",\"managed_tab_id\":\"t\",\"lifecycle\":\"provisional\",\"last_successful_publish\":null,\"published_baseline\":null},{\"source_path\":\"y.md\",\"document_id\":\"dup\",\"url\":\"u\",\"managed_tab_id\":\"t\",\"lifecycle\":\"provisional\",\"last_successful_publish\":null,\"published_baseline\":null}]}"
-  @async_fs.write_file(registry_file_path(directory), text, create_mode=@async_fs.TruncateExisting)
+  @async_fs.write_file(
+    registry_file_path(directory),
+    text,
+    create_mode=@async_fs.TruncateExisting,
+  )
   guard load_registry_document(directory) is Err(Malformed(_)) else {
     fail("a file with duplicate document IDs must fail closed")
   }
@@ -416,12 +604,22 @@ async test "duplicate document IDs are rejected in mutation and load" {
 async test "unsupported versions and empty files fail closed without rewriting" {
   let directory = test_directory("versions")
   clean_directory(directory)
-  @async_fs.mkdir(directory, permission=0o700, recursive=true) catch { _ => () }
-  @async_fs.write_file(registry_file_path(directory), "{\"version\":2,\"publications\":[]}", create_mode=@async_fs.CreateNew)
+  @async_fs.mkdir(directory, permission=0o700, recursive=true) catch {
+    _ => ()
+  }
+  @async_fs.write_file(
+    registry_file_path(directory),
+    "{\"version\":2,\"publications\":[]}",
+    create_mode=@async_fs.CreateNew,
+  )
   guard load_registry_document(directory) is Err(UnsupportedVersion(2)) else {
     fail("version 2 must be rejected")
   }
-  @async_fs.write_file(registry_file_path(directory), "", create_mode=@async_fs.TruncateExisting)
+  @async_fs.write_file(
+    registry_file_path(directory),
+    "",
+    create_mode=@async_fs.TruncateExisting,
+  )
   guard load_registry_document(directory) is Err(Malformed(_)) else {
     fail("an empty registry must be malformed")
   }
@@ -445,12 +643,18 @@ async test "atomic replacement leaves no temporary files and tolerates crash res
     lifecycle: Provisional,
     last_successful_publish: None,
     published_baseline: None,
+    pending_merge: None,
   }
   assert_eq(register_provisional_publication(directory, entry), Ok(()))
   let residue = registry_file_path(directory) + ".tmp-interrupted"
   @async_fs.write_file(residue, "junk", create_mode=@async_fs.CreateNew)
   assert_eq(
-    commit_ready_publication(directory, "notes/atomic.md", test_baseline(), "2026-08-05T10:00:00Z"),
+    commit_ready_publication(
+      directory,
+      "notes/atomic.md",
+      test_baseline(),
+      "2026-08-05T10:00:00Z",
+    ),
     Ok(()),
   )
   guard load_registry_document(directory) is Ok(loaded) else {
@@ -459,7 +663,8 @@ async test "atomic replacement leaves no temporary files and tolerates crash res
   assert_eq(loaded.entries.length(), 1)
   let names = @async_fs.readdir(directory)
   for name in names {
-    if name.has_prefix("publications.json.tmp-") && name != "publications.json.tmp-interrupted" {
+    if name.has_prefix("publications.json.tmp-") &&
+      name != "publications.json.tmp-interrupted" {
       fail("no temporary files may remain after an atomic save")
     }
   }
@@ -481,6 +686,7 @@ async test "concurrent registration serializes through the registry lock" {
         lifecycle: Provisional,
         last_successful_publish: None,
         published_baseline: None,
+        pending_merge: None,
       }
       outcomes.push(register_provisional_publication(directory, entry))
     }
@@ -493,6 +699,7 @@ async test "concurrent registration serializes through the registry lock" {
         lifecycle: Provisional,
         last_successful_publish: None,
         published_baseline: None,
+        pending_merge: None,
       }
       outcomes.push(register_provisional_publication(directory, entry))
     }
@@ -505,7 +712,8 @@ async test "concurrent registration serializes through the registry lock" {
     match outcome {
       Ok(_) => successes = successes + 1
       Err(DuplicateSource(_)) => duplicate_sources = duplicate_sources + 1
-      Err(error) => fail("unexpected concurrency error: " + error.user_message())
+      Err(error) =>
+        fail("unexpected concurrency error: " + error.user_message())
     }
   }
   assert_eq(successes, 1)
@@ -525,24 +733,31 @@ async test "reassociation validates destination ownership and blocked refusals" 
     lifecycle: Provisional,
     last_successful_publish: None,
     published_baseline: None,
+    pending_merge: None,
   }
   assert_eq(register_provisional_publication(directory, first), Ok(()))
   assert_eq(record_blocked_publication(directory, "notes/taken.md"), Ok(()))
-  guard reassociate_publication(directory, "notes/old.md", "notes/taken.md") is Err(
-    DestinationOccupied("notes/taken.md"),
-  ) else {
+  guard reassociate_publication(directory, "notes/old.md", "notes/taken.md")
+    is Err(DestinationOccupied("notes/taken.md")) else {
     fail("an occupied destination must be rejected")
   }
-  guard reassociate_publication(directory, "notes/absent.md", "notes/new.md") is Err(
-    NotFound("notes/absent.md"),
-  ) else {
+  guard reassociate_publication(directory, "notes/absent.md", "notes/new.md")
+    is Err(NotFound("notes/absent.md")) else {
     fail("an unknown source must be rejected")
   }
-  assert_eq(reassociate_publication(directory, "notes/old.md", "notes/new.md"), Ok(()))
+  assert_eq(
+    reassociate_publication(directory, "notes/old.md", "notes/new.md"),
+    Ok(()),
+  )
   guard load_registry_document(directory) is Ok(loaded) else {
     fail("registry must load after reassociation")
   }
-  assert_eq(publication_for_source(loaded, "notes/new.md").map(fn(entry) { entry.document_id }), Some(Some("doc-move")))
+  assert_eq(
+    publication_for_source(loaded, "notes/new.md").map(fn(entry) {
+      entry.document_id
+    }),
+    Some(Some("doc-move")),
+  )
   guard publication_for_source(loaded, "notes/old.md") is None else {
     fail("the old source must be free after reassociation")
   }
@@ -554,11 +769,214 @@ async test "reassociation validates destination ownership and blocked refusals" 
     lifecycle: Provisional,
     last_successful_publish: None,
     published_baseline: None,
+    pending_merge: None,
   }
-  guard document_with_provisional(loaded, blocked) is Err(
-    BlockedPublication("notes/taken.md"),
-  ) else {
+  guard document_with_provisional(loaded, blocked)
+    is Err(BlockedPublication("notes/taken.md")) else {
     fail("a blocked source must refuse provisional registration")
   }
   clean_directory(directory)
+}
+
+///|
+fn pending_merge_fixture() -> PendingMerge {
+  {
+    pre_pull_source: "# Before\r\n\r\nExact bytes\r\n",
+    marked_source: "<<<<<<< local\r\nLocal\r\n=======\r\nRemote\r\n>>>>>>> remote\r\n",
+    observed_remote_body: "{\"documentId\":\"doc-pending\",\"revisionId\":\"rev-7\"}",
+    observed_revision_id: "rev-7",
+  }
+}
+
+///|
+fn pending_ready_entry() -> PublicationEntry {
+  {
+    source_path: "notes/pending.md",
+    document_id: Some("doc-pending"),
+    url: Some("https://docs.google.com/document/d/doc-pending/edit"),
+    managed_tab_id: Some("tab-pending"),
+    lifecycle: Ready,
+    last_successful_publish: Some("before"),
+    published_baseline: Some(test_baseline()),
+    pending_merge: None,
+  }
+}
+
+///|
+test "a ready Publication can begin and clear a Pending Merge without changing its baseline" {
+  let entry = pending_ready_entry()
+  let pending = pending_merge_fixture()
+  guard document_with_pending_merge(
+      { entries: [entry] },
+      entry.source_path,
+      pending,
+    )
+    is Ok(begun) else {
+    fail("a ready Publication must begin a Pending Merge")
+  }
+  assert_eq(
+    @debug.to_string(begun.entries[0].pending_merge),
+    @debug.to_string(Some(pending)),
+  )
+  assert_eq(
+    @debug.to_string(begun.entries[0].published_baseline),
+    @debug.to_string(entry.published_baseline),
+  )
+  guard document_without_pending_merge(begun, entry.source_path) is Ok(cleared) else {
+    fail("an existing Pending Merge must clear")
+  }
+  assert_eq(cleared.entries[0].pending_merge, None)
+  assert_eq(
+    @debug.to_string(cleared.entries[0].published_baseline),
+    @debug.to_string(entry.published_baseline),
+  )
+}
+
+///|
+test "Pending Merge mutations require the matching registry state" {
+  let entry = pending_ready_entry()
+  let pending = pending_merge_fixture()
+  guard document_without_pending_merge({ entries: [entry] }, entry.source_path)
+    is Err(PendingMergeRequired("notes/pending.md")) else {
+    fail("clear must require a Pending Merge")
+  }
+  guard document_with_pending_merge(
+      {
+        entries: [
+          {
+            ..entry,
+            lifecycle: Provisional,
+            last_successful_publish: None,
+            published_baseline: None,
+          },
+        ],
+      },
+      entry.source_path,
+      pending,
+    )
+    is Err(Invalid(_)) else {
+    fail("only a ready Publication can begin a Pending Merge")
+  }
+  guard document_with_pending_merge(
+      { entries: [{ ..entry, pending_merge: Some(pending) }] },
+      entry.source_path,
+      pending,
+    )
+    is Err(PendingMergeBlocked("notes/pending.md")) else {
+    fail("a second Pending Merge must be blocked")
+  }
+}
+
+///|
+async test "Pending Merge round-trips and legacy missing or null state loads as absent" {
+  let directory = test_directory("pending-merge")
+  clean_directory(directory)
+  let entry = pending_ready_entry()
+  assert_eq(
+    save_registry_document(directory, {
+      entries: [{ ..entry, pending_merge: Some(pending_merge_fixture()) }],
+    }),
+    Ok(()),
+  )
+  guard load_registry_document(directory) is Ok(loaded) else {
+    fail("Pending Merge must load")
+  }
+  assert_eq(
+    @debug.to_string(loaded.entries[0].pending_merge),
+    @debug.to_string(Some(pending_merge_fixture())),
+  )
+  let serialized = @async_fs.read_file(registry_file_path(directory)).text()
+  assert_true(serialized.contains("\"pending_merge\""))
+  assert_true(serialized.contains("\"marked_source\""))
+  let legacy = serialized.replace_all(
+    old=",\"pending_merge\":" + Json::Json(pending_merge_fixture()).stringify(),
+    new="",
+  )
+  @async_fs.write_file(
+    registry_file_path(directory),
+    legacy,
+    create_mode=@async_fs.TruncateExisting,
+  )
+  guard load_registry_document(directory) is Ok(missing) else {
+    fail("a missing legacy pending_merge must load")
+  }
+  assert_eq(missing.entries[0].pending_merge, None)
+  @async_fs.write_file(
+    registry_file_path(directory),
+    serialized.replace_all(
+      old="\"pending_merge\":" + Json::Json(pending_merge_fixture()).stringify(),
+      new="\"pending_merge\":null",
+    ),
+    create_mode=@async_fs.TruncateExisting,
+  )
+  guard load_registry_document(directory) is Ok(null_state) else {
+    fail("a null pending_merge must load")
+  }
+  assert_eq(null_state.entries[0].pending_merge, None)
+  clean_directory(directory)
+}
+
+///|
+test "Pending Merge is orthogonal only to the ready lifecycle shape" {
+  let entry = pending_ready_entry()
+  let pending = pending_merge_fixture()
+  assert_eq(
+    validate_registry_document({
+      entries: [{ ..entry, pending_merge: Some(pending) }],
+    }),
+    Ok(()),
+  )
+  guard validate_registry_document({
+      entries: [
+        {
+          ..entry,
+          lifecycle: Provisional,
+          last_successful_publish: None,
+          published_baseline: None,
+          pending_merge: Some(pending),
+        },
+      ],
+    })
+    is Err(Invalid(_)) else {
+    fail("a provisional Publication cannot contain a Pending Merge")
+  }
+}
+
+///|
+test "move and forget reject a Publication with Pending Merge" {
+  let entry = {
+    ..pending_ready_entry(),
+    pending_merge: Some(pending_merge_fixture()),
+  }
+  let document : RegistryDocument = { entries: [entry] }
+  guard document_with_reassigned_source(
+      document,
+      entry.source_path,
+      "notes/moved.md",
+    )
+    is Err(PendingMergeBlocked("notes/pending.md")) else {
+    fail("move must be blocked by Pending Merge")
+  }
+  guard document_with_reassigned_source(
+      {
+        entries: [
+          entry,
+          {
+            ..pending_ready_entry(),
+            source_path: "notes/taken.md",
+            document_id: Some("doc-taken"),
+            pending_merge: None,
+          },
+        ],
+      },
+      entry.source_path,
+      "notes/taken.md",
+    )
+    is Err(PendingMergeBlocked("notes/pending.md")) else {
+    fail("Pending Merge must block move before destination validation")
+  }
+  guard document_without_publication(document, entry.source_path)
+    is Err(PendingMergeBlocked("notes/pending.md")) else {
+    fail("forget must be blocked by Pending Merge")
+  }
 }
