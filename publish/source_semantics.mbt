@@ -100,6 +100,68 @@ fn semantic_code_block(style : @pumd.ParagraphStyle) -> Bool {
 }
 
 ///|
+fn semantic_runs_mergeable(
+  left : SourceSemanticRun,
+  right : SourceSemanticRun,
+) -> Bool {
+  left.bold == right.bold &&
+  left.italic == right.italic &&
+  left.code == right.code &&
+  left.link == right.link
+}
+
+///|
+fn semantic_image_at_offset(
+  images : Array[SourceSemanticImage],
+  offset : Int,
+) -> Bool {
+  for image in images {
+    if image.text_offset == offset { return true }
+  }
+  false
+}
+
+///|
+fn normalize_semantic_runs(
+  runs : Array[SourceSemanticRun],
+  images? : Array[SourceSemanticImage] = [],
+) -> Array[SourceSemanticRun] {
+  let normalized : Array[SourceSemanticRun] = []
+  let mut text_offset = 0
+  for run in runs {
+    if run.text.is_empty() {
+      continue
+    }
+    let last = normalized.length() - 1
+    if last >= 0 &&
+      !semantic_image_at_offset(images, text_offset) &&
+      semantic_runs_mergeable(normalized[last], run) {
+      normalized[last] = {
+        ..normalized[last],
+        text: normalized[last].text + run.text,
+      }
+    } else {
+      normalized.push(run)
+    }
+    text_offset = advance_google_docs_index(index=text_offset, text=run.text)
+  }
+  normalized
+}
+
+///|
+fn semantic_table_header_paragraph(
+  semantic : SourceSemanticParagraph,
+) -> SourceSemanticParagraph {
+  {
+    ..semantic,
+    runs: normalize_semantic_runs(
+      semantic.runs.map(fn(run) { { ..run, bold: false } }),
+      images=semantic.images,
+    ),
+  }
+}
+
+///|
 fn desired_list(bullet : @pumd.BulletProperties?) -> (SourceSemanticList?, Int) {
   match bullet {
     Some(value) => {
@@ -116,19 +178,23 @@ fn desired_list(bullet : @pumd.BulletProperties?) -> (SourceSemanticList?, Int) 
 ///|
 fn desired_paragraph_semantics(paragraph : @pumd.Paragraph) -> SourceSemanticParagraph {
   let (list, nesting_level) = desired_list(paragraph.bullet)
+  let images = paragraph.inline_images.map(fn(image) {
+    SourceSemanticImage::{ source_url: image.source_url, text_offset: image.text_offset }
+  })
   {
-    runs: paragraph.runs.map(fn(run) {
-      SourceSemanticRun::{
-        text: run.content,
-        bold: run.style.bold,
-        italic: run.style.italic,
-        code: semantic_code_text(run.style),
-        link: run.link.map(fn(value) { value.url }),
-      }
-    }),
-    images: paragraph.inline_images.map(fn(image) {
-      SourceSemanticImage::{ source_url: image.source_url, text_offset: image.text_offset }
-    }),
+    runs: normalize_semantic_runs(
+      paragraph.runs.map(fn(run) {
+        SourceSemanticRun::{
+          text: run.content,
+          bold: run.style.bold,
+          italic: run.style.italic,
+          code: semantic_code_text(run.style),
+          link: run.link.map(fn(value) { value.url }),
+        }
+      }),
+      images=images,
+    ),
+    images,
     heading: semantic_heading(paragraph.style.named_style),
     list,
     nesting_level,
@@ -146,7 +212,7 @@ fn desired_table_semantics(table : @pumd.Table) -> SourceSemanticTable {
           paragraphs: cell.content.map(fn(paragraph) {
             let semantic = desired_paragraph_semantics(paragraph)
             if row.is_header {
-              { ..semantic, runs: semantic.runs.map(fn(run) { { ..run, bold: false } }) }
+              semantic_table_header_paragraph(semantic)
             } else {
               semantic
             }
@@ -225,34 +291,36 @@ fn remote_run_source_text(run : RemoteRun, is_last : Bool) -> String {
 }
 
 ///|
-fn remote_semantic_runs(paragraph : RemoteParagraph) -> Array[SourceSemanticRun] {
+fn remote_semantic_runs(
+  paragraph : RemoteParagraph,
+  images : Array[SourceSemanticImage],
+) -> Array[SourceSemanticRun] {
   let semantic : Array[SourceSemanticRun] = []
   for index, run in paragraph.runs {
     let text = remote_run_source_text(
       run,
       index == paragraph.runs.length() - 1,
     )
-    if !text.is_empty() {
-      semantic.push({
-        text,
-        bold: run.style.bold,
-        italic: run.style.italic,
-        code: semantic_code_text(run.style),
-        link: run.link,
-      })
-    }
+    semantic.push({
+      text,
+      bold: run.style.bold,
+      italic: run.style.italic,
+      code: semantic_code_text(run.style),
+      link: run.link,
+    })
   }
-  semantic
+  normalize_semantic_runs(semantic, images=images)
 }
 
 ///|
 fn remote_paragraph_semantics(paragraph : RemoteParagraph) -> SourceSemanticParagraph {
   let (list, nesting_level) = remote_list(paragraph.bullet)
+  let images = paragraph.inline_images.map(fn(image) {
+    SourceSemanticImage::{ source_url: image.source_url, text_offset: image.text_offset }
+  })
   {
-    runs: remote_semantic_runs(paragraph),
-    images: paragraph.inline_images.map(fn(image) {
-      SourceSemanticImage::{ source_url: image.source_url, text_offset: image.text_offset }
-    }),
+    runs: remote_semantic_runs(paragraph, images),
+    images,
     heading: semantic_heading(paragraph.style.named_style),
     list,
     nesting_level,
@@ -299,7 +367,7 @@ fn remote_table_semantics(table : RemoteTable) -> SourceSemanticTable {
           paragraphs: cell.paragraphs.map(fn(paragraph) {
             let semantic = remote_paragraph_semantics(paragraph)
             if row_index == 0 {
-              { ..semantic, runs: semantic.runs.map(fn(run) { { ..run, bold: false } }) }
+              semantic_table_header_paragraph(semantic)
             } else {
               semantic
             }

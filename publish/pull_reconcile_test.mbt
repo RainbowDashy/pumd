@@ -127,6 +127,159 @@ fn pull_two_paragraphs(first : String, second : String) -> RemoteContent {
 }
 
 ///|
+test "pull ignores incidental Google Docs boundaries between equivalent runs" {
+  let source = "Base\n"
+  let baseline = pull_rendered(source)
+  let original = pull_remote_paragraph("Remote", 1)
+  let remote = {
+    ..original,
+    runs: [
+      {
+        start_index: 1,
+        end_index: 3,
+        text: "Re",
+        style: @pumd.builtin_style_profile().body_text,
+        link: None,
+      },
+      {
+        start_index: 3,
+        end_index: 7,
+        text: "mote",
+        style: @pumd.builtin_style_profile().body_text,
+        link: None,
+      },
+    ],
+  }
+  match
+    plan_pull(source, baseline, baseline, {
+      units: [RemoteUnit::Paragraph(remote)],
+    }) {
+    Ok(plan) => {
+      inspect(plan.source, content="Remote\n")
+      assert_eq(plan.incoming, 1)
+    }
+    Err(error) => fail(error.user_message())
+  }
+}
+
+///|
+test "pull converges a manually mirrored edit despite remote run boundaries" {
+  let baseline = pull_rendered("Base\n")
+  let source = "Remote\n"
+  let original = pull_remote_paragraph("Remote", 1)
+  let remote = {
+    ..original,
+    runs: [
+      {
+        start_index: 1,
+        end_index: 3,
+        text: "Re",
+        style: @pumd.builtin_style_profile().body_text,
+        link: None,
+      },
+      {
+        start_index: 3,
+        end_index: 7,
+        text: "mote",
+        style: @pumd.builtin_style_profile().body_text,
+        link: None,
+      },
+    ],
+  }
+  match
+    plan_pull(source, baseline, pull_rendered(source), {
+      units: [RemoteUnit::Paragraph(remote)],
+    }) {
+    Ok(plan) => {
+      inspect(plan.source, content="Remote\n")
+      assert_eq(plan.converged, 1)
+      assert_eq(plan.conflicted, 0)
+    }
+    Err(error) => fail(error.user_message())
+  }
+}
+
+///|
+test "pull canonicalizes split linked bold code runs" {
+  let source = "Base\n"
+  let baseline = pull_rendered(source)
+  let original = pull_remote_paragraph("research", 1)
+  let code = { ..@pumd.builtin_style_profile().code_text, bold: true }
+  let remote = {
+    ..original,
+    runs: [
+      {
+        start_index: 1,
+        end_index: 4,
+        text: "res",
+        style: code,
+        link: Some("../research.md"),
+      },
+      {
+        start_index: 4,
+        end_index: 9,
+        text: "earch",
+        style: code,
+        link: Some("../research.md"),
+      },
+    ],
+  }
+  match
+    plan_pull(source, baseline, baseline, {
+      units: [RemoteUnit::Paragraph(remote)],
+    }) {
+    Ok(plan) =>
+      inspect(plan.source, content="[**`research`**](../research.md)\n")
+    Err(error) => fail(error.user_message())
+  }
+}
+
+///|
+test "pull retains an inline image after UTF-16 text between equivalent runs" {
+  let source = "Base\n"
+  let baseline = pull_rendered(source)
+  let original = pull_remote_paragraph("🚀Xmote", 1)
+  let remote = {
+    ..original,
+    runs: [
+      {
+        start_index: 1,
+        end_index: 4,
+        text: "🚀X",
+        style: @pumd.builtin_style_profile().body_text,
+        link: None,
+      },
+      {
+        start_index: 5,
+        end_index: 9,
+        text: "mote",
+        style: @pumd.builtin_style_profile().body_text,
+        link: None,
+      },
+    ],
+    inline_images: [
+      {
+        start_index: 4,
+        end_index: 5,
+        source_url: "https://example.test/research.png",
+        text_offset: 3,
+      },
+    ],
+  }
+  match
+    plan_pull(source, baseline, baseline, {
+      units: [RemoteUnit::Paragraph(remote)],
+    }) {
+    Ok(plan) =>
+      inspect(
+        plan.source,
+        content="🚀X![](https://example.test/research.png)mote\n",
+      )
+    Err(error) => fail(error.user_message())
+  }
+}
+
+///|
 test "pull merges disjoint Source Semantics and preserves local-only work" {
   let baseline = pull_rendered("Base A\n\nBase B\n")
   let source = "Local A\n\nBase B\n"
