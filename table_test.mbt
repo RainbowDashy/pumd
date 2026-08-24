@@ -9,7 +9,7 @@ test "renders aligned native tables with rich header and cell content" {
       inspect(
         document.to_snapshot(),
         content=(
-          #|profile pumd.default@3
+          #|profile pumd.default@4
           #|table
           #|  header-row
           #|    cell alignment=left background=#F1F3F4
@@ -29,10 +29,11 @@ test "renders aligned native tables with rich header and cell content" {
           #|      paragraph normal font=Arial size=11 line=1.15 before=0 after=0
           #|        text "link" underline font=Arial size=11 color=#1155CC link="https://example.test"
           #|        text " and " font=Arial size=11
-          #|        text "x" font=Roboto Mono size=10 background=#F1F3F4
+          #|        text "x" font=Roboto Mono size=11 background=#F1F3F4
           #|    cell alignment=right
           #|      paragraph normal font=Arial size=11 line=1.15 before=0 after=0
           #|
+
         ),
       )
     Err(_) => assert_true(false)

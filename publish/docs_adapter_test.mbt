@@ -189,6 +189,30 @@ async test "batch update preserves UTF-16 ranges, links, list presets, and color
 }
 
 ///|
+async test "inline code in a heading keeps the heading font size" {
+  let fake = DocsAdapterFakeHttpClient::{
+    requests: [],
+    responses: [@google_http.HttpResponse::new(200, {}, "{}")],
+  }
+  let markdown = "# Protect `/metrics` with a source address"
+  let plan = match @pumd.render_markdown(markdown) {
+    Ok(document) => compile_docs_update_plan(document)
+    Err(_) => abort("fixture must render")
+  }
+  match batch_update_document(docs_adapter_client(fake), "doc-123", plan) {
+    Ok(_) => ()
+    Err(_) => assert_true(false)
+  }
+  let body = match fake.requests[0].body {
+    Some(body) => body
+    None => abort("batch update must have JSON")
+  }
+  assert_true(body.contains(
+    "\"range\":{\"startIndex\":9,\"endIndex\":17},\"textStyle\":{\"bold\":false,\"italic\":false,\"underline\":false,\"weightedFontFamily\":{\"fontFamily\":\"Roboto Mono\"},\"fontSize\":{\"magnitude\":24",
+  ))
+}
+
+///|
 async test "batch update lowers colored runs at their UTF-16 ranges" {
   let profile = @pumd.builtin_style_profile()
   let document : @pumd.DesiredDocument = {

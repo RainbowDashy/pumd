@@ -11,18 +11,19 @@ test "renders nested bullet and non-default ordered lists as native list paragra
       inspect(
         document.to_snapshot(),
         content=(
-          #|profile pumd.default@3
+          #|profile pumd.default@4
           #|paragraph normal font=Arial size=11 line=1.15 before=0 after=6 list=bullet level=0
           #|  text "alpha " font=Arial size=11
           #|  text "bold" bold font=Arial size=11
           #|paragraph normal font=Arial size=11 line=1.15 before=0 after=6 list=bullet level=1
           #|  text "nested " font=Arial size=11
-          #|  text "code" font=Roboto Mono size=10 background=#F1F3F4
+          #|  text "code" font=Roboto Mono size=11 background=#F1F3F4
           #|paragraph normal font=Arial size=11 line=1.15 before=0 after=6 list=numbered(3.) level=0
           #|  text "third" font=Arial size=11
           #|paragraph normal font=Arial size=11 line=1.15 before=0 after=6 list=numbered(3.) level=0
           #|  text "fourth" font=Arial size=11
           #|
+
         ),
       )
     Err(_) => assert_true(false)

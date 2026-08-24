@@ -51,6 +51,7 @@ fn with_link_style(style : TextStyle, profile : StyleProfile) -> TextStyle {
 fn with_code_style(style : TextStyle, profile : StyleProfile) -> TextStyle {
   {
     ..profile.code_text,
+    font_size_points: style.font_size_points,
     bold: style.bold,
     italic: style.italic,
     underline: style.underline,

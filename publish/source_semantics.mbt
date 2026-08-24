@@ -86,7 +86,6 @@ fn semantic_quote_depth(style : @pumd.ParagraphStyle) -> Int {
 fn semantic_code_text(style : @pumd.TextStyle) -> Bool {
   let code = @pumd.builtin_style_profile().code_text
   style.font_family == code.font_family &&
-  style.font_size_points == code.font_size_points &&
   style.background_color.map(fn(c) { c.to_lower() }) ==
     code.background_color.map(fn(c) { c.to_lower() })
 }

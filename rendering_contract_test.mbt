@@ -35,7 +35,7 @@ test "mixed supported Markdown has a canonical native golden document" {
   inspect(
     document.to_snapshot(),
     content=(
-      #|profile pumd.default@3
+      #|profile pumd.default@4
       #|paragraph heading-1 font=Arial size=24 line=1.15 before=20 after=8
       #|  text "Contract title" font=Arial size=24
       #|paragraph normal font=Arial size=11 line=1.15 before=0 after=6
@@ -46,7 +46,7 @@ test "mixed supported Markdown has a canonical native golden document" {
       #|  text ", " font=Arial size=11
       #|  text "a link" underline font=Arial size=11 color=#1155CC link="https://example.test/guide" title="Guide title"
       #|  text ", and " font=Arial size=11
-      #|  text "inline" font=Roboto Mono size=10 background=#F1F3F4
+      #|  text "inline" font=Roboto Mono size=11 background=#F1F3F4
       #|  text " code." font=Arial size=11
       #|paragraph normal font=Roboto Mono size=10 line=1.0 before=0 after=0 background=#F1F3F4
       #|  text "let answer = 42" font=Roboto Mono size=10 background=#F1F3F4
@@ -56,7 +56,7 @@ test "mixed supported Markdown has a canonical native golden document" {
       #|  text "bold" bold font=Arial size=11
       #|paragraph normal font=Arial size=11 line=1.15 before=0 after=6 list=bullet level=1
       #|  text "nested " font=Arial size=11
-      #|  text "code" font=Roboto Mono size=10 background=#F1F3F4
+      #|  text "code" font=Roboto Mono size=11 background=#F1F3F4
       #|paragraph normal font=Arial size=11 line=1.15 before=0 after=6 list=numbered(3.) level=0
       #|  text "third" font=Arial size=11
       #|paragraph normal font=Arial size=11 line=1.15 before=0 after=6 list=numbered(3.) level=0
@@ -72,23 +72,26 @@ test "mixed supported Markdown has a canonical native golden document" {
       #|  row
       #|    cell alignment=left
       #|      paragraph normal font=Arial size=11 line=1.15 before=0 after=0
-      #|        text "cell" font=Roboto Mono size=10 background=#F1F3F4
+      #|        text "cell" font=Roboto Mono size=11 background=#F1F3F4
       #|    cell alignment=center
       #|      paragraph normal font=Arial size=11 line=1.15 before=0 after=0
       #|        text "link" underline font=Arial size=11 color=#1155CC link="https://example.test/table" title="Table title"
       #|
+
     ),
   )
 }
 
 test "HTTPS images render as native inline images with source metadata" {
   let document = render_or_fail("Before ![architecture](https://example.test/diagram.png \"System diagram\") after.")
-  inspect(document.to_snapshot(), content=(#|profile pumd.default@3
-#|paragraph normal font=Arial size=11 line=1.15 before=0 after=6
-#|  text "Before " font=Arial size=11
-#|  text " after." font=Arial size=11
-#|  image offset=7 source="https://example.test/diagram.png" alt="architecture" title="System diagram"
-#|
+  inspect(document.to_snapshot(), content=(
+    #|profile pumd.default@4
+    #|paragraph normal font=Arial size=11 line=1.15 before=0 after=6
+    #|  text "Before " font=Arial size=11
+    #|  text " after." font=Arial size=11
+    #|  image offset=7 source="https://example.test/diagram.png" alt="architecture" title="System diagram"
+    #|
+
 ))
   match document.content[0] { @pumd.StructuralElement::Paragraph(paragraph) => { assert_eq(paragraph.inline_images.length(), 1); let image = paragraph.inline_images[0]; assert_eq(image.text_offset, 7); assert_eq(image.alt_text, "architecture"); assert_eq(image.source_url, "https://example.test/diagram.png"); assert_eq(image.title, Some("System diagram")); assert_source_range(image.provenance, 7, 73) }; _ => fail("expected paragraph") }
 }
@@ -135,12 +138,12 @@ test "moving unchanged source changes provenance without changing native content
 test "empty and blank-line whitespace variants have documented deterministic output" {
   let empty = render_or_fail("")
   let blank = render_or_fail("\n\n\n")
-  assert_eq(empty.to_snapshot(), "profile pumd.default@3\n")
+  assert_eq(empty.to_snapshot(), "profile pumd.default@4\n")
   assert_eq(blank.to_snapshot(), empty.to_snapshot())
   assert_true(empty.semantic_eq(blank))
 
   let expected =
-    #|profile pumd.default@3
+    #|profile pumd.default@4
     #|paragraph normal font=Arial size=11 line=1.15 before=0 after=6
     #|  text "Text" font=Arial size=11
     #|

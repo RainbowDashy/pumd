@@ -63,7 +63,7 @@ fn make_paragraph_style(
 }
 
 ///|
-/// The sole version-three Style Profile.
+/// The sole version-four Style Profile.
 pub fn builtin_style_profile() -> StyleProfile {
   let heading_sizes = [24, 18, 14, 12, 11, 10]
   let heading_before = [20, 18, 16, 14, 12, 10]
@@ -91,7 +91,7 @@ pub fn builtin_style_profile() -> StyleProfile {
   }
   {
     id: "pumd.default",
-    version: 3,
+    version: 4,
     body: make_paragraph_style(NamedStyle::NormalText, 11, 0, 6),
     body_text: make_text_style("Arial", 11),
     headings,

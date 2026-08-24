@@ -279,7 +279,7 @@ test "UTF-16 matrix covers every published text context" {
       #|paragraph-style 14..49 normal font=Arial size=11 line=115 before=0 after=6
       #|text-style 14..30 bold font=Arial size=11
       #|text-style 30..35 font=Arial size=11
-      #|text-style 35..48 font=Roboto Mono size=10 background=#F1F3F4
+      #|text-style 35..48 font=Roboto Mono size=11 background=#F1F3F4
       #|insert-text 49 "fenced A界é🚀\n"
       #|paragraph-style 49..63 normal font=Roboto Mono size=10 line=100 before=0 after=0
       #|text-style 49..62 font=Roboto Mono size=10 background=#F1F3F4
@@ -299,6 +299,7 @@ test "UTF-16 matrix covers every published text context" {
       #|cell-text-style table=76 row=1 column=0 0..11 font=Arial size=11
       #|cell-style table=76 row=1 column=0 alignment=unspecified
       #|
+
     ),
   )
 }
