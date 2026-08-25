@@ -166,7 +166,7 @@ pub fn PublishError::user_message(self : PublishError) -> String {
     SourceWrite(path~, message~) =>
       "source replacement failed for `" + path + "`: " + message
     Rendering(diagnostics) => {
-      let message = StringBuilder::new()
+      let message = StringBuilder()
       message.write_string("rendering failed")
       for diagnostic in diagnostics {
         message.write_string("\n- ")

@@ -507,7 +507,7 @@ fn pull_report_json(
   dry_run : Bool,
   report : @publish.PullReport,
 ) -> String {
-  let output = StringBuilder::new()
+  let output = StringBuilder()
   output.write_string("{\"version\":1,\"outcome\":")
   write_pull_json_string(outcome, output)
   output.write_string(",\"dry_run\":")

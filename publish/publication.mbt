@@ -9,7 +9,7 @@ pub fn publication_title_from_path(path : String) -> String {
     (extension_parts.length() == 2 && extension_parts[0].is_empty()) {
     return file_name
   }
-  let title = StringBuilder::new()
+  let title = StringBuilder()
   for i = 0; i < extension_parts.length() - 1; i = i + 1 {
     if i > 0 {
       title.write_char('.')

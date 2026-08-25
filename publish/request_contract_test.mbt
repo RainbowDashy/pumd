@@ -83,7 +83,7 @@ async fn capture_complete_request_contract() -> Array[@google_http.HttpRequest] 
 fn request_sequence_snapshot(
   requests : Array[@google_http.HttpRequest],
 ) -> String {
-  let output = StringBuilder::new()
+  let output = StringBuilder()
   for index, request in requests {
     output.write_string("request ")
     output.write_string((index + 1).to_string())

@@ -122,7 +122,7 @@ fn paragraph_style_signature(style : @pumd.ParagraphStyle, output : StringBuilde
 
 ///|
 fn desired_paragraph_signature(paragraph : @pumd.Paragraph) -> String {
-  let output = StringBuilder::new()
+  let output = StringBuilder()
   output.write_string("p:")
   for run in paragraph.runs { output.write_string(run.content); output.write_char('|'); text_signature(run.style, match run.link { Some(link) => Some(link.url); None => None }, output) }
   for image in paragraph.inline_images { output.write_string("image|"); output.write_string(image.text_offset.to_string()); output.write_char('|'); output.write_string(image.source_url); output.write_char(';') }
@@ -136,7 +136,7 @@ fn desired_paragraph_signature(paragraph : @pumd.Paragraph) -> String {
 
 ///|
 fn remote_paragraph_signature(paragraph : RemoteParagraph) -> String {
-  let output = StringBuilder::new()
+  let output = StringBuilder()
   output.write_string("p:")
   for index, run in paragraph.runs {
     let text = remote_run_source_text(
@@ -168,7 +168,7 @@ fn cell_alignment_key(alignment : @pumd.TableAlignment) -> String {
 
 ///|
 fn desired_table_signature(table : @pumd.Table) -> String {
-  let output = StringBuilder::new(); output.write_string("t:")
+  let output = StringBuilder(); output.write_string("t:")
   for row in table.rows {
     output.write_string("r:")
     for cell in row.cells {
@@ -189,7 +189,7 @@ fn desired_table_signature(table : @pumd.Table) -> String {
 
 ///|
 fn remote_table_signature(table : RemoteTable) -> String {
-  let output = StringBuilder::new(); output.write_string("t:")
+  let output = StringBuilder(); output.write_string("t:")
   for row in table.rows {
     output.write_string("r:")
     for cell in row.cells {
@@ -313,7 +313,7 @@ fn has_decoration(style : @pumd.ParagraphStyle) -> Bool { style.indent_start_poi
 ///|
 fn append_paragraph_write(paragraph : @pumd.Paragraph, cursor : Int, include_newline : Bool, requests : Array[DocsUpdateRequest]) -> Unit {
   let indent = match paragraph.bullet { Some(bullet) => indent_tabs(bullet.nesting_level); None => "" }
-  let contents = StringBuilder::new(); contents.write_string(indent); for run in paragraph.runs { contents.write_string(run.content) }
+  let contents = StringBuilder(); contents.write_string(indent); for run in paragraph.runs { contents.write_string(run.content) }
   let text = contents.to_string(); let inserted = if include_newline { text + "\n" } else { text }
   requests.push(InsertText(index=cursor, text=inserted))
   let style_end = advance_google_docs_index(index=cursor, text=text)
@@ -328,7 +328,7 @@ fn append_paragraph_write(paragraph : @pumd.Paragraph, cursor : Int, include_new
 
 ///|
 fn paragraph_text(paragraph : @pumd.Paragraph) -> String {
-  let output = StringBuilder::new()
+  let output = StringBuilder()
   for run in paragraph.runs { output.write_string(run.content) }
   output.to_string()
 }
@@ -394,7 +394,7 @@ fn append_table_write(table : @pumd.Table, cursor : Int, requests : Array[DocsUp
   let mut columns = 0; for row in table.rows { if row.cells.length() > columns { columns = row.cells.length() } }
   requests.push(InsertTable(index=cursor, rows=table.rows.length(), columns~))
   for row_index, row in table.rows { for column_index, cell in row.cells {
-    let content = StringBuilder::new(); for paragraph_index, paragraph in cell.content { if paragraph_index > 0 { content.write_char('\n') }; for run in paragraph.runs { content.write_string(run.content) } }
+    let content = StringBuilder(); for paragraph_index, paragraph in cell.content { if paragraph_index > 0 { content.write_char('\n') }; for run in paragraph.runs { content.write_string(run.content) } }
     requests.push(InsertTableCellText(table_index=cursor, row=row_index, column=column_index, text=content.to_string()))
     let mut paragraph_start = 0
     for paragraph in cell.content { let mut paragraph_end = paragraph_start + 1; for run in paragraph.runs { paragraph_end = advance_google_docs_index(index=paragraph_end, text=run.content) }; requests.push(UpdateTableCellParagraphStyle(table_index=cursor, row=row_index, column=column_index, start_offset=paragraph_start, end_offset=paragraph_end, style=paragraph.style)); let mut run_start = paragraph_start; for run in paragraph.runs { let run_end = advance_google_docs_index(index=run_start, text=run.content); if run_start != run_end { requests.push(UpdateTableCellTextStyle(table_index=cursor, row=row_index, column=column_index, start_offset=run_start, end_offset=run_end, style=run.style, link=run.link)) }; run_start = run_end }; paragraph_start = paragraph_end }

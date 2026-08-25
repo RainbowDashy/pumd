@@ -347,7 +347,7 @@ fn write_paragraph_style(
   write_dimension(style.space_below_points, output)
   match style.background_color {
     Some(color) => {
-      let color_json = StringBuilder::new()
+      let color_json = StringBuilder()
       if write_rgb_color(color, color_json) {
         output.write_string(",\"shading\":{\"backgroundColor\":")
         output.write_string(color_json.to_string())
@@ -372,7 +372,7 @@ fn write_paragraph_style(
   }
   match style.border_left {
     Some(border) => {
-      let color_json = StringBuilder::new()
+      let color_json = StringBuilder()
       if write_rgb_color(border.color, color_json) {
         output.write_string(",\"borderLeft\":{\"color\":")
         output.write_string(color_json.to_string())
@@ -390,7 +390,7 @@ fn write_paragraph_style(
 
 ///|
 fn paragraph_style_fields(style : @pumd.ParagraphStyle) -> String {
-  let fields = StringBuilder::new()
+  let fields = StringBuilder()
   fields.write_string("namedStyleType,lineSpacing,spaceAbove,spaceBelow")
   match style.background_color {
     Some(color) if color.length() == 7 =>
@@ -418,7 +418,7 @@ fn write_paragraph_decoration(
   style : @pumd.ParagraphStyle,
   output : StringBuilder,
 ) -> String {
-  let fields = StringBuilder::new()
+  let fields = StringBuilder()
   output.write_char('{')
   let mut first = true
   match style.indent_start_points {
@@ -445,7 +445,7 @@ fn write_paragraph_decoration(
   }
   match style.border_left {
     Some(border) => {
-      let color_json = StringBuilder::new()
+      let color_json = StringBuilder()
       if write_rgb_color(border.color, color_json) {
         if !first {
           output.write_char(',')
@@ -473,7 +473,7 @@ fn write_text_style(
   link : @pumd.LinkIntent?,
   output : StringBuilder,
 ) -> String {
-  let fields = StringBuilder::new()
+  let fields = StringBuilder()
   output.write_string("{\"bold\":")
   output.write_string(if style.bold { "true" } else { "false" })
   fields.write_string("bold")
@@ -492,7 +492,7 @@ fn write_text_style(
   fields.write_string(",fontSize")
   match style.foreground_color {
     Some(color) => {
-      let color_json = StringBuilder::new()
+      let color_json = StringBuilder()
       if write_rgb_color(color, color_json) {
         output.write_string(",\"foregroundColor\":")
         output.write_string(color_json.to_string())
@@ -503,7 +503,7 @@ fn write_text_style(
   }
   match style.background_color {
     Some(color) => {
-      let color_json = StringBuilder::new()
+      let color_json = StringBuilder()
       if write_rgb_color(color, color_json) {
         output.write_string(",\"backgroundColor\":")
         output.write_string(color_json.to_string())
@@ -669,7 +669,7 @@ fn write_update_paragraph_decoration_request(
   first : Bool,
 ) -> Bool {
   let next_first = begin_request(output, first)
-  let decoration = StringBuilder::new()
+  let decoration = StringBuilder()
   let fields = write_paragraph_decoration(style, decoration)
   output.write_string("{\"updateParagraphStyle\":{\"range\":")
   write_range(start_index, end_index, tab_id, output)
@@ -692,7 +692,7 @@ fn write_update_text_request(
   first : Bool,
 ) -> Bool {
   let next_first = begin_request(output, first)
-  let text_style = StringBuilder::new()
+  let text_style = StringBuilder()
   let fields = write_text_style(style, link, text_style)
   output.write_string("{\"updateTextStyle\":{\"range\":")
   write_range(start_index, end_index, tab_id, output)
@@ -713,7 +713,7 @@ fn write_update_foreground_color_request(
   output : StringBuilder,
   first : Bool,
 ) -> Bool {
-  let color_json = StringBuilder::new()
+  let color_json = StringBuilder()
   if !write_rgb_color(color, color_json) { return first }
   let next_first = begin_request(output, first)
   output.write_string("{\"updateTextStyle\":{\"range\":")
@@ -734,7 +734,7 @@ fn write_update_cell_background_request(
   output : StringBuilder,
   first : Bool,
 ) -> Bool {
-  let color_json = StringBuilder::new()
+  let color_json = StringBuilder()
   if !write_rgb_color(color, color_json) {
     return first
   }
@@ -757,7 +757,7 @@ fn write_update_cell_background_request(
 
 ///|
 fn lower_plan_for_tab(plan : DocsUpdatePlan, tab_id : String?) -> String {
-  let output = StringBuilder::new()
+  let output = StringBuilder()
   let layouts : Array[TableLayout] = []
   let insertions : Array[CellInsertion] = []
   output.write_string("{\"requests\":[")
@@ -994,7 +994,7 @@ pub async fn create_document(
   client : @google_core.GoogleClient,
   title : String,
 ) -> Result[String, DocsAdapterError] {
-  let body = StringBuilder::new()
+  let body = StringBuilder()
   body.write_string("{\"title\":")
   write_json_string(title, body)
   body.write_char('}')
@@ -1029,7 +1029,7 @@ pub async fn create_document_with_managed_tab(
   client : @google_core.GoogleClient,
   title : String,
 ) -> Result[CreatedDocument, DocsAdapterError] {
-  let body = StringBuilder::new()
+  let body = StringBuilder()
   body.write_string("{\"title\":")
   write_json_string(title, body)
   body.write_char('}')
@@ -1145,7 +1145,7 @@ fn lower_update_plan_with_revision(
   required_revision_id : String,
 ) -> String {
   let lowered = lower_update_plan(plan, tab_id)
-  let body = StringBuilder::new()
+  let body = StringBuilder()
   body.write_string(lowered[:lowered.length() - 1].to_owned())
   body.write_string(",\"writeControl\":{\"requiredRevisionId\":")
   write_json_string(required_revision_id, body)

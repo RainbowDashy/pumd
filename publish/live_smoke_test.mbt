@@ -137,7 +137,7 @@ async fn run_publish_cli(markdown : String) -> Result[PublishSuccess, String] {
 
 ///|
 fn compact_json(value : String) -> String {
-  let result = StringBuilder::new()
+  let result = StringBuilder()
   let mut inside_string = false
   let mut escaped = false
   for char in value {
@@ -415,7 +415,7 @@ async fn run_live_cli(
 
 ///|
 fn live_paragraph_text(paragraph : RemoteParagraph) -> String {
-  let text = StringBuilder::new()
+  let text = StringBuilder()
   for run in paragraph.runs {
     text.write_string(run.text)
   }
@@ -424,7 +424,7 @@ fn live_paragraph_text(paragraph : RemoteParagraph) -> String {
 
 ///|
 fn live_json_string(value : String) -> String {
-  let output = StringBuilder::new()
+  let output = StringBuilder()
   output.write_char('"')
   for char in value {
     match char {

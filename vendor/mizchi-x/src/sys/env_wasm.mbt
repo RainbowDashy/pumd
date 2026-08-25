@@ -36,7 +36,7 @@ fn sys_utf8_to_string(
   start : Int,
   len : Int,
 ) -> String {
-  let buf = StringBuilder::new()
+  let buf = StringBuilder()
   let mut i = start
   let end = start + len
   while i < end {

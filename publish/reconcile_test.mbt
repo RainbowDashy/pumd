@@ -17,7 +17,7 @@ fn version_two_code_baseline(current : @pumd.DesiredDocument) -> @pumd.DesiredDo
       @pumd.StructuralElement::Paragraph(paragraph) => {
         let runs : Array[@pumd.TextRun] = []
         if !paragraph.runs.is_empty() {
-          let content = StringBuilder::new()
+          let content = StringBuilder()
           for run in paragraph.runs { content.write_string(run.content) }
           let first = paragraph.runs[0]
           runs.push({ ..first, content: content.to_string(), style: { ..first.style, foreground_color: None } })
@@ -515,7 +515,7 @@ async test "reorder bracketing an opaque unit conflicts" {
 
 ///|
 fn desired_body(document : @pumd.DesiredDocument) -> String {
-  let output = StringBuilder::new()
+  let output = StringBuilder()
   for element in document.content {
     match element {
       @pumd.StructuralElement::Paragraph(paragraph) => {
@@ -533,7 +533,7 @@ fn desired_body(document : @pumd.DesiredDocument) -> String {
 /// returns the resulting body text, proving the compiled indexes and ordering
 /// produce exactly the desired document.
 fn simulate_paragraph_plan(remote : RemoteContent, plan : DocsUpdatePlan) -> String {
-  let body = StringBuilder::new()
+  let body = StringBuilder()
   body.write_char('\u0000')
   for unit in remote.units {
     match unit {

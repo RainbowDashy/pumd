@@ -243,7 +243,7 @@ fn canonicalize_runs(runs : Array[TextRun], images? : Array[InlineImage] = []) -
 
 ///|
 fn unescape_text(content : String) -> String {
-  let buffer = StringBuilder::new()
+  let buffer = StringBuilder()
   let mut escaped = false
   for char in content {
     if escaped {

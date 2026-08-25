@@ -93,7 +93,7 @@ fn has_noncanonical_code_runs(document : @pumd.DesiredDocument) -> Bool {
 
 ///|
 test "renders a representative golden for every canonical fenced language" {
-  let snapshots = StringBuilder::new()
+  let snapshots = StringBuilder()
   let fixtures = [
     ("javascript", "const greeting = \"hello\""),
     ("jsx", "const node = <span title=\"hi\">ok</span>"),
@@ -354,7 +354,7 @@ test "console colors commands while preserving transcript output as plain text" 
 
 ///|
 test "HTML and Markdown use only bundled explicit language injections" {
-  let snapshots = StringBuilder::new()
+  let snapshots = StringBuilder()
   let bundled_markdown =
     #|````markdown
     #|```javascript

@@ -116,7 +116,7 @@ fn append_paragraph(
     Some(bullet) => list_indent_tabs(bullet.nesting_level)
     None => ""
   }
-  let text = StringBuilder::new()
+  let text = StringBuilder()
   text.write_string(indent)
   for run in paragraph.runs {
     text.write_string(run.content)
@@ -214,7 +214,7 @@ fn append_table_cell(
   cell : @pumd.TableCell,
   requests : Array[DocsUpdateRequest],
 ) -> Int {
-  let text = StringBuilder::new()
+  let text = StringBuilder()
   for paragraph_index, paragraph in cell.content {
     if paragraph_index > 0 {
       text.write_char('\n')
@@ -528,7 +528,7 @@ fn write_plan_text_style(
 
 ///|
 pub fn DocsUpdatePlan::to_snapshot(self : DocsUpdatePlan) -> String {
-  let buffer = StringBuilder::new()
+  let buffer = StringBuilder()
   for request in self.requests {
     match request {
       InsertText(index~, text~) => {

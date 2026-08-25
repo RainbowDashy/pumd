@@ -15,7 +15,7 @@ pub fn md_parse_and_render(
 ///|
 /// Serialize document to markdown string
 pub fn serialize(doc : Document) -> String {
-  let buf = StringBuilder::new()
+  let buf = StringBuilder()
 
   // Serialize frontmatter if present
   match doc.frontmatter {
@@ -189,7 +189,7 @@ fn serialize_block(block : Block, buf : StringBuilder) -> Unit {
     Block::Blockquote(children~, ..) =>
       // Serialize each block with > prefix
       for child in children {
-        let child_buf = StringBuilder::new()
+        let child_buf = StringBuilder()
         serialize_block(child, child_buf)
         let child_str = child_buf.to_string()
         for line in child_str.split("\n") {
@@ -274,7 +274,7 @@ fn serialize_block(block : Block, buf : StringBuilder) -> Unit {
         if !first {
           buf.write_string("\n    ") // Indent continuation
         }
-        let child_buf = StringBuilder::new()
+        let child_buf = StringBuilder()
         serialize_block(child, child_buf)
         let child_str = child_buf.to_string().trim_end(chars="\n").to_owned()
         buf.write_string(child_str)
@@ -289,7 +289,7 @@ fn serialize_block(block : Block, buf : StringBuilder) -> Unit {
 ///|
 /// Serialize link definitions
 pub fn serialize_definitions(defs : Array[LinkDefinition]) -> String {
-  let buf = StringBuilder::new()
+  let buf = StringBuilder()
   for def in defs {
     buf.write_char('[')
     buf.write_string(def.label)

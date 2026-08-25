@@ -9,7 +9,7 @@ fn format_error_message(message : String) -> String {
   let bullet_indent = "    "
   let continuation_indent = "      "
   let wrap_width = 78
-  let output = StringBuilder::new()
+  let output = StringBuilder()
   let lines = message.split("\n").map(fn(line) { line.to_owned() }).collect()
   for i, line in lines {
     if i > 0 {

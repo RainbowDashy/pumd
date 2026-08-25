@@ -211,7 +211,7 @@ fn reconciliation_error(error : ReconcileError) -> PublishError {
 
 ///|
 fn conflict_error(report : ReconciliationReport) -> PublishError {
-  let descriptions = StringBuilder::new()
+  let descriptions = StringBuilder()
   for unit in report.units {
     if unit.conflict {
       if !descriptions.is_empty() {
@@ -1045,7 +1045,7 @@ pub fn publication_list_json(
   document : @registry.RegistryDocument,
   missing_source : (String) -> Bool,
 ) -> String {
-  let output = StringBuilder::new()
+  let output = StringBuilder()
   output.write_string("{\"version\":1,\"publications\":[")
   let mut first = true
   for entry in sorted_entries(document) {
@@ -1066,7 +1066,7 @@ pub fn publication_refresh_json(
   missing_source : (String) -> Bool,
   inspections : Array[RemotePublicationInspection],
 ) -> String {
-  let output = StringBuilder::new()
+  let output = StringBuilder()
   output.write_string("{\"version\":1,\"publications\":[")
   let mut first = true
   for entry in sorted_entries(document) {
