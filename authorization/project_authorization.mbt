@@ -231,7 +231,7 @@ pub fn secure_random_bytes(
 ///|
 fn base64url(bytes : BytesView) -> String {
   let padded = @base64.encode(bytes, url_safe=true)
-  let output = StringBuilder::new()
+  let output = StringBuilder()
   for c in padded {
     if c != '=' {
       output.write_char(c)
@@ -248,7 +248,7 @@ fn pkce_challenge(verifier : String) -> String {
 
 ///|
 fn url_encode(value : String) -> String {
-  let output = StringBuilder::new()
+  let output = StringBuilder()
   for byte in @utf8.encode(value) {
     let n = byte.to_int()
     if (n >= 65 && n <= 90) ||
@@ -315,7 +315,7 @@ fn decode_callback_component(
   value : String,
 ) -> Result[String, ProjectAuthorizationError] {
   let chars = value.to_array()
-  let output = StringBuilder::new()
+  let output = StringBuilder()
   let mut index = 0
   while index < chars.length() {
     if chars[index] == '%' {
@@ -613,7 +613,7 @@ pub async fn project_access_token_classified(
 
 ///|
 fn form_encode(values : Array[(String, String)]) -> String {
-  let output = StringBuilder::new()
+  let output = StringBuilder()
   for i in 0..<values.length() {
     if i > 0 {
       output.write_char('&')

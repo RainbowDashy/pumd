@@ -5,7 +5,7 @@
 ///|
 /// Render a document to HTML
 pub fn render_html(doc : Document, autolink? : Bool = true) -> String {
-  let buf = StringBuilder::new()
+  let buf = StringBuilder()
   for block in doc.children {
     render_block_html(block, buf, autolink~)
   }
@@ -415,7 +415,7 @@ fn escape_html(s : String, attr? : Bool = false) -> String {
   if !needs_escape {
     return s
   }
-  let buf = StringBuilder::new()
+  let buf = StringBuilder()
   for c in s {
     match c {
       '&' => buf.write_string("&amp;")

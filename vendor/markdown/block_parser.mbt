@@ -247,7 +247,7 @@ fn BlockParser::try_parse_blockquote(self : BlockParser, start : Int) -> Block? 
   // Collect blockquote content and record where each virtual source character
   // came from. Parsing the stripped content recursively is convenient, but its
   // nodes must retain positions in the original document.
-  let content_buf = StringBuilder::new()
+  let content_buf = StringBuilder()
   let source_map : BlockquoteSourceMap = { starts: [], ends: [] }
   let mut first = true
   let mut previous_line_end = self.scanner.pos
@@ -752,7 +752,7 @@ fn remap_blockquote_definition(
 /// Parse paragraph (default block type)
 fn BlockParser::parse_paragraph(self : BlockParser, start : Int) -> Block? {
   let leading = self.read_leading_trivia()
-  let content_buf = StringBuilder::new()
+  let content_buf = StringBuilder()
   let mut first = true
   while !self.scanner.is_eof() {
     if self.scanner.is_blank_line() {

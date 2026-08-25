@@ -209,7 +209,7 @@ fn write_native_content(
 /// Human-readable canonical serialization used by golden tests. Source
 /// provenance is intentionally omitted.
 pub fn DesiredDocument::to_snapshot(self : DesiredDocument) -> String {
-  let buffer = StringBuilder::new()
+  let buffer = StringBuilder()
   buffer.write_string("profile ")
   buffer.write_string(self.render_metadata.style_profile_id)
   buffer.write_char('@')
@@ -226,8 +226,8 @@ pub fn DesiredDocument::semantic_eq(
   self : DesiredDocument,
   other : DesiredDocument,
 ) -> Bool {
-  let left = StringBuilder::new()
-  let right = StringBuilder::new()
+  let left = StringBuilder()
+  let right = StringBuilder()
   if self.metadata != other.metadata {
     return false
   }

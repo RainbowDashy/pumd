@@ -89,7 +89,7 @@ pub fn render_html_literal(
   image_preview? : Bool = false,
 ) -> String {
   let opts : LiteralOpts = { positions, image_preview }
-  let buf = StringBuilder::new()
+  let buf = StringBuilder()
   for block in doc.children {
     render_block_literal(block, buf, opts)
   }
@@ -604,7 +604,7 @@ fn render_block_literal(
       // Blockquote child spans are remapped to document offsets by the parser,
       // so preserve position annotations throughout the nested block tree.
       for child in children {
-        let child_buf = StringBuilder::new()
+        let child_buf = StringBuilder()
         render_block_literal(child, child_buf, opts)
         write_blockquote_prefixed(buf, child_buf.to_string())
       }
@@ -654,7 +654,7 @@ fn render_block_literal(
           buf.write_char('\n')
           write_marker(buf, "    ")
         }
-        let child_buf = StringBuilder::new()
+        let child_buf = StringBuilder()
         render_block_literal(child, child_buf, opts.nested())
         buf.write_string(strip_trailing_newline(child_buf.to_string()))
         first = false

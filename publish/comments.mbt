@@ -44,7 +44,7 @@ priv struct DriveCommentsPageResponse {
 
 ///|
 fn percent_encode_page_token(token : String) -> String {
-  let encoded = StringBuilder::new()
+  let encoded = StringBuilder()
   for char in token {
     match char {
       'A'..='Z' | 'a'..='z' | '0'..='9' | '-' | '.' | '_' | '~' =>

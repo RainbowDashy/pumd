@@ -86,7 +86,7 @@ fn pull_codepoint_length(source : String) -> Int {
 
 ///|
 fn pull_slice(source : String, start : Int, end : Int) -> String {
-  let output = StringBuilder::new()
+  let output = StringBuilder()
   let mut index = 0
   for char in source {
     if index >= start && index < end {
@@ -109,7 +109,7 @@ fn pull_trailing_newlines(source : String, newline : String) -> String {
       pull_codepoint_length(remaining) - pull_codepoint_length(newline),
     )
   }
-  let output = StringBuilder::new()
+  let output = StringBuilder()
   for index = 0; index < count; index = index + 1 {
     output.write_string(newline)
   }
@@ -367,7 +367,7 @@ fn pull_serialized_units(
   end : Int,
   newline : String,
 ) -> String {
-  let output = StringBuilder::new()
+  let output = StringBuilder()
   for index = start; index < end; index = index + 1 {
     if index > start {
       output.write_string(newline + newline)
@@ -527,7 +527,7 @@ fn pull_baseline_units(
   if units.is_empty() {
     return Ok(fallback)
   }
-  let output = StringBuilder::new()
+  let output = StringBuilder()
   for index, unit in units {
     if index > 0 {
       output.write_string(newline + newline)

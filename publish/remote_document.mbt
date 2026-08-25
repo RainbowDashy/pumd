@@ -555,7 +555,7 @@ fn decode_paragraph(element : Json, paragraph : Json, inline_objects : Json) -> 
     }
     None => warning = true
   }
-  let paragraph_text = StringBuilder::new()
+  let paragraph_text = StringBuilder()
   for run in runs { paragraph_text.write_string(run.text) }
   let (paragraph_suggestions, paragraph_suggestion_warning) = collect_suggestions(paragraph, start_index, end_index, paragraph_text.to_string())
   suggestions.push_iter(paragraph_suggestions.iter())

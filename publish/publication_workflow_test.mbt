@@ -214,7 +214,7 @@ fn docs_response_json_with_implicit_final_newline(
   tab_id : String,
   include_implicit_final_newline : Bool,
 ) -> String {
-  let output = StringBuilder::new()
+  let output = StringBuilder()
   output.write_string("{\"documentId\":")
   workflow_json_string(document_id, output)
   output.write_string(",\"revisionId\":")
@@ -299,7 +299,7 @@ fn docs_response_with_implicit_final_newline(
 
 ///|
 fn drive_comments_response(unresolved : Int) -> @google_http.HttpResponse {
-  let comments = StringBuilder::new()
+  let comments = StringBuilder()
   comments.write_string("{\"comments\":[")
   for index = 0; index < unresolved; index = index + 1 {
     if index > 0 {

@@ -1,6 +1,6 @@
 ///|
 fn markdown_repeat(text : String, count : Int) -> String {
-  let output = StringBuilder::new()
+  let output = StringBuilder()
   for index = 0; index < count; index = index + 1 {
     output.write_string(text)
   }
@@ -9,7 +9,7 @@ fn markdown_repeat(text : String, count : Int) -> String {
 
 ///|
 fn markdown_escape(text : String, table_cell : Bool) -> String {
-  let output = StringBuilder::new()
+  let output = StringBuilder()
   for char in text {
     if char == '\\' || char == '*' || char == '_' || char == '`' ||
       char == '[' || char == ']' || (table_cell && char == '|') {
@@ -54,7 +54,7 @@ fn serialize_semantic_code_block(
   paragraph : SourceSemanticParagraph,
   newline : String,
 ) -> String {
-  let content = StringBuilder::new()
+  let content = StringBuilder()
   for run in paragraph.runs { content.write_string(run.text) }
   let text = content.to_string()
   let delimiter = markdown_code_delimiter(text)
@@ -85,7 +85,7 @@ fn serialize_semantic_run(run : SourceSemanticRun, table_cell : Bool) -> String 
 
 ///|
 fn serialize_semantic_inline(paragraph : SourceSemanticParagraph, table_cell : Bool) -> String {
-  let output = StringBuilder::new()
+  let output = StringBuilder()
   let mut offset = 0
   for run in paragraph.runs {
     for image in paragraph.images {
@@ -113,7 +113,7 @@ fn serialize_semantic_paragraph(
   if paragraph.code_block {
     return serialize_semantic_code_block(paragraph, newline)
   }
-  let prefix = StringBuilder::new()
+  let prefix = StringBuilder()
   prefix.write_string(markdown_repeat("> ", paragraph.quote_depth))
   match paragraph.list {
     Some(Bullet) => {
@@ -161,7 +161,7 @@ fn semantic_alignment(alignment : @pumd.TableAlignment) -> String {
 
 ///|
 fn serialize_semantic_cell(cell : SourceSemanticCell, newline : String) -> String {
-  let output = StringBuilder::new()
+  let output = StringBuilder()
   for index, paragraph in cell.paragraphs {
     if index > 0 { output.write_string("<br>") }
     output.write_string(serialize_semantic_paragraph(paragraph, newline, true))
@@ -172,7 +172,7 @@ fn serialize_semantic_cell(cell : SourceSemanticCell, newline : String) -> Strin
 ///|
 fn serialize_semantic_table(table : SourceSemanticTable, newline : String) -> String {
   if table.rows.is_empty() { return "| |" + newline + "| --- |" }
-  let output = StringBuilder::new()
+  let output = StringBuilder()
   output.write_char('|')
   for cell in table.rows[0] {
     output.write_char(' ')
