@@ -647,6 +647,40 @@ test "canonical plain paragraphs escape block-leading Markdown markers" {
 }
 
 ///|
+test "pull serializes reviewer Heading 6 as supported level-six Markdown" {
+  let source = "###### Existing\n"
+  let baseline = pull_rendered(source)
+  let remote : RemoteContent = {
+    units: [
+      RemoteUnit::Paragraph(
+        pull_remote_paragraph(
+          "Reviewer heading",
+          1,
+          style={
+            ..@pumd.builtin_style_profile().headings[4],
+            named_style: @pumd.NamedStyle::Heading6,
+          },
+        ),
+      ),
+    ],
+  }
+  match plan_pull(source, baseline, baseline, remote) {
+    Ok(plan) => {
+      inspect(plan.source, content="###### Reviewer heading\n")
+      match @pumd.render_markdown(plan.source) {
+        Ok(document) => match document.content[0] {
+          @pumd.StructuralElement::Paragraph(paragraph) =>
+            assert_eq(paragraph.style.named_style, @pumd.NamedStyle::Heading5)
+          _ => fail("expected a heading paragraph")
+        }
+        Err(_) => fail("serialized Heading 6 must remain renderable")
+      }
+    }
+    Err(error) => abort(error.user_message())
+  }
+}
+
+///|
 test "pull conflicts instead of erasing Markdown-only metadata or fenced code" {
   let metadata_source = "[label](https://example.test \"title\")\n"
   let metadata = pull_rendered(metadata_source)

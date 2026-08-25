@@ -104,22 +104,24 @@ async test "remote decoder preserves colored run boundaries and canonical hex" {
 }
 
 ///|
-async test "remote decoder maps all heading styles and bullets" {
+async test "remote decoder maps Title and all heading styles and bullets" {
   let document = decoded_remote_document(
     (
     #|{
     #| "documentId":"doc","revisionId":"rev","body":{"content":[
-    #| {"startIndex":1,"endIndex":2,"paragraph":{"paragraphStyle":{"namedStyleType":"HEADING_1"},"bullet":{"nestingLevel":2,"glyphs":[{"glyph":"1."}]},"elements":[]}},
-    #| {"startIndex":2,"endIndex":3,"paragraph":{"paragraphStyle":{"namedStyleType":"HEADING_2"},"bullet":{"nestingLevel":1,"glyphs":[{"glyph":"•"}]},"elements":[]}},
-    #| {"startIndex":3,"endIndex":4,"paragraph":{"paragraphStyle":{"namedStyleType":"HEADING_3"},"elements":[]}},
-    #| {"startIndex":4,"endIndex":5,"paragraph":{"paragraphStyle":{"namedStyleType":"HEADING_4"},"elements":[]}},
-    #| {"startIndex":5,"endIndex":6,"paragraph":{"paragraphStyle":{"namedStyleType":"HEADING_5"},"elements":[]}},
-    #| {"startIndex":6,"endIndex":7,"paragraph":{"paragraphStyle":{"namedStyleType":"HEADING_6"},"elements":[]}}
+    #| {"startIndex":1,"endIndex":2,"paragraph":{"paragraphStyle":{"namedStyleType":"TITLE"},"elements":[]}},
+    #| {"startIndex":2,"endIndex":3,"paragraph":{"paragraphStyle":{"namedStyleType":"HEADING_1"},"bullet":{"nestingLevel":2,"glyphs":[{"glyph":"1."}]},"elements":[]}},
+    #| {"startIndex":3,"endIndex":4,"paragraph":{"paragraphStyle":{"namedStyleType":"HEADING_2"},"bullet":{"nestingLevel":1,"glyphs":[{"glyph":"•"}]},"elements":[]}},
+    #| {"startIndex":4,"endIndex":5,"paragraph":{"paragraphStyle":{"namedStyleType":"HEADING_3"},"elements":[]}},
+    #| {"startIndex":5,"endIndex":6,"paragraph":{"paragraphStyle":{"namedStyleType":"HEADING_4"},"elements":[]}},
+    #| {"startIndex":6,"endIndex":7,"paragraph":{"paragraphStyle":{"namedStyleType":"HEADING_5"},"elements":[]}},
+    #| {"startIndex":7,"endIndex":8,"paragraph":{"paragraphStyle":{"namedStyleType":"HEADING_6"},"elements":[]}}
     #| ]}
     #|}
     )
   )
   let headings = [
+    @pumd.NamedStyle::Title,
     @pumd.NamedStyle::Heading1, @pumd.NamedStyle::Heading2,
     @pumd.NamedStyle::Heading3, @pumd.NamedStyle::Heading4,
     @pumd.NamedStyle::Heading5, @pumd.NamedStyle::Heading6,
@@ -130,7 +132,7 @@ async test "remote decoder maps all heading styles and bullets" {
       _ => fail("expected heading paragraph")
     }
   }
-  match document.tabs[0].content.units[0] {
+  match document.tabs[0].content.units[1] {
     Paragraph({ bullet: Some(bullet), .. }) => {
       assert_eq(bullet.nesting_level, 2)
       assert_eq(bullet.numeric, true)
@@ -138,7 +140,7 @@ async test "remote decoder maps all heading styles and bullets" {
     }
     _ => fail("expected numeric bullet")
   }
-  match document.tabs[0].content.units[1] {
+  match document.tabs[0].content.units[2] {
     Paragraph({ bullet: Some(bullet), .. }) => assert_eq(bullet.numeric, false)
     _ => fail("expected disc bullet")
   }

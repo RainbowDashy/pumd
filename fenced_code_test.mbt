@@ -11,7 +11,7 @@ test "renders fenced code as editable paragraphs preserving blank lines and Unic
       inspect(
         document.to_snapshot(),
         content=(
-          #|profile pumd.default@4
+          #|profile pumd.default@5
           #|paragraph normal font=Roboto Mono size=10 line=1.0 before=0 after=0 background=#F1F3F4
           #|  text "let x = 1" font=Roboto Mono size=10 background=#F1F3F4
           #|paragraph normal font=Roboto Mono size=10 line=1.0 before=0 after=0 background=#F1F3F4
@@ -37,7 +37,7 @@ test "renders explicitly tagged JavaScript as colored editable text" {
       inspect(
         document.to_snapshot(),
         content=(
-          #|profile pumd.default@4
+          #|profile pumd.default@5
           #|paragraph normal font=Roboto Mono size=10 line=1.0 before=0 after=0 background=#F1F3F4
           #|  text "const" font=Roboto Mono size=10 color=#6A1B9A background=#F1F3F4
           #|  text " greeting = " font=Roboto Mono size=10 background=#F1F3F4
@@ -123,14 +123,14 @@ test "renders a representative golden for every canonical fenced language" {
     snapshots.to_string(),
     content=(
       #|--- javascript ---
-      #|profile pumd.default@4
+      #|profile pumd.default@5
       #|paragraph normal font=Roboto Mono size=10 line=1.0 before=0 after=0 background=#F1F3F4
       #|  text "const" font=Roboto Mono size=10 color=#6A1B9A background=#F1F3F4
       #|  text " greeting = " font=Roboto Mono size=10 background=#F1F3F4
       #|  text "\"hello\"" font=Roboto Mono size=10 color=#08783F background=#F1F3F4
       #|paragraph normal font=Roboto Mono size=10 line=1.0 before=0 after=0 background=#F1F3F4
       #|--- jsx ---
-      #|profile pumd.default@4
+      #|profile pumd.default@5
       #|paragraph normal font=Roboto Mono size=10 line=1.0 before=0 after=0 background=#F1F3F4
       #|  text "const" font=Roboto Mono size=10 color=#6A1B9A background=#F1F3F4
       #|  text " node = <" font=Roboto Mono size=10 background=#F1F3F4
@@ -144,7 +144,7 @@ test "renders a representative golden for every canonical fenced language" {
       #|  text ">" font=Roboto Mono size=10 background=#F1F3F4
       #|paragraph normal font=Roboto Mono size=10 line=1.0 before=0 after=0 background=#F1F3F4
       #|--- typescript ---
-      #|profile pumd.default@4
+      #|profile pumd.default@5
       #|paragraph normal font=Roboto Mono size=10 line=1.0 before=0 after=0 background=#F1F3F4
       #|  text "interface" font=Roboto Mono size=10 color=#6A1B9A background=#F1F3F4
       #|  text " " font=Roboto Mono size=10 background=#F1F3F4
@@ -156,7 +156,7 @@ test "renders a representative golden for every canonical fenced language" {
       #|  text " }" font=Roboto Mono size=10 background=#F1F3F4
       #|paragraph normal font=Roboto Mono size=10 line=1.0 before=0 after=0 background=#F1F3F4
       #|--- tsx ---
-      #|profile pumd.default@4
+      #|profile pumd.default@5
       #|paragraph normal font=Roboto Mono size=10 line=1.0 before=0 after=0 background=#F1F3F4
       #|  text "const" font=Roboto Mono size=10 color=#6A1B9A background=#F1F3F4
       #|  text " node = <" font=Roboto Mono size=10 background=#F1F3F4
@@ -166,20 +166,20 @@ test "renders a representative golden for every canonical fenced language" {
       #|  text ">" font=Roboto Mono size=10 background=#F1F3F4
       #|paragraph normal font=Roboto Mono size=10 line=1.0 before=0 after=0 background=#F1F3F4
       #|--- shell ---
-      #|profile pumd.default@4
+      #|profile pumd.default@5
       #|paragraph normal font=Roboto Mono size=10 line=1.0 before=0 after=0 background=#F1F3F4
       #|  text "echo" font=Roboto Mono size=10 color=#0B57D0 background=#F1F3F4
       #|  text " " font=Roboto Mono size=10 background=#F1F3F4
       #|  text "\"hello\"" font=Roboto Mono size=10 color=#08783F background=#F1F3F4
       #|paragraph normal font=Roboto Mono size=10 line=1.0 before=0 after=0 background=#F1F3F4
       #|--- powershell ---
-      #|profile pumd.default@4
+      #|profile pumd.default@5
       #|paragraph normal font=Roboto Mono size=10 line=1.0 before=0 after=0 background=#F1F3F4
       #|  text "$name = " font=Roboto Mono size=10 background=#F1F3F4
       #|  text "\"hello\"" font=Roboto Mono size=10 color=#08783F background=#F1F3F4
       #|paragraph normal font=Roboto Mono size=10 line=1.0 before=0 after=0 background=#F1F3F4
       #|--- json ---
-      #|profile pumd.default@4
+      #|profile pumd.default@5
       #|paragraph normal font=Roboto Mono size=10 line=1.0 before=0 after=0 background=#F1F3F4
       #|  text "{" font=Roboto Mono size=10 background=#F1F3F4
       #|  text "\"name\"" font=Roboto Mono size=10 color=#08783F background=#F1F3F4
@@ -188,19 +188,19 @@ test "renders a representative golden for every canonical fenced language" {
       #|  text "}" font=Roboto Mono size=10 background=#F1F3F4
       #|paragraph normal font=Roboto Mono size=10 line=1.0 before=0 after=0 background=#F1F3F4
       #|--- yaml ---
-      #|profile pumd.default@4
+      #|profile pumd.default@5
       #|paragraph normal font=Roboto Mono size=10 line=1.0 before=0 after=0 background=#F1F3F4
       #|  text "name" font=Roboto Mono size=10 color=#08783F background=#F1F3F4
       #|  text ": " font=Roboto Mono size=10 background=#F1F3F4
       #|  text "value" font=Roboto Mono size=10 color=#08783F background=#F1F3F4
       #|paragraph normal font=Roboto Mono size=10 line=1.0 before=0 after=0 background=#F1F3F4
       #|--- toml ---
-      #|profile pumd.default@4
+      #|profile pumd.default@5
       #|paragraph normal font=Roboto Mono size=10 line=1.0 before=0 after=0 background=#F1F3F4
       #|  text "name = \"value\"" font=Roboto Mono size=10 color=#7A3E00 background=#F1F3F4
       #|paragraph normal font=Roboto Mono size=10 line=1.0 before=0 after=0 background=#F1F3F4
       #|--- html ---
-      #|profile pumd.default@4
+      #|profile pumd.default@5
       #|paragraph normal font=Roboto Mono size=10 line=1.0 before=0 after=0 background=#F1F3F4
       #|  text "<" font=Roboto Mono size=10 background=#F1F3F4
       #|  text "div" font=Roboto Mono size=10 color=#0057B8 background=#F1F3F4
@@ -213,7 +213,7 @@ test "renders a representative golden for every canonical fenced language" {
       #|  text ">" font=Roboto Mono size=10 background=#F1F3F4
       #|paragraph normal font=Roboto Mono size=10 line=1.0 before=0 after=0 background=#F1F3F4
       #|--- css ---
-      #|profile pumd.default@4
+      #|profile pumd.default@5
       #|paragraph normal font=Roboto Mono size=10 line=1.0 before=0 after=0 background=#F1F3F4
       #|  text "." font=Roboto Mono size=10 background=#F1F3F4
       #|  text "box" font=Roboto Mono size=10 color=#7A3E00 background=#F1F3F4
@@ -222,7 +222,7 @@ test "renders a representative golden for every canonical fenced language" {
       #|  text ": red; }" font=Roboto Mono size=10 background=#F1F3F4
       #|paragraph normal font=Roboto Mono size=10 line=1.0 before=0 after=0 background=#F1F3F4
       #|--- xml ---
-      #|profile pumd.default@4
+      #|profile pumd.default@5
       #|paragraph normal font=Roboto Mono size=10 line=1.0 before=0 after=0 background=#F1F3F4
       #|  text "<" font=Roboto Mono size=10 background=#F1F3F4
       #|  text "item" font=Roboto Mono size=10 color=#0057B8 background=#F1F3F4
@@ -235,7 +235,7 @@ test "renders a representative golden for every canonical fenced language" {
       #|  text ">" font=Roboto Mono size=10 background=#F1F3F4
       #|paragraph normal font=Roboto Mono size=10 line=1.0 before=0 after=0 background=#F1F3F4
       #|--- sql ---
-      #|profile pumd.default@4
+      #|profile pumd.default@5
       #|paragraph normal font=Roboto Mono size=10 line=1.0 before=0 after=0 background=#F1F3F4
       #|  text "SELECT" font=Roboto Mono size=10 color=#6A1B9A background=#F1F3F4
       #|  text " " font=Roboto Mono size=10 background=#F1F3F4
@@ -246,13 +246,13 @@ test "renders a representative golden for every canonical fenced language" {
       #|  text "users" font=Roboto Mono size=10 color=#0057B8 background=#F1F3F4
       #|paragraph normal font=Roboto Mono size=10 line=1.0 before=0 after=0 background=#F1F3F4
       #|--- markdown ---
-      #|profile pumd.default@4
+      #|profile pumd.default@5
       #|paragraph normal font=Roboto Mono size=10 line=1.0 before=0 after=0 background=#F1F3F4
       #|  text "# " font=Roboto Mono size=10 background=#F1F3F4
       #|  text "hello" font=Roboto Mono size=10 color=#0057B8 background=#F1F3F4
       #|paragraph normal font=Roboto Mono size=10 line=1.0 before=0 after=0 background=#F1F3F4
       #|--- http ---
-      #|profile pumd.default@4
+      #|profile pumd.default@5
       #|paragraph normal font=Roboto Mono size=10 line=1.0 before=0 after=0 background=#F1F3F4
       #|  text "GET" font=Roboto Mono size=10 color=#0B57D0 background=#F1F3F4
       #|  text " " font=Roboto Mono size=10 background=#F1F3F4
@@ -261,7 +261,7 @@ test "renders a representative golden for every canonical fenced language" {
       #|  text "HTTP/1.1" font=Roboto Mono size=10 color=#9B5200 background=#F1F3F4
       #|paragraph normal font=Roboto Mono size=10 line=1.0 before=0 after=0 background=#F1F3F4
       #|--- protobuf ---
-      #|profile pumd.default@4
+      #|profile pumd.default@5
       #|paragraph normal font=Roboto Mono size=10 line=1.0 before=0 after=0 background=#F1F3F4
       #|  text "message" font=Roboto Mono size=10 color=#6A1B9A background=#F1F3F4
       #|  text " User { string name = 1; }" font=Roboto Mono size=10 background=#F1F3F4
@@ -337,7 +337,7 @@ test "console colors commands while preserving transcript output as plain text" 
   inspect(
     fenced_snapshot("CoNsOlE", "$ echo \"ok\"\nplain output"),
     content=(
-      #|profile pumd.default@4
+      #|profile pumd.default@5
       #|paragraph normal font=Roboto Mono size=10 line=1.0 before=0 after=0 background=#F1F3F4
       #|  text "$ " font=Roboto Mono size=10 background=#F1F3F4
       #|  text "echo" font=Roboto Mono size=10 color=#0B57D0 background=#F1F3F4
@@ -380,7 +380,7 @@ test "HTML and Markdown use only bundled explicit language injections" {
   inspect(
     snapshots.to_string(),
     content=(
-      #|profile pumd.default@4
+      #|profile pumd.default@5
       #|paragraph normal font=Roboto Mono size=10 line=1.0 before=0 after=0 background=#F1F3F4
       #|  text "<" font=Roboto Mono size=10 background=#F1F3F4
       #|  text "script" font=Roboto Mono size=10 color=#0057B8 background=#F1F3F4
@@ -403,7 +403,7 @@ test "HTML and Markdown use only bundled explicit language injections" {
       #|  text ">" font=Roboto Mono size=10 background=#F1F3F4
       #|paragraph normal font=Roboto Mono size=10 line=1.0 before=0 after=0 background=#F1F3F4
       #|--- markdown ---
-      #|profile pumd.default@4
+      #|profile pumd.default@5
       #|paragraph normal font=Roboto Mono size=10 line=1.0 before=0 after=0 background=#F1F3F4
       #|  text "```javascript" font=Roboto Mono size=10 background=#F1F3F4
       #|paragraph normal font=Roboto Mono size=10 line=1.0 before=0 after=0 background=#F1F3F4
@@ -414,7 +414,7 @@ test "HTML and Markdown use only bundled explicit language injections" {
       #|  text "```" font=Roboto Mono size=10 background=#F1F3F4
       #|paragraph normal font=Roboto Mono size=10 line=1.0 before=0 after=0 background=#F1F3F4
       #|--- unavailable ---
-      #|profile pumd.default@4
+      #|profile pumd.default@5
       #|paragraph normal font=Roboto Mono size=10 line=1.0 before=0 after=0 background=#F1F3F4
       #|  text "```not-bundled" font=Roboto Mono size=10 background=#F1F3F4
       #|paragraph normal font=Roboto Mono size=10 line=1.0 before=0 after=0 background=#F1F3F4
@@ -453,7 +453,7 @@ test "incomplete code preserves valid-prefix captures and exact text" {
   inspect(
     snapshot,
     content=(
-      #|profile pumd.default@4
+      #|profile pumd.default@5
       #|paragraph normal font=Roboto Mono size=10 line=1.0 before=0 after=0 background=#F1F3F4
       #|  text "const" font=Roboto Mono size=10 color=#6A1B9A background=#F1F3F4
       #|  text " answer = " font=Roboto Mono size=10 background=#F1F3F4
@@ -474,7 +474,7 @@ test "highlighted fences preserve CJK combining emoji whitespace blank and trail
   inspect(
     fenced_snapshot("javascript", "const label = \"界é🚀\t \"\n\n// note"),
     content=(
-      #|profile pumd.default@4
+      #|profile pumd.default@5
       #|paragraph normal font=Roboto Mono size=10 line=1.0 before=0 after=0 background=#F1F3F4
       #|  text "const" font=Roboto Mono size=10 color=#6A1B9A background=#F1F3F4
       #|  text " label = " font=Roboto Mono size=10 background=#F1F3F4

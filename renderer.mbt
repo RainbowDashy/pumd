@@ -601,13 +601,18 @@ fn render_block(
 ) -> Bool {
   match block {
     @markdown.Block::Heading(level~, children~, span~, ..) => {
-      let index = heading_index(level)
-      let inlines = render_inlines(children, context.profile.heading_text[index], context)
+      let (paragraph_style, text_style) = if level == 1 {
+        (context.profile.title, context.profile.title_text)
+      } else {
+        let index = heading_index(level - 1)
+        (context.profile.headings[index], context.profile.heading_text[index])
+      }
+      let inlines = render_inlines(children, text_style, context)
       let paragraph = {
         runs: inlines.runs,
         inline_images: inlines.images,
         style: paragraph_style_for(
-          context.profile.headings[index],
+          paragraph_style,
           state,
           context,
         ),

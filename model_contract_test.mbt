@@ -14,7 +14,7 @@ fn assert_source_range(
 }
 
 ///|
-test "public seam applies all six heading roles and profile sizes" {
+test "public seam applies the title and five content-heading roles with profile sizes" {
   let markdown =
     #|# One
     #|
@@ -28,18 +28,18 @@ test "public seam applies all six heading roles and profile sizes" {
     #|
     #|###### Six
   let expected_named_styles = [
+    @pumd.NamedStyle::Title,
     @pumd.NamedStyle::Heading1,
     @pumd.NamedStyle::Heading2,
     @pumd.NamedStyle::Heading3,
     @pumd.NamedStyle::Heading4,
     @pumd.NamedStyle::Heading5,
-    @pumd.NamedStyle::Heading6,
   ]
   let expected_sizes = [24, 18, 14, 12, 11, 10]
   match @pumd.render_markdown(markdown) {
     Ok(document) => {
       assert_eq(document.render_metadata.style_profile_id, "pumd.default")
-      assert_eq(document.render_metadata.style_profile_version, 4)
+      assert_eq(document.render_metadata.style_profile_version, 5)
       assert_eq(document.content.length(), 6)
       for i = 0; i < 6; i = i + 1 {
         match document.content[i] {

@@ -11,7 +11,7 @@ test "renders nested bullet and non-default ordered lists as native list paragra
       inspect(
         document.to_snapshot(),
         content=(
-          #|profile pumd.default@4
+          #|profile pumd.default@5
           #|paragraph normal font=Arial size=11 line=1.15 before=0 after=6 list=bullet level=0
           #|  text "alpha " font=Arial size=11
           #|  text "bold" bold font=Arial size=11

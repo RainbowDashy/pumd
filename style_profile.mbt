@@ -15,6 +15,8 @@ pub(all) struct StyleProfile {
   version : Int
   body : ParagraphStyle
   body_text : TextStyle
+  title : ParagraphStyle
+  title_text : TextStyle
   headings : Array[ParagraphStyle]
   heading_text : Array[TextStyle]
   link_color : String
@@ -63,22 +65,21 @@ fn make_paragraph_style(
 }
 
 ///|
-/// The sole version-four Style Profile.
+/// The sole version-five Style Profile.
 pub fn builtin_style_profile() -> StyleProfile {
-  let heading_sizes = [24, 18, 14, 12, 11, 10]
-  let heading_before = [20, 18, 16, 14, 12, 10]
-  let heading_after = [8, 6, 4, 4, 3, 3]
+  let heading_sizes = [18, 14, 12, 11, 10]
+  let heading_before = [18, 16, 14, 12, 10]
+  let heading_after = [6, 4, 4, 3, 3]
   let named = [
     NamedStyle::Heading1,
     NamedStyle::Heading2,
     NamedStyle::Heading3,
     NamedStyle::Heading4,
     NamedStyle::Heading5,
-    NamedStyle::Heading6,
   ]
   let headings : Array[ParagraphStyle] = []
   let heading_text : Array[TextStyle] = []
-  for i = 0; i < 6; i = i + 1 {
+  for i = 0; i < 5; i = i + 1 {
     headings.push(
       make_paragraph_style(
         named[i],
@@ -91,9 +92,11 @@ pub fn builtin_style_profile() -> StyleProfile {
   }
   {
     id: "pumd.default",
-    version: 4,
+    version: 5,
     body: make_paragraph_style(NamedStyle::NormalText, 11, 0, 6),
     body_text: make_text_style("Arial", 11),
+    title: make_paragraph_style(NamedStyle::Title, 24, 20, 8),
+    title_text: make_text_style("Arial", 24),
     headings,
     heading_text,
     link_color: "#1155CC",

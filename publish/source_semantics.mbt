@@ -62,11 +62,15 @@ priv struct RemoteSemanticEntry {
 fn semantic_heading(style : @pumd.NamedStyle) -> Int {
   match style {
     @pumd.NamedStyle::NormalText => 0
-    @pumd.NamedStyle::Heading1 => 1
-    @pumd.NamedStyle::Heading2 => 2
-    @pumd.NamedStyle::Heading3 => 3
-    @pumd.NamedStyle::Heading4 => 4
-    @pumd.NamedStyle::Heading5 => 5
+    @pumd.NamedStyle::Title => 1
+    @pumd.NamedStyle::Heading1 => 2
+    @pumd.NamedStyle::Heading2 => 3
+    @pumd.NamedStyle::Heading3 => 4
+    @pumd.NamedStyle::Heading4 => 5
+    @pumd.NamedStyle::Heading5 => 6
+    // Markdown has no heading level beyond six. Preserve reviewer-authored
+    // Heading 6 as a representable level-six source heading; republishing it
+    // safely normalizes to the supported Heading 5 body role.
     @pumd.NamedStyle::Heading6 => 6
   }
 }

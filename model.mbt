@@ -23,6 +23,7 @@ pub(all) struct RenderMetadata {
 ///|
 pub(all) enum NamedStyle {
   NormalText
+  Title
   Heading1
   Heading2
   Heading3

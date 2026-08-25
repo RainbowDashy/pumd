@@ -1,5 +1,5 @@
 ///|
-test "public golden covers every version-four Style Profile role" {
+test "public golden covers every version-five Style Profile role" {
   let markdown =
     #|# Heading one
     #|## Heading two
@@ -25,18 +25,18 @@ test "public golden covers every version-four Style Profile role" {
   inspect(
     document.to_snapshot(),
     content=(
-      #|profile pumd.default@4
-      #|paragraph heading-1 font=Arial size=24 line=1.15 before=20 after=8
+      #|profile pumd.default@5
+      #|paragraph title font=Arial size=24 line=1.15 before=20 after=8
       #|  text "Heading one" font=Arial size=24
-      #|paragraph heading-2 font=Arial size=18 line=1.15 before=18 after=6
+      #|paragraph heading-1 font=Arial size=18 line=1.15 before=18 after=6
       #|  text "Heading two" font=Arial size=18
-      #|paragraph heading-3 font=Arial size=14 line=1.15 before=16 after=4
+      #|paragraph heading-2 font=Arial size=14 line=1.15 before=16 after=4
       #|  text "Heading three" font=Arial size=14
-      #|paragraph heading-4 font=Arial size=12 line=1.15 before=14 after=4
+      #|paragraph heading-3 font=Arial size=12 line=1.15 before=14 after=4
       #|  text "Heading four" font=Arial size=12
-      #|paragraph heading-5 font=Arial size=11 line=1.15 before=12 after=3
+      #|paragraph heading-4 font=Arial size=11 line=1.15 before=12 after=3
       #|  text "Heading five" font=Arial size=11
-      #|paragraph heading-6 font=Arial size=10 line=1.15 before=10 after=3
+      #|paragraph heading-5 font=Arial size=10 line=1.15 before=10 after=3
       #|  text "Heading six" font=Arial size=10
       #|paragraph normal font=Arial size=11 line=1.15 before=0 after=6
       #|  text "Body " font=Arial size=11
@@ -70,7 +70,7 @@ test "public golden covers every version-four Style Profile role" {
 test "render metadata retains the built-in profile outside native semantic equality" {
   let original = render_or_fail("profile contract")
   assert_eq(original.render_metadata.style_profile_id, "pumd.default")
-  assert_eq(original.render_metadata.style_profile_version, 4)
+  assert_eq(original.render_metadata.style_profile_version, 5)
   let changed : @pumd.DesiredDocument = {
     ..original,
     render_metadata: {
@@ -84,9 +84,11 @@ test "render metadata retains the built-in profile outside native semantic equal
 }
 
 ///|
-test "public Style Profile supplies version-four quote decorations" {
+test "public Style Profile supplies version-five title and quote decorations" {
   let profile = builtin_style_profile()
-  assert_eq(profile.version, 4)
+  assert_eq(profile.version, 5)
+  assert_eq(profile.title.named_style, NamedStyle::Title)
+  assert_eq(profile.title_text.font_size_points, 24)
   assert_eq(profile.quote_indent_per_level_points, 18)
   assert_eq(profile.quote_border.color, "#B7B7B7")
   assert_eq(profile.quote_border.width_points, 1)

@@ -6,7 +6,7 @@ test "renders body paragraphs with emphasis, strong text, and inline code" {
       inspect(
         document.to_snapshot(),
         content=(
-          #|profile pumd.default@4
+          #|profile pumd.default@5
           #|paragraph normal font=Arial size=11 line=1.15 before=0 after=6
           #|  text "Intro paragraph." font=Arial size=11
           #|paragraph normal font=Arial size=11 line=1.15 before=0 after=6
@@ -32,7 +32,7 @@ test "renders soft and hard breaks inside a paragraph" {
       inspect(
         document.to_snapshot(),
         content=(
-          #|profile pumd.default@4
+          #|profile pumd.default@5
           #|paragraph normal font=Arial size=11 line=1.15 before=0 after=6
           #|  text "soft break\nhard" font=Arial size=11
           #|
@@ -53,7 +53,7 @@ test "renders a direct link with its title and link styling" {
       inspect(
         document.to_snapshot(),
         content=(
-          #|profile pumd.default@4
+          #|profile pumd.default@5
           #|paragraph normal font=Arial size=11 line=1.15 before=0 after=6
           #|  text "Read " font=Arial size=11
           #|  text "the guide" underline font=Arial size=11 color=#1155CC link="https://example.com/guide" title="Guide title"
@@ -77,7 +77,7 @@ test "resolves a reference link before rendering the paragraph" {
       inspect(
         document.to_snapshot(),
         content=(
-          #|profile pumd.default@4
+          #|profile pumd.default@5
           #|paragraph normal font=Arial size=11 line=1.15 before=0 after=6
           #|  text "See " font=Arial size=11
           #|  text "the guide" underline font=Arial size=11 color=#1155CC link="https://example.com/docs" title="Docs title"
@@ -100,7 +100,7 @@ test "renders web and email autolinks as link runs" {
       inspect(
         document.to_snapshot(),
         content=(
-          #|profile pumd.default@4
+          #|profile pumd.default@5
           #|paragraph normal font=Arial size=11 line=1.15 before=0 after=6
           #|  text "Visit " font=Arial size=11
           #|  text "https://example.com" underline font=Arial size=11 color=#1155CC link="https://example.com"

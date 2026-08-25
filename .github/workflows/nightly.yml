@@ -1,6 +1,9 @@
 name: Nightly
 
 on:
+  push:
+    branches:
+      - main
   schedule:
     # 02:23 Asia/Shanghai. A non-zero minute reduces peak scheduler delay.
     - cron: "23 18 * * *"

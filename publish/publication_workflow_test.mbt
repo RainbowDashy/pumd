@@ -105,6 +105,7 @@ fn workflow_json_string(value : String, output : StringBuilder) -> Unit {
 fn workflow_named_style(style : @pumd.NamedStyle) -> String {
   match style {
     NormalText => "NORMAL_TEXT"
+    Title => "TITLE"
     Heading1 => "HEADING_1"
     Heading2 => "HEADING_2"
     Heading3 => "HEADING_3"

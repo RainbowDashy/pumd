@@ -18,6 +18,7 @@ fn write_escaped(value : String, buffer : StringBuilder) -> Unit {
 fn named_style_name(style : NamedStyle) -> String {
   match style {
     NormalText => "normal"
+    Title => "title"
     Heading1 => "heading-1"
     Heading2 => "heading-2"
     Heading3 => "heading-3"

@@ -387,6 +387,7 @@ fn write_plan_paragraph_style(
 ) -> Unit {
   match style.named_style {
     NormalText => buffer.write_string("normal")
+    Title => buffer.write_string("title")
     Heading1 => buffer.write_string("heading-1")
     Heading2 => buffer.write_string("heading-2")
     Heading3 => buffer.write_string("heading-3")

@@ -358,6 +358,7 @@ fn paragraph_style(value : Json?, runs : Array[RemoteRun]) -> (@pumd.ParagraphSt
   }
   let (named_style, named_warning) = match string_field(style, "namedStyleType").unwrap_or("NORMAL_TEXT") {
     "NORMAL_TEXT" => (@pumd.NamedStyle::NormalText, false)
+    "TITLE" => (@pumd.NamedStyle::Title, false)
     "HEADING_1" => (@pumd.NamedStyle::Heading1, false)
     "HEADING_2" => (@pumd.NamedStyle::Heading2, false)
     "HEADING_3" => (@pumd.NamedStyle::Heading3, false)

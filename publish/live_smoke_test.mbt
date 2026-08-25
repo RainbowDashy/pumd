@@ -256,8 +256,8 @@ async test "live smoke publishes and reads a real Google Doc" {
   }
   let compact_response = compact_json(document.body)
   let required_structure = [
-    "\"namedStyleType\":\"HEADING_1\"", "\"namedStyleType\":\"HEADING_2\"", "\"namedStyleType\":\"HEADING_3\"",
-    "\"namedStyleType\":\"HEADING_4\"", "\"namedStyleType\":\"HEADING_5\"", "\"namedStyleType\":\"HEADING_6\"",
+    "\"namedStyleType\":\"TITLE\"", "\"namedStyleType\":\"HEADING_1\"", "\"namedStyleType\":\"HEADING_2\"",
+    "\"namedStyleType\":\"HEADING_3\"", "\"namedStyleType\":\"HEADING_4\"", "\"namedStyleType\":\"HEADING_5\"",
     "\"bold\":true", "\"italic\":true", "Roboto Mono", "\"bullet\"", "\"table\"",
     "\"backgroundColor\"", "\"alignment\":\"END\"",
   ]

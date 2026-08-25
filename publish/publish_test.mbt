@@ -500,6 +500,8 @@ async test "complete supported document still publishes through the public seam"
   let source =
     #|# Heading 🚀
     #|
+    #|## Section
+    #|
     #|A **strong** *emphasis* [link](https://example.test) with `inline code`.
     #|
     #|```text
@@ -529,6 +531,7 @@ async test "complete supported document still publishes through the public seam"
   inspect(success.document_id, content="full-1")
   assert_eq(fake.requests.length(), 2)
   let body = fake.requests[1].body.unwrap()
+  assert_true(body.contains("\"namedStyleType\":\"TITLE\""))
   assert_true(body.contains("HEADING_1"))
   assert_true(body.contains("\"bold\":true"))
   assert_true(body.contains("\"italic\":true"))

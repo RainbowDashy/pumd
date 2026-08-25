@@ -35,8 +35,8 @@ test "mixed supported Markdown has a canonical native golden document" {
   inspect(
     document.to_snapshot(),
     content=(
-      #|profile pumd.default@4
-      #|paragraph heading-1 font=Arial size=24 line=1.15 before=20 after=8
+      #|profile pumd.default@5
+      #|paragraph title font=Arial size=24 line=1.15 before=20 after=8
       #|  text "Contract title" font=Arial size=24
       #|paragraph normal font=Arial size=11 line=1.15 before=0 after=6
       #|  text "Body with " font=Arial size=11
@@ -85,7 +85,7 @@ test "mixed supported Markdown has a canonical native golden document" {
 test "HTTPS images render as native inline images with source metadata" {
   let document = render_or_fail("Before ![architecture](https://example.test/diagram.png \"System diagram\") after.")
   inspect(document.to_snapshot(), content=(
-    #|profile pumd.default@4
+    #|profile pumd.default@5
     #|paragraph normal font=Arial size=11 line=1.15 before=0 after=6
     #|  text "Before " font=Arial size=11
     #|  text " after." font=Arial size=11
@@ -138,12 +138,12 @@ test "moving unchanged source changes provenance without changing native content
 test "empty and blank-line whitespace variants have documented deterministic output" {
   let empty = render_or_fail("")
   let blank = render_or_fail("\n\n\n")
-  assert_eq(empty.to_snapshot(), "profile pumd.default@4\n")
+  assert_eq(empty.to_snapshot(), "profile pumd.default@5\n")
   assert_eq(blank.to_snapshot(), empty.to_snapshot())
   assert_true(empty.semantic_eq(blank))
 
   let expected =
-    #|profile pumd.default@4
+    #|profile pumd.default@5
     #|paragraph normal font=Arial size=11 line=1.15 before=0 after=6
     #|  text "Text" font=Arial size=11
     #|
@@ -202,7 +202,7 @@ test "canonical rendering removes empty runs merges adjacent runs and normalizes
   }
   match document.content[1] {
     @pumd.StructuralElement::Paragraph(paragraph) => {
-      assert_eq(paragraph.style.named_style, @pumd.NamedStyle::Heading1)
+      assert_eq(paragraph.style.named_style, @pumd.NamedStyle::Title)
       assert_true(paragraph.bullet is None)
     }
     _ => assert_true(false)
